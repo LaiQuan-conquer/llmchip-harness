@@ -1,0 +1,28 @@
+{
+  "name": "@llmchip/root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.18.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "harnessd": "node --conditions=development packages/kernel/src/cli.ts",
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "tsc -b tsconfig.build.json --clean",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check:workspace": "node scripts/check-workspace.ts",
+    "verify": "yarn check:workspace && yarn typecheck && yarn test && yarn build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}
