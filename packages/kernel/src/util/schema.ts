@@ -2,7 +2,7 @@ import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js'
 import { KERNEL_SCHEMA_ID, kernelSchema } from '@llmchip/kernel-api'
 import { KernelError } from './errors.ts'
 
-const ajv = new Ajv2020({ strict: true, allErrors: true, useDefaults: true, validateFormats: false })
+const ajv = new Ajv2020({ strict: true, allowUnionTypes: true, allErrors: true, useDefaults: true, validateFormats: false })
 ajv.addSchema(kernelSchema)
 
 const cache = new Map<string, ValidateFunction>()

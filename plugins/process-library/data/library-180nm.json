@@ -1,0 +1,64 @@
+{
+  "id": "library-180nm",
+  "description": "Implementation library entries for 180nm processes (requirements §3.8). Densities are bound to a concrete implementation, not to the node. Every value is empirical until FR-EST-13 calibration replaces it.",
+  "entries": [
+    {
+      "id": "sephonchitech-180bcd.foundry-rom",
+      "process": "sephonchitech-180bcd",
+      "kind": "rom",
+      "title": "Foundry ROM compiler (mask or via ROM)",
+      "availability": "pending",
+      "availabilityNote": "unknown whether the foundry offers a ROM compiler (inquiry email question 6)",
+      "densityUm2PerBit": { "low": 0.4, "typ": 0.5, "high": 0.7, "confidence": "empirical", "source": "typical 180nm mask ROM" },
+      "peripheryFactor": { "low": 0.15, "typ": 0.2, "high": 0.3, "confidence": "empirical", "source": "decoders and sense amplifiers" }
+    },
+    {
+      "id": "sephonchitech-180bcd.foundry-sram",
+      "process": "sephonchitech-180bcd",
+      "kind": "sram",
+      "title": "Foundry SRAM compiler",
+      "availability": "pending",
+      "availabilityNote": "unknown whether the foundry offers an SRAM compiler (inquiry email question 6)",
+      "densityUm2PerBit": { "low": 4, "typ": 5, "high": 6, "confidence": "empirical", "source": "180nm 6T SRAM including periphery" },
+      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+    },
+    {
+      "id": "sephonchitech-180bcd.stdcell-rom",
+      "process": "sephonchitech-180bcd",
+      "kind": "rom",
+      "title": "Standard-cell logic ROM",
+      "availability": "pending",
+      "availabilityNote": "1.8V standard-cell library not yet confirmed (inquiry email question 4)",
+      "densityUm2PerBit": { "low": 3, "typ": 4, "high": 5, "confidence": "empirical", "source": "synthesized constant logic; logic minimization can change this a lot" },
+      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+    },
+    {
+      "id": "gf180mcu.stdcell-rom",
+      "process": "gf180mcu",
+      "kind": "rom",
+      "title": "Standard-cell logic ROM (gf180mcu_fd_sc_mcu7t5v0)",
+      "availability": "available",
+      "densityUm2PerBit": { "low": 3, "typ": 4, "high": 5, "confidence": "empirical", "source": "synthesized constant logic, before calibration" },
+      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+    },
+    {
+      "id": "gf180mcu.openram-rom",
+      "process": "gf180mcu",
+      "kind": "rom",
+      "title": "OpenRAM ROM generator (experimental for GF180)",
+      "availability": "pending",
+      "availabilityNote": "experimental; simulation model, Liberty and LEF views must be supplied before use in S4-S6 (requirements §3.8)",
+      "densityUm2PerBit": { "low": 0.5, "typ": 0.8, "high": 1.2, "confidence": "empirical", "source": "OpenRAM ROM bitcell plus periphery, before calibration" },
+      "peripheryFactor": { "low": 0.2, "typ": 0.3, "high": 0.4, "confidence": "empirical", "source": "decoders" }
+    },
+    {
+      "id": "gf180mcu.sram-512x8",
+      "process": "gf180mcu",
+      "kind": "sram",
+      "title": "gf180mcu_fd_ip_sram__sram512x8m8wm1 macros, tiled",
+      "availability": "available",
+      "densityUm2PerBit": { "low": 5, "typ": 6, "high": 8, "confidence": "empirical", "source": "macro area per bit including periphery, before calibration" },
+      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+    }
+  ]
+}

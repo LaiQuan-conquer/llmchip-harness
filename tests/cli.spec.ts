@@ -56,7 +56,7 @@ describe('llmchip CLI', () => {
     const events = (await llmchip(home, ['events', 'list', '--kind', 'artifact.'])).out
     expect(events.match(/artifact\./g)).toHaveLength(3)
     expect((await llmchip(home, ['events', 'verify'])).code).toBe(0)
-    expect((await llmchip(home, ['projections', 'rebuild'])).out).toMatch(/^artifacts v1: \d+ events\n$/)
+    expect((await llmchip(home, ['projections', 'rebuild'])).out).toMatch(/^artifacts v1: \d+ events\n/m)
     expect((await llmchip(home, ['bogus'])).code).toBe(2)
     expect((await llmchip(home, ['artifact', 'stat', '0'.repeat(64)])).err).toMatch(/ARTIFACT_NOT_FOUND/)
   })

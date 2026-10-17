@@ -57,15 +57,29 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 | `packages/<name>/tests/` | Vitest tests, named `*.spec.ts` |
 | `packages/<name>/lib/` | Build output (ignored by git) |
 | `vendor/<name>/` | Vendored third-party source with its upstream npm name; see `vendor/README.md` |
-| `tests/` | Repository-level tests, such as smoke tests of the vendored packages |
+| `plugins/<id>/` | Out-of-process and data plugins, each with an `llmchip-plugin.json` manifest; bundled with the workbench |
+| `python/<name>/` | Python packages of the uv workspace, such as the plugin SDK |
+| `tests/` | Repository-level and end-to-end tests; `tests/fixtures/plugins/` holds test-only plugins |
 | `scripts/` | Repository tooling scripts |
 
 Current packages:
 
 - `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6). The source of truth is the JSON Schema in `packages/kernel-api/schemas/`; `src/generated/` is produced from it by `yarn gen:schemas` and must not be edited by hand.
 - `kernel` — `harnessd`, the kernel daemon: event store (K1), artifact store (K2), configuration and secrets (K10), the kernel API server (IF-1) and the in-kernel plugin host.
+- `kernel` also runs out-of-process plugins: plugin registry (K9), scheduler and process supervision (K4), and the workflow engine with verdicts and approvals (K3, K6, K7).
+- `plugin-sdk` — TypeScript SDK for out-of-process plugins (IF-2).
 - `client` — kernel API client for Node.js and browsers.
 - `cli` — the `llmchip` command-line client.
+
+Python (uv workspace, root `pyproject.toml`):
+
+- `python/llmchip-sdk` — Python SDK for out-of-process plugins (IF-2).
+
+Bundled plugins:
+
+- `estimator` (Python) — feasibility, area, cost and performance estimate (FR-EST).
+- `process-library` (data) — process profiles and the implementation library. Every value records its source and confidence; empirical values stay empirical until calibrated.
+- `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions.
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -77,13 +91,16 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 - TypeScript with project references. Node runs `.ts` sources directly; there is no separate transpiler.
 - Each package exports `"."` with the conditions `development` → `./src/index.ts`, `types` → `./lib/index.d.ts`, `default` → `./lib/index.js`. Type checking, tests and `yarn harnessd` resolve the `development` condition, so they work without a build.
 - Relative imports inside a package use the `.ts` extension; the build rewrites them to `.js`.
+- Python 3.12 and its tools are managed by [uv](https://docs.astral.sh/uv/) (`uv` must be on `PATH`). `yarn setup:python` creates `.venv/` from `uv.lock`; the kernel uses `.venv/bin/python` for Python plugins when it exists. Lint and format with ruff, test with pytest.
 - Vendored packages use syntax Node cannot run directly, so they export only `types` and `default`, both into `lib/`. Everything that imports them (tests, type checking, `harnessd`) uses their build output; `yarn typecheck` and `yarn test` build all project references first. After changing vendored code, run `yarn build` before `yarn harnessd`.
 
 ### Commands
 
 | Command | Purpose |
 |---|---|
-| `yarn install` | Install dependencies |
+| `yarn install` | Install Node.js dependencies |
+| `yarn setup:python` | Create the Python environment (`.venv/`) from `uv.lock` |
+| `yarn check:python` | Lint, format-check and test the Python code |
 | `yarn check:workspace` | Check that tooling configuration matches the packages that exist |
 | `yarn gen:schemas` | Regenerate `kernel-api` types from its JSON Schema |
 | `yarn check:generated` | Check that the generated `kernel-api` files are up to date |
@@ -93,7 +110,7 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 | `yarn clean` | Remove build output |
 | `yarn harnessd serve [--home DIR]` | Run the kernel daemon from source (home defaults to `$LLMCHIP_HOME` or `~/.llmchip`) |
 | `yarn llmchip <command>` | Run the CLI from source against a running kernel; `yarn llmchip --help` lists commands |
-| `yarn verify` | Run check:workspace, check:generated, typecheck, test and build in order |
+| `yarn verify` | Run check:workspace, check:generated, check:python, typecheck, test and build in order |
 
 `yarn verify` must pass before every commit.
 
@@ -105,6 +122,13 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 4. Run `yarn install`, then `yarn verify`. `yarn check:workspace` reports anything missed in steps 1–3.
 
 A package that imports a vendored package follows the same rules: declare it as `"workspace:*"` and add a reference to `../../vendor/<dir>`.
+
+### Adding a plugin
+
+1. Create `plugins/<id>/llmchip-plugin.json` (schema `PluginManifest` in `packages/kernel-api/schemas/kernel.schema.json`). Declare every handler with its inputs, outputs and a JSON Schema for its params; the kernel validates them before a run is queued.
+2. Python plugins are uv workspace members: add `plugins/<id>` to `[tool.uv.workspace].members` and to the root dependencies in `pyproject.toml`, then run `uv lock` and `yarn setup:python`.
+3. Handlers return outputs, metrics and a parse status, never verdicts (AP-7). Judging is done by check definitions in a flow pack.
+4. Test the plugin directly (pytest or Vitest) and end to end through the kernel (`tests/`).
 
 ### Vendored code
 

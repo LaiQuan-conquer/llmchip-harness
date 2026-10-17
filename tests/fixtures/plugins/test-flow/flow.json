@@ -1,0 +1,47 @@
+{
+  "id": "test",
+  "version": "1",
+  "stages": [
+    { "id": "A", "title": "Design" },
+    { "id": "B", "title": "Signoff", "entry": { "gates": ["GA"] } }
+  ],
+  "gates": [{ "id": "GA", "title": "Design freeze", "after": "A", "members": ["design", "spec"], "checks": ["stub.drc"] }],
+  "checks": [
+    {
+      "id": "stub.drc",
+      "version": "1",
+      "title": "Design rule check",
+      "plugin": "stub-tool",
+      "handler": "report",
+      "completeness": [{ "metric": "coverage.complete", "op": "==", "value": true }],
+      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }],
+      "waiver": "risk_acceptance"
+    },
+    {
+      "id": "stub.mfg",
+      "version": "1",
+      "title": "Manufacturing rule check",
+      "plugin": "stub-tool",
+      "handler": "report",
+      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }],
+      "waiver": "foundry_waiver"
+    },
+    {
+      "id": "stub.timing",
+      "version": "1",
+      "title": "SDF timing simulation",
+      "plugin": "stub-tool",
+      "handler": "report",
+      "requiredCapability": "sdf",
+      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }]
+    },
+    {
+      "id": "stub-tool.qualify.sdf",
+      "version": "1",
+      "title": "Qualification of the stub tool's SDF capability",
+      "plugin": "stub-tool",
+      "handler": "qualify",
+      "criteria": [{ "metric": "detected", "op": "==", "value": true }]
+    }
+  ]
+}

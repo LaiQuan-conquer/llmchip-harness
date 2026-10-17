@@ -1,0 +1,8 @@
+{
+  "id": "test-flow",
+  "version": "1.0.0",
+  "kinds": ["flow-pack"],
+  "runtime": "data",
+  "kernelApi": "^0.2",
+  "data": [{ "id": "flow", "type": "flow.pack", "path": "flow.json" }]
+}

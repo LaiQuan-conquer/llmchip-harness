@@ -11,6 +11,8 @@ export interface HomeLayout {
   store: string
   run: string
   logs: string
+  runs: string
+  plugins: string
 }
 
 /** The home directory: explicit argument, then `LLMCHIP_HOME`, then `~/.llmchip`. */
@@ -27,6 +29,8 @@ export function homeLayout(root: string): HomeLayout {
     store: join(root, 'store'),
     run: join(root, 'run'),
     logs: join(root, 'logs'),
+    runs: join(root, 'runs'),
+    plugins: join(root, 'plugins'),
   }
 }
 

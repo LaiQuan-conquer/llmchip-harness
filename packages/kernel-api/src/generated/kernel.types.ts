@@ -30,6 +30,34 @@ export type CheckVerdict = 'pass' | 'fail' | 'waived' | 'indeterminate'
  * Verdict layer ④ (requirements §3.9).
  */
 export type StageConclusion = 'incomplete' | 'awaiting_approval' | 'passed' | 'rejected'
+/**
+ * Plugin types of requirements FR-INT-01.
+ */
+export type PluginKind =
+  | 'flow-pack'
+  | 'model-loader'
+  | 'quantizer'
+  | 'numeric-spec'
+  | 'architecture'
+  | 'rtl-generator'
+  | 'simulator'
+  | 'eda-adapter'
+  | 'parser'
+  | 'pdk'
+  | 'process-profile'
+  | 'implementation-library'
+  | 'signoff-check'
+  | 'package-template'
+  | 'silicon-test'
+  | 'estimator'
+  | 'llm-provider'
+  | 'ui-panel'
+  | 'test'
+/**
+ * Approval states of requirements §3.7.3, plus `none` and `invalidated`.
+ */
+export type ApprovalStatus =
+  'none' | 'approved' | 'conditional_pending' | 'conditional_closed' | 'rejected' | 'invalidated'
 
 /**
  * Who performed an action.
@@ -51,7 +79,9 @@ export interface EventRecord {
   project: string | null
   actor: Actor
   kind: EventKind
-  payload: {}
+  payload: {
+    [k: string]: unknown | undefined
+  }
   label: Label
   /**
    * Id of the event that caused this one.
@@ -106,21 +136,61 @@ export interface LineageEdge {
   run: string | null
 }
 /**
- * One execution of a tool, plugin or agent (requirements §3.3).
+ * One execution of a plugin handler or tool (requirements §3.3). `execution` is verdict layer ①.
  */
 export interface RunRecord {
   id: string
   project: string | null
-  /**
-   * Plugin handler or tool adapter that executed the run.
-   */
+  plugin: string
   handler: string
-  inputs: Hash[]
-  outputs: Hash[]
+  params: {
+    [k: string]: unknown | undefined
+  }
+  inputs: RunRef[]
+  outputs: RunRef[]
+  state: 'queued' | 'running' | 'finished'
   execution: ExecutionStatus
-  exitCode?: number | null
+  exitCode: number | null
+  signal: string | null
+  metrics: Metrics
+  parse: ParseReport | null
+  error: string | null
+  /**
+   * Artifact holding the run log.
+   */
+  log: Hash | null
+  label: Label
+  attempt: number
+  retryOf: string | null
+  timeoutMs: number
+  queuedAt: string
   startedAt: string | null
   endedAt: string | null
+  maxAttempts: number
+}
+/**
+ * A named artifact consumed or produced by a run.
+ */
+export interface RunRef {
+  name: string
+  hash: Hash
+}
+/**
+ * Named measurements extracted from a run, e.g. `drc.violations`.
+ */
+export interface Metrics {
+  [k: string]: number | string | boolean | undefined
+}
+/**
+ * How completely a tool report was parsed (verdict layer ②).
+ */
+export interface ParseReport {
+  status: ParseStatus
+  /**
+   * Parser identifier and version.
+   */
+  parser: string
+  message?: string
 }
 /**
  * A check verdict issued by the verdict engine (K6). Plugins never write these (AP-7).
@@ -141,13 +211,17 @@ export interface VerdictRecord {
   verdict: CheckVerdict
   reasons: Message[]
   reqRef: string | null
+  waiver: string | null
+  createdAt: string
 }
 /**
  * A localizable message: a stable code plus parameters, rendered by the client in the user's language (architecture §9.1).
  */
 export interface Message {
   code: string
-  params?: {}
+  params?: {
+    [k: string]: unknown | undefined
+  }
 }
 /**
  * Workspace-level configuration (K10). Stored in `<home>/config/config.json`.
@@ -162,6 +236,32 @@ export interface WorkspaceConfig {
      * Number of most recent events whose hash chain is verified at startup.
      */
     verifyTailOnStart?: number
+  }
+  plugins?: {
+    /**
+     * Directories scanned for plugins (each subdirectory with llmchip-plugin.json), in addition to the bundled plugins and `<home>/plugins`.
+     */
+    searchPaths?: string[]
+    /**
+     * Interpreter substituted for `${python}` in plugin commands. Defaults to the bundled environment's Python when present, otherwise `python3`.
+     */
+    python?: string
+    /**
+     * Runtime substituted for `${node}`; defaults to the kernel's own Node.js.
+     */
+    node?: string
+    /**
+     * Load the plugins shipped with the workbench.
+     */
+    bundled?: boolean
+  }
+  scheduler?: {
+    maxParallel?: number
+    defaultTimeoutMs?: number
+    /**
+     * Time a cancelled plugin gets to exit before it is killed.
+     */
+    cancelGraceMs?: number
   }
 }
 export interface KernelStartedPayload {
@@ -211,13 +311,16 @@ export interface KernelInfo {
    * Sequence number of the latest event.
    */
   head: number
+  paused: boolean
 }
 /**
  * `data` member of JSON-RPC errors returned by the kernel.
  */
 export interface ErrorData {
   code: string
-  params?: {}
+  params?: {
+    [k: string]: unknown | undefined
+  }
 }
 export interface EmptyParams {}
 export interface EventsListParams {
@@ -310,4 +413,524 @@ export interface ProjectionsRebuildResult {
 }
 export interface OkResult {
   ok: true
+}
+export interface HandlerSpec {
+  name: string
+  title?: string
+  inputs?: HandlerInputSpec[]
+  outputs?: HandlerOutputSpec[]
+  /**
+   * JSON Schema of the handler params.
+   */
+  params?: {
+    [k: string]: unknown | undefined
+  }
+  timeoutMs?: number
+}
+export interface HandlerInputSpec {
+  name: string
+  types: string[]
+  required?: boolean
+  multiple?: boolean
+}
+export interface HandlerOutputSpec {
+  name: string
+  type: string
+  mediaType?: string
+}
+/**
+ * Contents of `llmchip-plugin.json` (architecture §4.9).
+ */
+export interface PluginManifest {
+  $schema?: string
+  id: string
+  version: string
+  title?: string
+  /**
+   * @minItems 1
+   */
+  kinds: [PluginKind, ...PluginKind[]]
+  /**
+   * `process`: own OS process speaking IF-2; `container`: same inside a container image; `data`: no code, only data files.
+   */
+  runtime: 'process' | 'container' | 'data'
+  entry?: PluginEntry
+  /**
+   * Compatible kernel API versions, as a caret range.
+   */
+  kernelApi: string
+  handlers?: HandlerSpec[]
+  data?: PluginDataSpec[]
+  capabilities?: CapabilitySpec[]
+  requiresProcessCapabilities?: string[]
+  permissions?: PluginPermissions
+}
+export interface PluginEntry {
+  /**
+   * Command line. `${python}`, `${node}` and `${pluginDir}` are substituted.
+   *
+   * @minItems 1
+   */
+  command: [string, ...string[]]
+  image?: string
+}
+export interface PluginDataSpec {
+  id: string
+  type: string
+  path: string
+  mediaType?: string
+  label?: Label
+}
+export interface CapabilitySpec {
+  name: string
+  /**
+   * Handler that runs the qualification test of this capability.
+   */
+  qualification: string
+}
+export interface PluginPermissions {
+  network?: boolean
+}
+/**
+ * A registered plugin.
+ */
+export interface PluginInfo {
+  id: string
+  version: string
+  kinds: PluginKind[]
+  runtime: string
+  dir: string
+  handlers: string[]
+  data: PluginDataInfo[]
+}
+export interface PluginDataInfo {
+  id: string
+  type: string
+  hash: Hash
+}
+/**
+ * IF-2 `initialize` request.
+ */
+export interface ProtocolInitializeParams {
+  protocolVersion: string
+  kernelApiVersion: string
+  pluginDir: string
+}
+/**
+ * IF-2 `initialize` result.
+ */
+export interface ProtocolInitializeResult {
+  id: string
+  version: string
+  handlers: string[]
+}
+export interface ProtocolInput {
+  name: string
+  hash: Hash
+  type: string
+  label: Label
+  /**
+   * Absolute path of a read-only copy in the run workspace.
+   */
+  path: string
+}
+/**
+ * IF-2 `invoke` request.
+ */
+export interface ProtocolInvokeParams {
+  run: string
+  handler: string
+  params: {
+    [k: string]: unknown | undefined
+  }
+  inputs: ProtocolInput[]
+  outDir: string
+  workDir: string
+}
+export interface ProtocolOutput {
+  name: string
+  /**
+   * Path relative to `outDir`.
+   */
+  path: string
+  type: string
+  mediaType?: string
+  label?: Label
+}
+/**
+ * IF-2 `invoke` result. Plugins report metrics and parse status, never verdicts (AP-7).
+ */
+export interface ProtocolInvokeResult {
+  outputs: ProtocolOutput[]
+  metrics?: Metrics
+  parse?: ParseReport | null
+}
+/**
+ * IF-2 `progress` notification.
+ */
+export interface ProtocolProgressParams {
+  run: string
+  fraction?: number
+  message?: string
+}
+/**
+ * IF-2 `log` notification.
+ */
+export interface ProtocolLogParams {
+  run: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+}
+/**
+ * IF-2 `cancel` notification.
+ */
+export interface ProtocolCancelParams {
+  run: string
+}
+export interface Criterion {
+  metric: string
+  op: '==' | '!=' | '<' | '<=' | '>' | '>='
+  value: number | string | boolean
+}
+/**
+ * How the verdict engine judges a check (K6). Hard constraint.
+ */
+export interface CheckDefinition {
+  id: string
+  version: string
+  title?: string
+  plugin: string
+  /**
+   * Runs of this plugin handler are evaluated.
+   */
+  handler: string
+  acceptExitCodes?: number[]
+  /**
+   * Require a complete parse report.
+   */
+  requireParse?: boolean
+  /**
+   * Tool capability the run must hold (requirements FR-VER-01).
+   */
+  requiredCapability?: string
+  completeness?: Criterion[]
+  /**
+   * @minItems 1
+   */
+  criteria: [Criterion, ...Criterion[]]
+  /**
+   * Which kind of waiver may apply (requirements §3.7.4).
+   */
+  waiver?: 'none' | 'risk_acceptance' | 'foundry_waiver'
+}
+export interface FlowStage {
+  id: string
+  title: string
+  entry?: StageEntry
+}
+export interface StageEntry {
+  gates?: string[]
+}
+export interface FlowGate {
+  id: string
+  title: string
+  after: string
+  /**
+   * Project slots forming the design snapshot.
+   *
+   * @minItems 1
+   */
+  members: [string, ...string[]]
+  checks: string[]
+}
+/**
+ * Stages, gates and check definitions of a workflow (architecture §4.3).
+ */
+export interface FlowPack {
+  id: string
+  version: string
+  /**
+   * @minItems 1
+   */
+  stages: [FlowStage, ...FlowStage[]]
+  gates: FlowGate[]
+  checks: CheckDefinition[]
+}
+export interface ProjectRecord {
+  id: string
+  title: string
+  flow: string
+  flowHash: Hash
+  createdAt: string
+}
+export interface SnapshotMember {
+  slot: string
+  hash: Hash
+}
+/**
+ * Design snapshot of a gate plus its evidence manifest (requirements §3.7.2).
+ */
+export interface Snapshot {
+  project: string
+  branch: string
+  gate: string
+  members: SnapshotMember[]
+  hash: Hash
+  evidence: string[]
+  evidenceHash: Hash
+  missing: string[]
+}
+export interface ApprovalCondition {
+  id: string
+  title: string
+  owner: string
+  closeCriteria: string
+  /**
+   * Check whose passing verdict closes the condition.
+   */
+  check: string
+  closed: {
+    by: Actor
+    at: string
+    verdict: string
+  } | null
+}
+export interface ApprovalRecord {
+  id: string
+  project: string
+  branch: string
+  gate: string
+  decision: 'approved' | 'conditional' | 'rejected'
+  snapshotHash: Hash
+  evidenceHash: Hash
+  conditions: ApprovalCondition[]
+  comment: string
+  by: Actor
+  at: string
+}
+/**
+ * Result of the single release check before advancing or exporting (architecture §4.7).
+ */
+export interface ReleaseResult {
+  gate: string
+  status: ApprovalStatus
+  released: boolean
+  approval: string | null
+  reasons: Message[]
+}
+export interface WaiverRecord {
+  id: string
+  kind: 'risk_acceptance' | 'foundry_waiver'
+  check: string
+  /**
+   * @minItems 1
+   */
+  subjects: [Hash, ...Hash[]]
+  reason: string
+  impact?: string
+  /**
+   * Foundry written acknowledgement artifact; required for foundry waivers.
+   */
+  acknowledgement: Hash | null
+  by: Actor
+  at: string
+}
+export interface ProjectState {
+  project: ProjectRecord
+  branches: string[]
+  branch: string
+  slots: {
+    [k: string]: Hash | undefined
+  }
+  stages: StageState[]
+  gates: ReleaseResult[]
+}
+export interface StageState {
+  id: string
+  entered: boolean
+}
+export interface RunQueuedPayload {
+  run: RunRecord
+}
+export interface RunStartedPayload {
+  run: string
+  pid: number | null
+}
+export interface RunFinishedPayload {
+  run: string
+  execution: ExecutionStatus
+  exitCode: number | null
+  signal: string | null
+  outputs: RunRef[]
+  metrics: Metrics
+  parse: ParseReport | null
+  error: string | null
+  log: Hash | null
+}
+export interface KernelPausedPayload {
+  paused: boolean
+  reason: string
+}
+export interface VerdictRecordedPayload {
+  verdict: VerdictRecord
+}
+export interface ProjectCreatedPayload {
+  project: ProjectRecord
+}
+export interface ProjectBranchedPayload {
+  project: string
+  branch: string
+  from: string
+  atSeq: number
+}
+export interface SlotBoundPayload {
+  project: string
+  branch: string
+  slot: string
+  hash: Hash
+  previous: Hash | null
+}
+export interface StageEnteredPayload {
+  project: string
+  branch: string
+  stage: string
+}
+export interface ApprovalRecordedPayload {
+  approval: ApprovalRecord
+}
+export interface ConditionClosedPayload {
+  approval: string
+  condition: string
+  verdict: string
+}
+export interface ApprovalInvalidatedPayload {
+  approval: string
+  gate: string
+  reason: Message
+}
+export interface WaiverRecordedPayload {
+  waiver: WaiverRecord
+}
+export interface PluginsListResult {
+  plugins: PluginInfo[]
+  problems: Message[]
+}
+export interface RunsStartParams {
+  plugin: string
+  handler: string
+  params?: {
+    [k: string]: unknown | undefined
+  }
+  inputs?: RunRef[]
+  project?: string
+  timeoutMs?: number
+  maxAttempts?: number
+}
+export interface RunRefParams {
+  run: string
+}
+export interface RunsWaitParams {
+  run: string
+  timeoutMs?: number
+}
+export interface RunsListParams {
+  project?: string
+  state?: 'queued' | 'running' | 'finished'
+  limit?: number
+}
+export interface RunsListResult {
+  runs: RunRecord[]
+}
+export interface PauseParams {
+  reason?: string
+}
+export interface PauseResult {
+  paused: boolean
+}
+export interface ChecksListResult {
+  checks: CheckDefinition[]
+}
+export interface VerdictsEvaluateParams {
+  project: string
+  check: string
+  run: string
+}
+export interface VerdictsListParams {
+  check?: string
+  subject?: Hash
+  limit?: number
+}
+export interface VerdictsListResult {
+  verdicts: VerdictRecord[]
+}
+export interface ProjectsCreateParams {
+  id: string
+  title: string
+  flow?: string
+}
+export interface ProjectRefParams {
+  project: string
+  branch?: string
+}
+export interface ProjectsListResult {
+  projects: ProjectRecord[]
+}
+export interface ProjectsBindParams {
+  project: string
+  branch?: string
+  slot: string
+  hash: Hash
+}
+export interface ProjectsBranchParams {
+  project: string
+  from?: string
+  name: string
+  /**
+   * Event sequence number to branch at (checkpoint); defaults to now.
+   */
+  atSeq?: number
+}
+export interface StagesEnterParams {
+  project: string
+  branch?: string
+  stage: string
+}
+export interface GateRefParams {
+  project: string
+  branch?: string
+  gate: string
+}
+export interface ConditionInput {
+  id: string
+  title: string
+  owner: string
+  closeCriteria: string
+  check: string
+}
+export interface ApprovalsDecideParams {
+  project: string
+  branch?: string
+  gate: string
+  decision: 'approved' | 'conditional' | 'rejected'
+  conditions?: ConditionInput[]
+  comment?: string
+}
+export interface ApprovalsCloseConditionParams {
+  approval: string
+  condition: string
+  verdict: string
+}
+export interface ApprovalsListResult {
+  approvals: ApprovalRecord[]
+}
+export interface WaiversCreateParams {
+  kind: 'risk_acceptance' | 'foundry_waiver'
+  check: string
+  /**
+   * @minItems 1
+   */
+  subjects: [Hash, ...Hash[]]
+  reason: string
+  impact?: string
+  acknowledgement?: Hash
 }

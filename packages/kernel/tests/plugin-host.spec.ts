@@ -31,6 +31,7 @@ describe('PluginHost on Cordis', () => {
     const home = tempDir()
     const healthy: InKernelPlugin = { id: 'healthy', apply: () => {} }
     const kernel = await Kernel.start({
+      config: { plugins: { bundled: false } },
       home,
       pluginTimeoutMs: 200,
       plugins: [
@@ -83,7 +84,8 @@ describe('PluginHost on Cordis', () => {
         })
       },
     }
-    const kernel = await Kernel.start({ home, plugins: [provider, consumer] })
+    const kernel = await Kernel.start({
+      config: { plugins: { bundled: false } }, home, plugins: [provider, consumer] })
     await kernel.stop()
     expect(order).toEqual(['consumer cleanup, provider alive: true', 'provider cleanup'])
     expect(kinds(home).slice(-5)).toEqual([
@@ -99,6 +101,7 @@ describe('PluginHost on Cordis', () => {
     const home = tempDir()
     const order: string[] = []
     const kernel = await Kernel.start({
+      config: { plugins: { bundled: false } },
       home,
       plugins: [
         {
@@ -155,6 +158,7 @@ describe('PluginHost on Cordis', () => {
   it('does not let a plugin whose cleanup never finishes block shutdown', async () => {
     const home = tempDir()
     const kernel = await Kernel.start({
+      config: { plugins: { bundled: false } },
       home,
       pluginTimeoutMs: 200,
       plugins: [{ id: 'stuck', apply: (ctx) => void ctx.effect(() => () => new Promise<void>(() => {})) }],
@@ -167,7 +171,8 @@ describe('PluginHost on Cordis', () => {
     // Documents a Cordis property relied on by ADR-001: synchronous `emit`
     // propagates a listener's exception to the emitter. The kernel therefore
     // never uses Cordis events on its critical paths (architecture §5 item 4).
-    const kernel = await Kernel.start({ home: tempDir() })
+    const kernel = await Kernel.start({
+      config: { plugins: { bundled: false } }, home: tempDir() })
     // Untyped: the event is not declared in Cordis's Events interface.
     const ctx = kernel.plugins.root as any
     const reached: string[] = []

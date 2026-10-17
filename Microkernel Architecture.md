@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.3 (draft) |
+| Document version | v0.4 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -178,7 +178,7 @@ A typical work process is as follows:
   | Executor | Purpose | Isolation |
   |---|---|---|
   | Out-of-process plugin process | Domain plugins written in Python and other languages | Separate process, communicating via IF-2 |
-  | Tool container | EDA tools | Podman container with CPU and memory limits, network disabled by default |
+  | Tool container | EDA tools | Podman container with CPU and memory limits, network disabled by default (implemented in M1.5, when Podman is installed) |
   | In-kernel execution | Only for extremely lightweight, non-blocking system operations | None, so its scope is strictly limited |
 
 - **Run workspace**: every run gets a new temporary directory. Input artifacts are mounted read-only (hard links or bind mounts), and the tool can only write to the `out/` directory. After the run ends, the kernel collects the outputs from `out/` and commits them to K2.
@@ -213,7 +213,7 @@ A typical work process is as follows:
 - **Rules**:
   - Plugins cannot write verdict records; they can only produce metrics (AP-7).
   - If any input is missing, parsing is incomplete, coverage completeness conditions are not met, or tool capabilities do not match, the verdict is "Indeterminate".
-  - **Tool capability qualification**: every capability declared by a backend (e.g. "SDF timing simulation") must come with a qualification test. The capability is recognized only after the qualification test passes on that tool image. For example, the qualification test for the SDF capability deliberately introduces a timing violation and checks whether the simulation can detect it.
+  - **Tool capability qualification**: every capability declared by a backend (e.g. "SDF timing simulation") must come with a qualification test. The capability is recognized only after the qualification test passes on that tool image. The qualification test is itself a check, with the id `<plugin>.qualify.<capability>`; its passing verdict is the qualification evidence. For example, the qualification test for the SDF capability deliberately introduces a timing violation and checks whether the simulation can detect it.
 
 ### 4.7 K7 Snapshot & Approval
 
@@ -433,10 +433,12 @@ In the dedicated WSL distro, the workbench's home directory structure is as foll
 
 ### 9.2 IF-2 Plugin Protocol
 
-- **Transport**: JSON-RPC 2.0 over stdio, one process per out-of-process plugin.
+- **Transport**: JSON-RPC 2.0, one JSON message per line, over stdin/stdout; stderr carries free-form log lines, which the kernel records in the run log. Each run starts its own plugin process, which leads its own process group, so cancellation or a timeout terminates the whole group. Plugin processes receive no secrets in their environment.
+- **Commands in the plugin manifest**: the kernel substitutes `${python}`, `${node}` and `${pluginDir}` in `entry.command`. Plugins with `runtime: data` have no code and only provide data files (for example flow packs, process profiles and implementation libraries); the kernel imports the data files as artifacts at registration, so every use is traceable by hash.
 - **Main methods**: `initialize` (exchange versions and capabilities), `invoke` (execute a handler; inputs and outputs are artifact references and paths in the run workspace), `progress` and `log` (notifications), `cancel`, `shutdown`.
 - **Data passing**: large data is passed via files in the run workspace, not transmitted inline in the protocol.
-- **SDK**: a Python SDK and a TypeScript SDK are provided, encapsulating protocol details. Other languages can implement it according to the protocol documentation.
+- **SDK**: a Python SDK (`python/llmchip-sdk`) and a TypeScript SDK (`packages/plugin-sdk`) are provided, encapsulating protocol details; the SDKs redirect a handler's standard output to stderr so that the protocol stream cannot be corrupted. Other languages can implement it according to the protocol documentation.
+- **Results**: `invoke` returns only output files, metrics and the parse status, never verdicts (AP-7). Outputs must lie in the run workspace's `out/` and match the types declared in the manifest; otherwise the run fails and no output is registered.
 
 ### 9.3 IF-3 Tool Runs
 
@@ -614,9 +616,9 @@ llmchip-harness/
 | ADR-004 | The MVP kernel runs in WSL2, and the Windows desktop application connects to the local kernel; it can later be deployed to a private server | Accepted (owner decision) |
 | ADR-005 | Use a dedicated WSL distro with built-in Podman as the container runtime; users do not need to install Docker | Proposed |
 | ADR-006 | The event store uses SQLite (WAL, synchronous=FULL) through Node.js's built-in `node:sqlite`, with no native add-on; artifacts use a content-addressed store on the file system | Accepted (M1a) |
-| ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0 over stdio | Proposed |
+| ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0, one message per line, over stdio | Accepted (M1b) |
 | ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Proposed |
-| ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Proposed |
+| ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Accepted (M1b) |
 
 The full record of each ADR (context, alternatives, rationale, consequences) will be placed under `docs/adr/` after development starts.
 

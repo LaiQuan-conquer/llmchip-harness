@@ -1,0 +1,13 @@
+[project]
+name = "llmchip-estimator"
+version = "0.1.0"
+description = "Feasibility, area and cost estimator plugin of llmchip-harness (requirements FR-EST)"
+requires-python = ">=3.12"
+dependencies = ["llmchip-sdk"]
+
+[tool.uv.sources]
+llmchip-sdk = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"

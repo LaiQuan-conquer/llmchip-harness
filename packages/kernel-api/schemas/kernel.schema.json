@@ -106,7 +106,8 @@
           "$ref": "#/$defs/EventKind"
         },
         "payload": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": true
         },
         "label": {
           "$ref": "#/$defs/Label"
@@ -311,19 +312,8 @@
     },
     "RunRecord": {
       "title": "RunRecord",
-      "description": "One execution of a tool, plugin or agent (requirements §3.3).",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "project",
-        "handler",
-        "inputs",
-        "outputs",
-        "execution",
-        "startedAt",
-        "endedAt"
-      ],
       "properties": {
         "id": {
           "type": "string"
@@ -334,21 +324,35 @@
             "null"
           ]
         },
+        "plugin": {
+          "type": "string"
+        },
         "handler": {
-          "type": "string",
-          "description": "Plugin handler or tool adapter that executed the run."
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
         },
         "inputs": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Hash"
+            "$ref": "#/$defs/RunRef"
           }
         },
         "outputs": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Hash"
+            "$ref": "#/$defs/RunRef"
           }
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "finished"
+          ]
         },
         "execution": {
           "$ref": "#/$defs/ExecutionStatus"
@@ -358,6 +362,63 @@
             "integer",
             "null"
           ]
+        },
+        "signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "parse": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ParseReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Artifact holding the run log."
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "retryOf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "queuedAt": {
+          "type": "string",
+          "format": "date-time"
         },
         "startedAt": {
           "type": [
@@ -372,8 +433,38 @@
             "null"
           ],
           "format": "date-time"
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1
         }
-      }
+      },
+      "required": [
+        "id",
+        "project",
+        "plugin",
+        "handler",
+        "params",
+        "inputs",
+        "outputs",
+        "state",
+        "execution",
+        "exitCode",
+        "signal",
+        "metrics",
+        "parse",
+        "error",
+        "log",
+        "label",
+        "attempt",
+        "retryOf",
+        "timeoutMs",
+        "queuedAt",
+        "startedAt",
+        "endedAt",
+        "maxAttempts"
+      ],
+      "description": "One execution of a plugin handler or tool (requirements §3.3). `execution` is verdict layer ①."
     },
     "VerdictRecord": {
       "title": "VerdictRecord",
@@ -389,7 +480,9 @@
         "parse",
         "verdict",
         "reasons",
-        "reqRef"
+        "reqRef",
+        "waiver",
+        "createdAt"
       ],
       "properties": {
         "id": {
@@ -439,6 +532,16 @@
             "string",
             "null"
           ]
+        },
+        "waiver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -456,7 +559,8 @@
           "pattern": "^[A-Z][A-Z0-9_]*$"
         },
         "params": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": true
         }
       }
     },
@@ -491,6 +595,56 @@
               "minimum": 0,
               "default": 1000,
               "description": "Number of most recent events whose hash chain is verified at startup."
+            }
+          }
+        },
+        "plugins": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "searchPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "Directories scanned for plugins (each subdirectory with llmchip-plugin.json), in addition to the bundled plugins and `<home>/plugins`."
+            },
+            "python": {
+              "type": "string",
+              "description": "Interpreter substituted for `${python}` in plugin commands. Defaults to the bundled environment's Python when present, otherwise `python3`."
+            },
+            "node": {
+              "type": "string",
+              "description": "Runtime substituted for `${node}`; defaults to the kernel's own Node.js."
+            },
+            "bundled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Load the plugins shipped with the workbench."
+            }
+          }
+        },
+        "scheduler": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxParallel": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256,
+              "default": 2
+            },
+            "defaultTimeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3600000
+            },
+            "cancelGraceMs": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 2000,
+              "description": "Time a cancelled plugin gets to exit before it is killed."
             }
           }
         }
@@ -658,7 +812,8 @@
         "apiVersion",
         "pid",
         "startedAt",
-        "head"
+        "head",
+        "paused"
       ],
       "properties": {
         "name": {
@@ -682,6 +837,9 @@
           "type": "integer",
           "minimum": 0,
           "description": "Sequence number of the latest event."
+        },
+        "paused": {
+          "type": "boolean"
         }
       }
     },
@@ -699,7 +857,8 @@
           "pattern": "^[A-Z][A-Z0-9_]*$"
         },
         "params": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": true
         }
       }
     },
@@ -1054,6 +1213,2035 @@
           "const": true
         }
       }
+    },
+    "RunRef": {
+      "title": "RunRef",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "name",
+        "hash"
+      ],
+      "description": "A named artifact consumed or produced by a run."
+    },
+    "ParseReport": {
+      "title": "ParseReport",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/ParseStatus"
+        },
+        "parser": {
+          "type": "string",
+          "description": "Parser identifier and version."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "parser"
+      ],
+      "description": "How completely a tool report was parsed (verdict layer ②)."
+    },
+    "Metrics": {
+      "title": "Metrics",
+      "description": "Named measurements extracted from a run, e.g. `drc.violations`.",
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "number",
+          "string",
+          "boolean"
+        ]
+      }
+    },
+    "PluginKind": {
+      "title": "PluginKind",
+      "description": "Plugin types of requirements FR-INT-01.",
+      "type": "string",
+      "enum": [
+        "flow-pack",
+        "model-loader",
+        "quantizer",
+        "numeric-spec",
+        "architecture",
+        "rtl-generator",
+        "simulator",
+        "eda-adapter",
+        "parser",
+        "pdk",
+        "process-profile",
+        "implementation-library",
+        "signoff-check",
+        "package-template",
+        "silicon-test",
+        "estimator",
+        "llm-provider",
+        "ui-panel",
+        "test"
+      ]
+    },
+    "HandlerSpec": {
+      "title": "HandlerSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_.-]*$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "title": "HandlerInputSpec",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "multiple": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "types"
+            ]
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "title": "HandlerOutputSpec",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ]
+          }
+        },
+        "params": {
+          "type": "object",
+          "description": "JSON Schema of the handler params.",
+          "additionalProperties": true
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "PluginManifest": {
+      "title": "PluginManifest",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "version": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginKind"
+          },
+          "minItems": 1
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "process",
+            "container",
+            "data"
+          ],
+          "description": "`process`: own OS process speaking IF-2; `container`: same inside a container image; `data`: no code, only data files."
+        },
+        "entry": {
+          "title": "PluginEntry",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "Command line. `${python}`, `${node}` and `${pluginDir}` are substituted."
+            },
+            "image": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        },
+        "kernelApi": {
+          "type": "string",
+          "pattern": "^\\^\\d+\\.\\d+(\\.\\d+)?$",
+          "description": "Compatible kernel API versions, as a caret range."
+        },
+        "handlers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HandlerSpec"
+          }
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "title": "PluginDataSpec",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "label": {
+                "$ref": "#/$defs/Label"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "path"
+            ]
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "title": "CapabilitySpec",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "qualification": {
+                "type": "string",
+                "description": "Handler that runs the qualification test of this capability."
+              }
+            },
+            "required": [
+              "name",
+              "qualification"
+            ]
+          }
+        },
+        "requiresProcessCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permissions": {
+          "title": "PluginPermissions",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "network": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kinds",
+        "runtime",
+        "kernelApi"
+      ],
+      "description": "Contents of `llmchip-plugin.json` (architecture §4.9)."
+    },
+    "PluginInfo": {
+      "title": "PluginInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginKind"
+          }
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "handlers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "title": "PluginDataInfo",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "hash": {
+                "$ref": "#/$defs/Hash"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "hash"
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kinds",
+        "runtime",
+        "dir",
+        "handlers",
+        "data"
+      ],
+      "description": "A registered plugin."
+    },
+    "ProtocolInitializeParams": {
+      "title": "ProtocolInitializeParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "type": "string"
+        },
+        "kernelApiVersion": {
+          "type": "string"
+        },
+        "pluginDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "kernelApiVersion",
+        "pluginDir"
+      ],
+      "description": "IF-2 `initialize` request."
+    },
+    "ProtocolInitializeResult": {
+      "title": "ProtocolInitializeResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "handlers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "handlers"
+      ],
+      "description": "IF-2 `initialize` result."
+    },
+    "ProtocolInput": {
+      "title": "ProtocolInput",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path of a read-only copy in the run workspace."
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "type",
+        "label",
+        "path"
+      ]
+    },
+    "ProtocolInvokeParams": {
+      "title": "ProtocolInvokeParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProtocolInput"
+          }
+        },
+        "outDir": {
+          "type": "string"
+        },
+        "workDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run",
+        "handler",
+        "params",
+        "inputs",
+        "outDir",
+        "workDir"
+      ],
+      "description": "IF-2 `invoke` request."
+    },
+    "ProtocolOutput": {
+      "title": "ProtocolOutput",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path relative to `outDir`."
+        },
+        "type": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "type"
+      ]
+    },
+    "ProtocolInvokeResult": {
+      "title": "ProtocolInvokeResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProtocolOutput"
+          }
+        },
+        "metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "parse": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ParseReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "outputs"
+      ],
+      "description": "IF-2 `invoke` result. Plugins report metrics and parse status, never verdicts (AP-7)."
+    },
+    "ProtocolProgressParams": {
+      "title": "ProtocolProgressParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "description": "IF-2 `progress` notification."
+    },
+    "ProtocolLogParams": {
+      "title": "ProtocolLogParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run",
+        "level",
+        "message"
+      ],
+      "description": "IF-2 `log` notification."
+    },
+    "ProtocolCancelParams": {
+      "title": "ProtocolCancelParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "description": "IF-2 `cancel` notification."
+    },
+    "Criterion": {
+      "title": "Criterion",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "==",
+            "!=",
+            "<",
+            "<=",
+            ">",
+            ">="
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "string",
+            "boolean"
+          ]
+        }
+      },
+      "required": [
+        "metric",
+        "op",
+        "value"
+      ]
+    },
+    "CheckDefinition": {
+      "title": "CheckDefinition",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string",
+          "description": "Runs of this plugin handler are evaluated."
+        },
+        "acceptExitCodes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "default": [
+            0
+          ]
+        },
+        "requireParse": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require a complete parse report."
+        },
+        "requiredCapability": {
+          "type": "string",
+          "description": "Tool capability the run must hold (requirements FR-VER-01)."
+        },
+        "completeness": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          },
+          "minItems": 1
+        },
+        "waiver": {
+          "type": "string",
+          "enum": [
+            "none",
+            "risk_acceptance",
+            "foundry_waiver"
+          ],
+          "default": "none",
+          "description": "Which kind of waiver may apply (requirements §3.7.4)."
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "plugin",
+        "handler",
+        "criteria"
+      ],
+      "description": "How the verdict engine judges a check (K6). Hard constraint."
+    },
+    "FlowStage": {
+      "title": "FlowStage",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "entry": {
+          "title": "StageEntry",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ]
+    },
+    "FlowGate": {
+      "title": "FlowGate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Project slots forming the design snapshot."
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "after",
+        "members",
+        "checks"
+      ]
+    },
+    "FlowPack": {
+      "title": "FlowPack",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowStage"
+          },
+          "minItems": 1
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowGate"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckDefinition"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "stages",
+        "gates",
+        "checks"
+      ],
+      "description": "Stages, gates and check definitions of a workflow (architecture §4.3)."
+    },
+    "ProjectRecord": {
+      "title": "ProjectRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "flow": {
+          "type": "string"
+        },
+        "flowHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "flow",
+        "flowHash",
+        "createdAt"
+      ]
+    },
+    "SnapshotMember": {
+      "title": "SnapshotMember",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "type": "string"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "slot",
+        "hash"
+      ]
+    },
+    "Snapshot": {
+      "title": "Snapshot",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotMember"
+          }
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidenceHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "gate",
+        "members",
+        "hash",
+        "evidence",
+        "evidenceHash",
+        "missing"
+      ],
+      "description": "Design snapshot of a gate plus its evidence manifest (requirements §3.7.2)."
+    },
+    "ApprovalCondition": {
+      "title": "ApprovalCondition",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "closeCriteria": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string",
+          "description": "Check whose passing verdict closes the condition."
+        },
+        "closed": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "by",
+            "at",
+            "verdict"
+          ],
+          "properties": {
+            "by": {
+              "$ref": "#/$defs/Actor"
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "verdict": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "owner",
+        "closeCriteria",
+        "check",
+        "closed"
+      ]
+    },
+    "ApprovalRecord": {
+      "title": "ApprovalRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "conditional",
+            "rejected"
+          ]
+        },
+        "snapshotHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "evidenceHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalCondition"
+          }
+        },
+        "comment": {
+          "type": "string"
+        },
+        "by": {
+          "$ref": "#/$defs/Actor"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "project",
+        "branch",
+        "gate",
+        "decision",
+        "snapshotHash",
+        "evidenceHash",
+        "conditions",
+        "comment",
+        "by",
+        "at"
+      ]
+    },
+    "ApprovalStatus": {
+      "title": "ApprovalStatus",
+      "type": "string",
+      "enum": [
+        "none",
+        "approved",
+        "conditional_pending",
+        "conditional_closed",
+        "rejected",
+        "invalidated"
+      ],
+      "description": "Approval states of requirements §3.7.3, plus `none` and `invalidated`."
+    },
+    "ReleaseResult": {
+      "title": "ReleaseResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gate": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ApprovalStatus"
+        },
+        "released": {
+          "type": "boolean"
+        },
+        "approval": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
+      },
+      "required": [
+        "gate",
+        "status",
+        "released",
+        "approval",
+        "reasons"
+      ],
+      "description": "Result of the single release check before advancing or exporting (architecture §4.7)."
+    },
+    "WaiverRecord": {
+      "title": "WaiverRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "risk_acceptance",
+            "foundry_waiver"
+          ]
+        },
+        "check": {
+          "type": "string"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "minItems": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string"
+        },
+        "acknowledgement": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Foundry written acknowledgement artifact; required for foundry waivers."
+        },
+        "by": {
+          "$ref": "#/$defs/Actor"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "check",
+        "subjects",
+        "reason",
+        "acknowledgement",
+        "by",
+        "at"
+      ]
+    },
+    "ProjectState": {
+      "title": "ProjectState",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/ProjectRecord"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "branch": {
+          "type": "string"
+        },
+        "slots": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Hash"
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "title": "StageState",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "entered": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "entered"
+            ]
+          }
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReleaseResult"
+          }
+        }
+      },
+      "required": [
+        "project",
+        "branches",
+        "branch",
+        "slots",
+        "stages",
+        "gates"
+      ]
+    },
+    "RunQueuedPayload": {
+      "title": "RunQueuedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "$ref": "#/$defs/RunRecord"
+        }
+      },
+      "required": [
+        "run"
+      ]
+    },
+    "RunStartedPayload": {
+      "title": "RunStartedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "run",
+        "pid"
+      ]
+    },
+    "RunFinishedPayload": {
+      "title": "RunFinishedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/$defs/ExecutionStatus"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunRef"
+          }
+        },
+        "metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "parse": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ParseReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run",
+        "execution",
+        "exitCode",
+        "signal",
+        "outputs",
+        "metrics",
+        "parse",
+        "error",
+        "log"
+      ]
+    },
+    "KernelPausedPayload": {
+      "title": "KernelPausedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paused",
+        "reason"
+      ]
+    },
+    "VerdictRecordedPayload": {
+      "title": "VerdictRecordedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "$ref": "#/$defs/VerdictRecord"
+        }
+      },
+      "required": [
+        "verdict"
+      ]
+    },
+    "ProjectCreatedPayload": {
+      "title": "ProjectCreatedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/ProjectRecord"
+        }
+      },
+      "required": [
+        "project"
+      ]
+    },
+    "ProjectBranchedPayload": {
+      "title": "ProjectBranchedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "atSeq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "from",
+        "atSeq"
+      ]
+    },
+    "SlotBoundPayload": {
+      "title": "SlotBoundPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "previous": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "slot",
+        "hash",
+        "previous"
+      ]
+    },
+    "StageEnteredPayload": {
+      "title": "StageEnteredPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "stage"
+      ]
+    },
+    "ApprovalRecordedPayload": {
+      "title": "ApprovalRecordedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/ApprovalRecord"
+        }
+      },
+      "required": [
+        "approval"
+      ]
+    },
+    "ConditionClosedPayload": {
+      "title": "ConditionClosedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approval",
+        "condition",
+        "verdict"
+      ]
+    },
+    "ApprovalInvalidatedPayload": {
+      "title": "ApprovalInvalidatedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/Message"
+        }
+      },
+      "required": [
+        "approval",
+        "gate",
+        "reason"
+      ]
+    },
+    "WaiverRecordedPayload": {
+      "title": "WaiverRecordedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "waiver": {
+          "$ref": "#/$defs/WaiverRecord"
+        }
+      },
+      "required": [
+        "waiver"
+      ]
+    },
+    "PluginsListResult": {
+      "title": "PluginsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginInfo"
+          }
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
+      },
+      "required": [
+        "plugins",
+        "problems"
+      ]
+    },
+    "RunsStartParams": {
+      "title": "RunsStartParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunRef"
+          },
+          "default": []
+        },
+        "project": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        }
+      },
+      "required": [
+        "plugin",
+        "handler"
+      ]
+    },
+    "RunRefParams": {
+      "title": "RunRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run"
+      ]
+    },
+    "RunsWaitParams": {
+      "title": "RunsWaitParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "default": 60000
+        }
+      },
+      "required": [
+        "run"
+      ]
+    },
+    "RunsListParams": {
+      "title": "RunsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "finished"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    },
+    "RunsListResult": {
+      "title": "RunsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunRecord"
+          }
+        }
+      },
+      "required": [
+        "runs"
+      ]
+    },
+    "PauseParams": {
+      "title": "PauseParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "default": "requested"
+        }
+      }
+    },
+    "PauseResult": {
+      "title": "PauseResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paused"
+      ]
+    },
+    "ChecksListResult": {
+      "title": "ChecksListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckDefinition"
+          }
+        }
+      },
+      "required": [
+        "checks"
+      ]
+    },
+    "VerdictsEvaluateParams": {
+      "title": "VerdictsEvaluateParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "check",
+        "run"
+      ]
+    },
+    "VerdictsListParams": {
+      "title": "VerdictsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/Hash"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    },
+    "VerdictsListResult": {
+      "title": "VerdictsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerdictRecord"
+          }
+        }
+      },
+      "required": [
+        "verdicts"
+      ]
+    },
+    "ProjectsCreateParams": {
+      "title": "ProjectsCreateParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "flow": {
+          "type": "string",
+          "default": "default"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ]
+    },
+    "ProjectRefParams": {
+      "title": "ProjectRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        }
+      },
+      "required": [
+        "project"
+      ]
+    },
+    "ProjectsListResult": {
+      "title": "ProjectsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectRecord"
+          }
+        }
+      },
+      "required": [
+        "projects"
+      ]
+    },
+    "ProjectsBindParams": {
+      "title": "ProjectsBindParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "slot": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "project",
+        "slot",
+        "hash"
+      ]
+    },
+    "ProjectsBranchParams": {
+      "title": "ProjectsBranchParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string",
+          "default": "main"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "atSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Event sequence number to branch at (checkpoint); defaults to now."
+        }
+      },
+      "required": [
+        "project",
+        "name"
+      ]
+    },
+    "StagesEnterParams": {
+      "title": "StagesEnterParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "stage"
+      ]
+    },
+    "GateRefParams": {
+      "title": "GateRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "gate": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "gate"
+      ]
+    },
+    "ConditionInput": {
+      "title": "ConditionInput",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "closeCriteria": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "owner",
+        "closeCriteria",
+        "check"
+      ]
+    },
+    "ApprovalsDecideParams": {
+      "title": "ApprovalsDecideParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "conditional",
+            "rejected"
+          ]
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConditionInput"
+          },
+          "default": []
+        },
+        "comment": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "project",
+        "gate",
+        "decision"
+      ]
+    },
+    "ApprovalsCloseConditionParams": {
+      "title": "ApprovalsCloseConditionParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approval",
+        "condition",
+        "verdict"
+      ]
+    },
+    "ApprovalsListResult": {
+      "title": "ApprovalsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalRecord"
+          }
+        }
+      },
+      "required": [
+        "approvals"
+      ]
+    },
+    "WaiversCreateParams": {
+      "title": "WaiversCreateParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "risk_acceptance",
+            "foundry_waiver"
+          ]
+        },
+        "check": {
+          "type": "string"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "minItems": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string"
+        },
+        "acknowledgement": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "kind",
+        "check",
+        "subjects",
+        "reason"
+      ]
     }
   }
 }

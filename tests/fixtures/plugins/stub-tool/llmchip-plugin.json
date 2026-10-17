@@ -1,0 +1,104 @@
+{
+  "id": "stub-tool",
+  "version": "1.0.0",
+  "title": "Stub EDA tool for kernel tests",
+  "kinds": [
+    "test"
+  ],
+  "runtime": "process",
+  "entry": {
+    "command": [
+      "${node}",
+      "--conditions=development",
+      "${pluginDir}/plugin.ts"
+    ]
+  },
+  "kernelApi": "^0.2",
+  "capabilities": [
+    {
+      "name": "sdf",
+      "qualification": "qualify"
+    }
+  ],
+  "handlers": [
+    {
+      "name": "report",
+      "inputs": [
+        {
+          "name": "design",
+          "types": [
+            "test.design"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "test.report",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "violations": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "truncate": {
+            "type": "boolean",
+            "default": false
+          },
+          "coverage": {
+            "type": "boolean",
+            "default": true
+          },
+          "crash": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "qualify",
+      "params": {
+        "type": "object",
+        "properties": {
+          "detected": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "sleep",
+      "params": {
+        "type": "object",
+        "required": [
+          "ms"
+        ],
+        "properties": {
+          "ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "hang"
+    },
+    {
+      "name": "crash"
+    },
+    {
+      "name": "fail"
+    },
+    {
+      "name": "escape"
+    }
+  ]
+}

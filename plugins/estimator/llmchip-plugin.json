@@ -1,0 +1,58 @@
+{
+  "id": "estimator",
+  "version": "0.1.0",
+  "title": "Feasibility, area, cost and performance estimator (requirements FR-EST)",
+  "kinds": ["estimator"],
+  "runtime": "process",
+  "entry": { "command": ["${python}", "-m", "llmchip_estimator"] },
+  "kernelApi": "^0.2",
+  "handlers": [
+    {
+      "name": "estimate",
+      "title": "Estimate area, cost, performance and feasibility",
+      "inputs": [
+        { "name": "profile", "types": ["process.profile"], "required": true },
+        { "name": "library", "types": ["implementation.library"], "required": true }
+      ],
+      "outputs": [
+        { "name": "report", "type": "estimate.report", "mediaType": "application/json" },
+        { "name": "summary", "type": "estimate.summary", "mediaType": "text/markdown" }
+      ],
+      "timeoutMs": 60000,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "weightStorage"],
+        "properties": {
+          "model": {
+            "type": "object",
+            "description": "A preset name, or params count and structure.",
+            "properties": {
+              "preset": { "type": "string" },
+              "params": { "type": "integer", "minimum": 1 },
+              "dim": { "type": "integer", "minimum": 1 },
+              "layers": { "type": "integer", "minimum": 1 },
+              "heads": { "type": "integer", "minimum": 1 },
+              "kvHeads": { "type": "integer", "minimum": 1 },
+              "vocab": { "type": "integer", "minimum": 1 },
+              "hiddenDim": { "type": "integer", "minimum": 1 },
+              "title": { "type": "string" }
+            }
+          },
+          "weightBits": { "type": "integer", "enum": [2, 3, 4, 8, 16], "default": 4 },
+          "activationBits": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+          "kvBits": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+          "contextLength": { "type": "integer", "minimum": 1, "default": 64 },
+          "kvLocation": { "enum": ["onchip", "offchip"], "default": "offchip" },
+          "weightStorage": { "type": "string", "description": "Implementation library entry storing the weights." },
+          "kvStorage": { "type": "string", "description": "Implementation library entry storing the KV cache when on chip." },
+          "parallelMacs": { "type": "integer", "minimum": 1, "default": 8 },
+          "clockMHz": { "type": "number", "exclusiveMinimum": 0, "default": 50 },
+          "offchipBandwidthMBps": { "type": "number", "exclusiveMinimum": 0, "default": 25 },
+          "targetAreaMm2": { "type": "number", "exclusiveMinimum": 0 },
+          "budgetCny": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    }
+  ]
+}

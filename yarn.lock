@@ -375,6 +375,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@llmchip/plugin-sdk@workspace:packages/plugin-sdk":
+  version: 0.0.0-use.local
+  resolution: "@llmchip/plugin-sdk@workspace:packages/plugin-sdk"
+  dependencies:
+    "@llmchip/kernel-api": "workspace:*"
+  languageName: unknown
+  linkType: soft
+
 "@llmchip/root@workspace:.":
   version: 0.0.0-use.local
   resolution: "@llmchip/root@workspace:."

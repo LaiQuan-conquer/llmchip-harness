@@ -1,0 +1,35 @@
+{
+  "id": "sephonchitech-180bcd",
+  "title": "Sephonchitech (十方尺) 180nm BCD MPW",
+  "nodeNm": 180,
+  "source": "https://www.sephonchitech.com/tapeout.html (retrieved 2026-10-17); empirical values marked as such",
+  "foundry": {
+    "name": "Sephonchitech (foundry not named)",
+    "priceCnyPerMm2": 5000,
+    "minAreaMm2": 2,
+    "dieYOptionsMm": [2, 3, 5],
+    "dieXMinMm": 1,
+    "dieXStepMm": null,
+    "areaRounding": null,
+    "samples": 40,
+    "receiverForWaivers": true,
+    "pending": [
+      "X dimension unit and step (inquiry email question 13)",
+      "billing rounding and whether seal ring and scribe line are billed (question 14)",
+      "whether the price includes tax, masks, PDK, IP and packaging (question 21)"
+    ]
+  },
+  "ring": {
+    "ioRingWidthMm": { "low": 0.13, "typ": 0.15, "high": 0.18, "confidence": "empirical", "source": "typical 180nm pad ring; IO library not yet received" },
+    "sealRingWidthMm": { "low": 0.01, "typ": 0.02, "high": 0.03, "confidence": "empirical", "source": "typical seal ring" }
+  },
+  "logic": {
+    "macAreaUm2": { "low": 3000, "typ": 5000, "high": 8000, "confidence": "empirical", "source": "8x4-bit MAC with 20-bit accumulator, ~400 NAND2 equivalents at ~10 um2" },
+    "flopBitAreaUm2": { "low": 25, "typ": 35, "high": 50, "confidence": "empirical", "source": "180nm D flip-flop with mux" },
+    "controlAreaMm2": { "low": 0.03, "typ": 0.05, "high": 0.1, "confidence": "empirical", "source": "sequencer, SPI/UART interfaces, debug readback" },
+    "utilization": { "low": 0.75, "typ": 0.7, "high": 0.6, "confidence": "empirical", "source": "placement utilization of standard-cell logic" },
+    "powerOverhead": { "low": 0.05, "typ": 0.07, "high": 0.1, "confidence": "empirical", "source": "power grid and decap share of core area" }
+  },
+  "implementations": ["sephonchitech-180bcd.foundry-rom", "sephonchitech-180bcd.foundry-sram", "sephonchitech-180bcd.stdcell-rom"],
+  "reticleLimitMm2": 850
+}

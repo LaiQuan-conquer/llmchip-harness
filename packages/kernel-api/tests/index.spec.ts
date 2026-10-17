@@ -15,7 +15,7 @@ describe('kernel-api', () => {
   })
 
   it('compiles as a strict JSON Schema 2020-12 document', () => {
-    const ajv = new Ajv2020({ strict: true, allErrors: true, validateFormats: false })
+    const ajv = new Ajv2020({ strict: true, allowUnionTypes: true, allErrors: true, validateFormats: false })
     ajv.addSchema(kernelSchema)
     expect(kernelSchema.$id).toBe(KERNEL_SCHEMA_ID)
     for (const name of Object.keys(kernelSchema.$defs)) {

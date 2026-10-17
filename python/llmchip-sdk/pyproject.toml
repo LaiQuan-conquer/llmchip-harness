@@ -1,0 +1,10 @@
+[project]
+name = "llmchip-sdk"
+version = "0.0.0"
+description = "Python SDK for llmchip-harness out-of-process plugins (IF-2)"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"

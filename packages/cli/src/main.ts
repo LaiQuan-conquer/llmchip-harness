@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { KernelCallError, KernelClient } from '@llmchip/client'
-import type { Label } from '@llmchip/kernel-api'
+import type { Label, RunRecord } from '@llmchip/kernel-api'
 
 export interface Io {
   out(text: string): void
@@ -34,7 +34,22 @@ Commands:
   secret set NAME                      Value is read from standard input
   secret rm NAME
   secret list
-  kernel stop
+  kernel stop | pause [--reason TEXT] | resume
+  plugins list
+  run start PLUGIN HANDLER [--params JSON] [--input NAME=HASH]... [--max-attempts N] [--wait]
+  run get|wait|cancel RUN
+  run list [--state S]
+  estimate --model PRESET [--bits N] [--process ID] [--storage ID] [--params JSON]
+                                       Feasibility, area and cost estimate (prints the summary)
+  project create ID --title T [--flow F]
+  project list
+  project show ID [--branch B]
+  project bind ID SLOT HASH [--branch B]
+  project branch ID NAME [--from B] [--at SEQ]
+  stage enter ID STAGE [--branch B]
+  gate snapshot|release ID GATE [--branch B]
+  verdict evaluate CHECK RUN [--project ID]
+  call METHOD [JSON]                   Any kernel API method, e.g. approvals.decide
 
 Global options:
   --home DIR   Workbench home (default: $LLMCHIP_HOME or ~/.llmchip)
@@ -67,6 +82,20 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         all: { type: 'boolean' },
         down: { type: 'boolean' },
         reason: { type: 'string' },
+        params: { type: 'string' },
+        'max-attempts': { type: 'string' },
+        wait: { type: 'boolean' },
+        state: { type: 'string' },
+        model: { type: 'string' },
+        bits: { type: 'string' },
+        process: { type: 'string' },
+        storage: { type: 'string' },
+        title: { type: 'string' },
+        flow: { type: 'string' },
+        branch: { type: 'string' },
+        from: { type: 'string' },
+        at: { type: 'string' },
+        project: { type: 'string' },
       },
       allowPositionals: true,
       strict: true,
@@ -75,7 +104,7 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     return usage(io, (error as Error).message)
   }
   const { values, positionals } = parsed
-  const [group, action, arg] = positionals
+  const [group, action, arg, arg2, arg3] = positionals
   if (values.help || !group) {
     io.out(USAGE)
     return 0
@@ -185,7 +214,146 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         await client.call('kernel.shutdown')
         io.out('harnessd is stopping\n')
         return 0
+      case 'kernel pause':
+        await client.call('kernel.pause', compact({ reason: values.reason }))
+        io.out('paused: no new run starts until `llmchip kernel resume`\n')
+        return 0
+      case 'kernel resume':
+        await client.call('kernel.resume')
+        io.out('resumed\n')
+        return 0
+      case 'plugins list': {
+        const result = await client.call('plugins.list')
+        print(result, () =>
+          [
+            ...result.plugins.map((p) => `${p.id}\t${p.version}\t${p.runtime}\t${p.kinds.join(',')}\t${[...p.handlers, ...p.data.map((d) => `data:${d.id}`)].join(' ')}\n`),
+            ...result.problems.map((p) => `problem: ${p.code} ${JSON.stringify(p.params ?? {})}\n`),
+          ].join(''),
+        )
+        return 0
+      }
+      case 'run start': {
+        if (!arg || !arg2) return usage(io, 'run start needs PLUGIN and HANDLER')
+        const inputs = []
+        for (const spec of values.input ?? []) {
+          const [name, hash] = spec.split('=')
+          if (!name || !hash) return usage(io, `--input must be NAME=HASH, got ${spec}`)
+          inputs.push({ name, hash })
+        }
+        let run = await client.call('runs.start', {
+          plugin: arg,
+          handler: arg2,
+          params: values.params ? JSON.parse(values.params) : {},
+          inputs,
+          ...compact({ maxAttempts: int(values['max-attempts']) }),
+        })
+        if (values.wait) run = await waitRun(client, run.id)
+        print(run, () => runLine(run))
+        return run.state === 'finished' && run.execution !== 'exited_zero' ? 1 : 0
+      }
+      case 'run get':
+      case 'run wait':
+      case 'run cancel': {
+        if (!arg) return usage(io, `run ${action} needs RUN`)
+        const run =
+          action === 'get' ? await client.call('runs.get', { run: arg }) : action === 'wait' ? await waitRun(client, arg) : await client.call('runs.cancel', { run: arg })
+        print(run, () => runLine(run))
+        return 0
+      }
+      case 'run list': {
+        const { runs } = await client.call('runs.list', compact({ state: values.state as 'queued' | undefined }))
+        print(runs, () => runs.map(runLine).join(''))
+        return 0
+      }
+      case 'estimate': {
+        if (!values.model) return usage(io, 'estimate needs --model PRESET (stories260K, qwen2.5-0.5b, llama3.1-8b)')
+        const processId = values.process ?? 'sephonchitech-180bcd'
+        const { plugins } = await client.call('plugins.list')
+        const data = plugins.flatMap((p) => p.data)
+        const profile = data.find((d) => d.type === 'process.profile' && d.id === processId)
+        const library = data.find((d) => d.type === 'implementation.library')
+        if (!profile || !library) return usage(io, `no process profile ${processId} or implementation library is registered`)
+        const params = {
+          model: { preset: values.model },
+          weightStorage: values.storage ?? (processId === 'gf180mcu' ? 'gf180mcu.stdcell-rom' : `${processId}.foundry-rom`),
+          ...compact({ weightBits: int(values.bits) }),
+          ...(values.params ? JSON.parse(values.params) : {}),
+        }
+        const run = await waitRun(
+          client,
+          (
+            await client.call('runs.start', {
+              plugin: 'estimator',
+              handler: 'estimate',
+              params,
+              inputs: [
+                { name: 'profile', hash: profile.hash },
+                { name: 'library', hash: library.hash },
+              ],
+            })
+          ).id,
+        )
+        if (run.execution !== 'exited_zero') {
+          io.err(`llmchip: estimate failed: ${run.error ?? run.execution}\n`)
+          return 1
+        }
+        const output = run.outputs.find((o) => o.name === (values.json ? 'report' : 'summary'))!
+        io.out(await (await client.download(output.hash)).text())
+        return 0
+      }
+      case 'project create': {
+        if (!arg || !values.title) return usage(io, 'project create needs ID and --title')
+        print(await client.call('projects.create', { id: arg, title: values.title, ...compact({ flow: values.flow }) }), () => `created project ${arg}\n`)
+        return 0
+      }
+      case 'project list': {
+        const { projects } = await client.call('projects.list')
+        print(projects, () => projects.map((p) => `${p.id}\t${p.flow}\t${p.title}\n`).join(''))
+        return 0
+      }
+      case 'project show':
+        if (!arg) return usage(io, 'project show needs ID')
+        print(await client.call('projects.get', { project: arg, ...compact({ branch: values.branch }) }))
+        return 0
+      case 'project bind':
+        if (!arg || !arg2 || !arg3) return usage(io, 'project bind needs ID SLOT HASH')
+        await client.call('projects.bind', { project: arg, slot: arg2, hash: arg3, ...compact({ branch: values.branch }) })
+        io.out(`bound ${arg2}\n`)
+        return 0
+      case 'project branch':
+        if (!arg || !arg2) return usage(io, 'project branch needs ID and NAME')
+        await client.call('projects.branch', { project: arg, name: arg2, ...compact({ from: values.from, atSeq: int(values.at) }) })
+        io.out(`created branch ${arg2}\n`)
+        return 0
+      case 'stage enter':
+        if (!arg || !arg2) return usage(io, 'stage enter needs ID and STAGE')
+        await client.call('stages.enter', { project: arg, stage: arg2, ...compact({ branch: values.branch }) })
+        io.out(`entered stage ${arg2}\n`)
+        return 0
+      case 'gate snapshot':
+      case 'gate release': {
+        if (!arg || !arg2) return usage(io, `gate ${action} needs ID and GATE`)
+        const params = { project: arg, gate: arg2, ...compact({ branch: values.branch }) }
+        if (action === 'snapshot') print(await client.call('gates.snapshot', params))
+        else {
+          const release = await client.call('gates.release', params)
+          print(release, () => `${release.gate}: ${release.status}${release.released ? ' (released)' : ''}\n${release.reasons.map((r) => `  ${r.code} ${JSON.stringify(r.params ?? {})}\n`).join('')}`)
+        }
+        return 0
+      }
+      case 'verdict evaluate': {
+        if (!arg || !arg2) return usage(io, 'verdict evaluate needs CHECK and RUN')
+        const verdict = await client.call('verdicts.evaluate', { check: arg, run: arg2, project: values.project ?? '' })
+        print(verdict, () => `${verdict.check}: ${verdict.verdict}\n${verdict.reasons.map((r) => `  ${r.code} ${JSON.stringify(r.params ?? {})}\n`).join('')}`)
+        return 0
+      }
       default:
+        if (group === 'call') {
+          if (!action) return usage(io, 'call needs METHOD')
+          const params = arg ? JSON.parse(arg) : {}
+          print(await (client.call as (method: string, params: unknown) => Promise<unknown>)(action, params))
+          return 0
+        }
         return usage(io, `unknown command: ${positionals.join(' ')}`)
     }
   } catch (error) {
@@ -197,6 +365,19 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
   } finally {
     await client.close()
   }
+}
+
+/** Waits for a run to finish, however long it takes. */
+async function waitRun(client: KernelClient, run: string): Promise<RunRecord> {
+  for (;;) {
+    const record = await client.call('runs.wait', { run, timeoutMs: 600_000 })
+    if (record.state === 'finished') return record
+  }
+}
+
+function runLine(run: RunRecord): string {
+  const outputs = run.outputs.map((o) => `${o.name}=${o.hash}`).join(' ')
+  return `${run.id}\t${run.plugin}/${run.handler}\t${run.state}\t${run.execution}${run.error ? `\t${run.error}` : ''}${outputs ? `\t${outputs}` : ''}\n`
 }
 
 function report(io: Io, result: { ok: boolean; checked: number; problems: { code: string; params?: object }[] }, what: string): number {

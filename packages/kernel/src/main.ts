@@ -17,6 +17,8 @@ Commands:
     --home DIR   Workbench home (default: $LLMCHIP_HOME or ~/.llmchip)
     --host HOST  Listen address (default: 127.0.0.1)
     --port PORT  Listen port; 0 picks a free port (default: 0)
+    --plugins DIR  Also load plugins from DIR (repeatable)
+    --python PATH  Python interpreter for Python plugins (default: python3)
 
 Options:
   --version    Print the version and exit.
@@ -41,11 +43,17 @@ export async function main(argv: readonly string[], io: Io, options: MainOptions
   }
   if (command !== 'serve') return usageError(io, `unknown argument: ${command}`)
 
-  let values: { home?: string; host?: string; port?: string }
+  let values: { home?: string; host?: string; port?: string; plugins?: string[]; python?: string }
   try {
     ;({ values } = parseArgs({
       args: [...rest],
-      options: { home: { type: 'string' }, host: { type: 'string' }, port: { type: 'string' } },
+      options: {
+        home: { type: 'string' },
+        host: { type: 'string' },
+        port: { type: 'string' },
+        plugins: { type: 'string', multiple: true },
+        python: { type: 'string' },
+      },
       strict: true,
       allowPositionals: false,
     }))
@@ -61,7 +69,10 @@ export async function main(argv: readonly string[], io: Io, options: MainOptions
   try {
     kernel = await Kernel.start({
       ...(values.home ? { home: values.home } : {}),
-      config: { server: { ...(values.host ? { host: values.host } : {}), ...(port !== undefined ? { port } : {}) } },
+      config: {
+        server: { ...(values.host ? { host: values.host } : {}), ...(port !== undefined ? { port } : {}) },
+        plugins: { ...(values.plugins ? { searchPaths: values.plugins } : {}), ...(values.python ? { python: values.python } : {}) },
+      },
       console: (line) => io.err(line + '\n'),
     })
   } catch (error) {

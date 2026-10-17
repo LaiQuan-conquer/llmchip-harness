@@ -1,0 +1,34 @@
+# uv workspace of the Python parts of llmchip-harness: the plugin SDK
+# (python/) and Python plugins (plugins/). See AGENTS.md "Engineering".
+[project]
+name = "llmchip-harness-python"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = ["llmchip-sdk", "llmchip-estimator"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4",
+  "ruff>=0.14",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+llmchip-sdk = { workspace = true }
+llmchip-estimator = { workspace = true }
+
+[tool.uv.workspace]
+members = ["python/llmchip-sdk", "plugins/estimator"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["python", "plugins"]
+addopts = "--import-mode=importlib"

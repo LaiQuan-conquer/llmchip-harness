@@ -7,7 +7,12 @@ import { OWNER, tempDir } from './helpers.ts'
 describe('loadConfig', () => {
   it('applies schema defaults, the config file, then overrides', () => {
     const dir = tempDir()
-    expect(loadConfig(dir)).toEqual({ server: { host: '127.0.0.1', port: 0 }, events: { verifyTailOnStart: 1000 } })
+    expect(loadConfig(dir)).toEqual({
+      server: { host: '127.0.0.1', port: 0 },
+      events: { verifyTailOnStart: 1000 },
+      plugins: { searchPaths: [], bundled: true },
+      scheduler: { maxParallel: 2, defaultTimeoutMs: 3_600_000, cancelGraceMs: 2000 },
+    })
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ server: { port: 8080 } }))
     expect(loadConfig(dir).server).toEqual({ host: '127.0.0.1', port: 8080 })
     expect(loadConfig(dir, { server: { port: 9090 } }).server.port).toBe(9090)

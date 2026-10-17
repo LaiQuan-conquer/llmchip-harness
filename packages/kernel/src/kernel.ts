@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { KERNEL_API_VERSION, type Actor, type KernelInfo, type WorkspaceConfig } from '@llmchip/kernel-api'
 import { ArtifactStore } from './artifacts/store.ts'
 import { loadConfig, type ResolvedConfig } from './config/config.ts'
@@ -8,6 +9,9 @@ import { ensureHome, homeLayout, resolveHome, type HomeLayout } from './config/h
 import { Redactor, SecretStore } from './config/secrets.ts'
 import { EventStore } from './events/store.ts'
 import { PluginHost, type InKernelPlugin } from './plugin-host.ts'
+import { PluginRegistry } from './plugins/registry.ts'
+import { Scheduler } from './runs/scheduler.ts'
+import { Workflow } from './workflow/engine.ts'
 import { KernelServer, type MethodHandlers } from './server.ts'
 import { KernelError } from './util/errors.ts'
 import { createLogger, type Logger } from './util/logger.ts'
@@ -34,6 +38,11 @@ export interface RuntimeInfo {
 
 const KERNEL_ACTOR: Actor = { kind: 'kernel', id: 'harnessd' }
 
+// Plugins and the Python environment shipped with the workbench, relative to this package
+// (packages/kernel/{src,lib}/ in the repository).
+const BUNDLED_PLUGINS = fileURLToPath(new URL('../../../plugins', import.meta.url))
+const BUNDLED_PYTHON = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url))
+
 export function kernelVersion(): string {
   // src/ and lib/ are both one level below the package root.
   return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
@@ -59,6 +68,9 @@ export class Kernel {
   readonly events: EventStore
   readonly artifacts: ArtifactStore
   readonly plugins: PluginHost
+  readonly registry: PluginRegistry
+  readonly scheduler: Scheduler
+  readonly workflow: Workflow
   readonly startedAt = new Date().toISOString()
   readonly version = kernelVersion()
   /** Resolves once the kernel has fully stopped. */
@@ -75,6 +87,7 @@ export class Kernel {
     acquireLock(this.layout)
     try {
       this.config = loadConfig(this.layout.config, options.config)
+      this.config.plugins.python ??= existsSync(BUNDLED_PYTHON) ? BUNDLED_PYTHON : 'python3'
       this.secrets = new SecretStore(this.layout.secrets)
       const redactor = new Redactor(() => this.secrets.entries())
       this.logger = createLogger({
@@ -93,6 +106,21 @@ export class Kernel {
       this.artifacts = new ArtifactStore(this.layout.store, this.events)
       const removed = this.artifacts.cleanupTemp()
       if (removed > 0) this.logger.warn('removed interrupted artifact writes', { count: removed })
+      this.registry = new PluginRegistry({
+        searchPaths: [...(this.config.plugins.bundled ? [BUNDLED_PLUGINS] : []), this.layout.plugins, ...this.config.plugins.searchPaths],
+        artifacts: this.artifacts,
+        logger: this.logger,
+      })
+      this.scheduler = new Scheduler({
+        events: this.events,
+        artifacts: this.artifacts,
+        registry: this.registry,
+        layout: this.layout,
+        config: this.config,
+        logger: this.logger,
+        redact: (text) => redactor.text(text),
+      })
+      this.workflow = new Workflow({ events: this.events, artifacts: this.artifacts, registry: this.registry, scheduler: this.scheduler })
       this.plugins = new PluginHost(
         { events: this.events, artifacts: this.artifacts, logger: this.logger },
         options.pluginTimeoutMs === undefined ? {} : { loadTimeoutMs: options.pluginTimeoutMs, unloadTimeoutMs: options.pluginTimeoutMs },
@@ -111,6 +139,10 @@ export class Kernel {
         payload: { version: kernel.version, apiVersion: KERNEL_API_VERSION, pid: process.pid },
         actor: KERNEL_ACTOR,
       })
+      for (const problem of [...(await kernel.registry.scan()), ...kernel.workflow.loadFlows()]) {
+        kernel.logger.warn('plugin problem', { problem })
+      }
+      kernel.scheduler.recover()
       for (const plugin of options.plugins ?? []) await kernel.plugins.load(plugin)
       const token = randomBytes(32).toString('base64url')
       kernel.server = new KernelServer({
@@ -123,6 +155,7 @@ export class Kernel {
       kernel.url = await kernel.server.listen(kernel.config.server.host, kernel.config.server.port)
       const runtime: RuntimeInfo = { pid: process.pid, url: kernel.url, token, version: kernel.version, startedAt: kernel.startedAt }
       writeFileSync(join(kernel.layout.run, 'harnessd.json'), JSON.stringify(runtime, null, 2), { mode: 0o600 })
+      kernel.scheduler.pump()
       kernel.logger.info('harnessd started', { url: kernel.url, home: kernel.layout.root })
     } catch (error) {
       await kernel.stop('startup failed')
@@ -139,6 +172,7 @@ export class Kernel {
       pid: process.pid,
       startedAt: this.startedAt,
       head: this.events.head(),
+      paused: this.scheduler.paused,
     }
   }
 
@@ -152,6 +186,7 @@ export class Kernel {
     try {
       rmSync(join(this.layout.run, 'harnessd.json'), { force: true })
       await this.server?.close()
+      await this.scheduler.stop()
       await this.plugins.dispose()
       this.events.append({ kind: 'kernel.stopped', payload: { reason }, actor: KERNEL_ACTOR })
       this.logger.info('harnessd stopped', { reason })
@@ -190,6 +225,38 @@ export class Kernel {
         return { ok: true }
       },
       'secrets.list': () => ({ names: this.secrets.list() }),
+      'kernel.pause': ({ reason }, session) => ({ paused: this.scheduler.setPaused(true, reason ?? 'requested', session.actor) }),
+      'kernel.resume': (_params, session) => ({ paused: this.scheduler.setPaused(false, 'resumed', session.actor) }),
+      'plugins.list': () => this.registry.list(),
+      'runs.start': (params, session) => this.scheduler.start(params, session.actor),
+      'runs.get': ({ run }) => this.scheduler.get(run),
+      'runs.wait': ({ run, timeoutMs }) => this.scheduler.wait(run, timeoutMs ?? 60_000),
+      'runs.list': (params) => ({ runs: this.scheduler.list(params) }),
+      'runs.cancel': ({ run }, session) => this.scheduler.cancel(run, session.actor),
+      'checks.list': () => ({ checks: this.workflow.checks() }),
+      'verdicts.evaluate': ({ check, run, project }, session) => this.workflow.evaluate(check, run, session.actor, project),
+      'verdicts.list': (params) => ({ verdicts: this.workflow.verdicts(params) }),
+      'projects.create': ({ id, title, flow }, session) => this.workflow.createProject(id, title, flow ?? 'default', session.actor),
+      'projects.list': () => ({ projects: this.workflow.projects() }),
+      'projects.get': ({ project, branch }) => this.workflow.project(project, branch),
+      'projects.bind': ({ project, branch, slot, hash }, session) => {
+        this.workflow.bind(project, branch ?? 'main', slot, hash, session.actor)
+        return { ok: true }
+      },
+      'projects.branch': ({ project, from, name, atSeq }, session) => {
+        this.workflow.branch(project, from ?? 'main', name, atSeq, session.actor)
+        return { ok: true }
+      },
+      'stages.enter': ({ project, branch, stage }, session) => {
+        this.workflow.enterStage(project, branch ?? 'main', stage, session.actor)
+        return { ok: true }
+      },
+      'gates.snapshot': ({ project, branch, gate }) => this.workflow.snapshot(project, branch ?? 'main', gate),
+      'gates.release': ({ project, branch, gate }) => this.workflow.release(project, branch ?? 'main', gate),
+      'approvals.decide': (params, session) => this.workflow.decide(params, session.actor),
+      'approvals.closeCondition': ({ approval, condition, verdict }, session) => this.workflow.closeCondition(approval, condition, verdict, session.actor),
+      'approvals.list': ({ project, branch }) => ({ approvals: this.workflow.approvals(project, branch) }),
+      'waivers.create': (params, session) => this.workflow.createWaiver(params, session.actor),
     }
   }
 }
