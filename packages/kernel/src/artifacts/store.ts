@@ -29,6 +29,11 @@ export interface PutOptions {
   creator: Actor
   reqRef?: string | null
   project?: string | null
+  /**
+   * Declassification rule that produced this artifact. Only then may its
+   * label be below its inputs' labels (requirements FR-SEC-02, FR-SEC-04).
+   */
+  declassifiedBy?: string
 }
 
 export type ArtifactSource = Uint8Array | string | Readable | AsyncIterable<Uint8Array>
@@ -157,13 +162,14 @@ export class ArtifactStore {
       size,
       type: options.type,
       mediaType: options.mediaType ?? 'application/octet-stream',
-      label: maxLabel([options.label ?? 'internal', ...inputMetas.map((m) => m.label)]),
+      label: options.declassifiedBy ? (options.label ?? 'internal') : maxLabel([options.label ?? 'internal', ...inputMetas.map((m) => m.label)]),
       run: options.run ?? null,
       inputs,
       creator: options.creator,
       createdAt: new Date().toISOString(),
       reqRef: options.reqRef ?? null,
       deleted: null,
+      declassifiedBy: options.declassifiedBy ?? null,
     }
     this.events.append({
       kind: 'artifact.created',

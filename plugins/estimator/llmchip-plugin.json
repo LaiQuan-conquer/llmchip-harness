@@ -5,7 +5,7 @@
   "kinds": ["estimator"],
   "runtime": "process",
   "entry": { "command": ["${python}", "-m", "llmchip_estimator"] },
-  "kernelApi": "^0.2",
+  "kernelApi": "^0.3",
   "handlers": [
     {
       "name": "estimate",

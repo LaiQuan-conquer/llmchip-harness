@@ -12,6 +12,7 @@ describe('loadConfig', () => {
       events: { verifyTailOnStart: 1000 },
       plugins: { searchPaths: [], bundled: true },
       scheduler: { maxParallel: 2, defaultTimeoutMs: 3_600_000, cancelGraceMs: 2000 },
+      llm: { providers: [] },
     })
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ server: { port: 8080 } }))
     expect(loadConfig(dir).server).toEqual({ host: '127.0.0.1', port: 8080 })

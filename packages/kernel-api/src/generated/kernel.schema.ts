@@ -25,7 +25,7 @@ export const kernelSchema = {
     },
     "Actor": {
       "title": "Actor",
-      "description": "Who performed an action.",
+      "description": "Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements §6.1).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -39,7 +39,8 @@ export const kernelSchema = {
             "human",
             "agent",
             "plugin",
-            "kernel"
+            "kernel",
+            "external"
           ]
         },
         "id": {
@@ -160,7 +161,8 @@ export const kernelSchema = {
         "creator",
         "createdAt",
         "reqRef",
-        "deleted"
+        "deleted",
+        "declassifiedBy"
       ],
       "properties": {
         "hash": {
@@ -238,6 +240,13 @@ export const kernelSchema = {
               }
             }
           ]
+        },
+        "declassifiedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Declassification rule that produced this artifact (FR-SEC-04); only such artifacts may be labelled below their inputs."
         }
       }
     },
@@ -648,6 +657,19 @@ export const kernelSchema = {
               "minimum": 0,
               "default": 2000,
               "description": "Time a cancelled plugin gets to exit before it is killed."
+            }
+          }
+        },
+        "llm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LlmProviderConfig"
+              },
+              "default": []
             }
           }
         }
@@ -3244,6 +3266,1248 @@ export const kernelSchema = {
         "check",
         "subjects",
         "reason"
+      ]
+    },
+    "IncidentRecord": {
+      "title": "IncidentRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "e.g. permission_denied, scope_violation, egress_blocked, standard_lowered, loop_detected, budget_exceeded, run_failed."
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/Message"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "refs": {
+          "title": "IncidentRefs",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Hash"
+              }
+            },
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "openedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "closed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "title": "IncidentClosure",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "by": {
+                  "$ref": "#/$defs/Actor"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "cause": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "action": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "by",
+                "at",
+                "cause",
+                "action"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "summary",
+        "project",
+        "actor",
+        "refs",
+        "openedAt",
+        "closed"
+      ],
+      "description": "An anomaly that must be visible to humans (requirements §3.10)."
+    },
+    "IncidentOpenedPayload": {
+      "title": "IncidentOpenedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "incident": {
+          "$ref": "#/$defs/IncidentRecord"
+        }
+      },
+      "required": [
+        "incident"
+      ]
+    },
+    "IncidentClosedPayload": {
+      "title": "IncidentClosedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "incident": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "incident",
+        "cause",
+        "action"
+      ]
+    },
+    "IncidentsListParams": {
+      "title": "IncidentsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "open": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    },
+    "IncidentsListResult": {
+      "title": "IncidentsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "incidents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IncidentRecord"
+          }
+        }
+      },
+      "required": [
+        "incidents"
+      ]
+    },
+    "IncidentsCloseParams": {
+      "title": "IncidentsCloseParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "incident": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "incident",
+        "cause",
+        "action"
+      ]
+    },
+    "EgressSegment": {
+      "title": "EgressSegment",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "source": {
+          "type": "string",
+          "description": "Where the segment came from, e.g. an artifact hash or `system-prompt`."
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "label",
+        "source",
+        "hash"
+      ]
+    },
+    "EgressDestination": {
+      "title": "EgressDestination",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "llm",
+            "mcp",
+            "network"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "enum": [
+            "local",
+            "cloud"
+          ]
+        },
+        "maxLabel": {
+          "$ref": "#/$defs/Label"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "maxLabel"
+      ]
+    },
+    "EgressDecidedPayload": {
+      "title": "EgressDecidedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destination": {
+          "$ref": "#/$defs/EgressDestination"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EgressSegment"
+          }
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allowed",
+            "blocked"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "destination",
+        "segments",
+        "decision",
+        "reasons",
+        "bytes"
+      ],
+      "description": "Audit record of one outbound request (FR-SEC-07). Contents are never stored, only their hashes and labels."
+    },
+    "DeclassRule": {
+      "title": "DeclassRule",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "sourceType": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(/[^/]+)+$"
+          },
+          "minItems": 1,
+          "description": "JSON pointers of the structured fields that may be extracted."
+        },
+        "targetLabel": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal"
+          ]
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sourceType",
+        "fields",
+        "targetLabel"
+      ],
+      "description": "A declassification rule (FR-SEC-04). Only a human can create one."
+    },
+    "DeclassRuleSetPayload": {
+      "title": "DeclassRuleSetPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "$ref": "#/$defs/DeclassRule"
+        }
+      },
+      "required": [
+        "rule"
+      ]
+    },
+    "DeclassRulesListResult": {
+      "title": "DeclassRulesListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeclassRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
+    },
+    "DeclassifyParams": {
+      "title": "DeclassifyParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "type": "string"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "rule",
+        "hash"
+      ]
+    },
+    "CheckOverride": {
+      "title": "CheckOverride",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          },
+          "minItems": 1
+        }
+      },
+      "description": "Project-specific replacement of a check definition's standards. A hard constraint (requirements §3.2)."
+    },
+    "ConstraintProposal": {
+      "title": "ConstraintProposal",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "override": {
+          "$ref": "#/$defs/CheckOverride"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "by": {
+          "$ref": "#/$defs/Actor"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project",
+        "check",
+        "override",
+        "reason",
+        "by",
+        "at",
+        "status"
+      ]
+    },
+    "ConstraintProposedPayload": {
+      "title": "ConstraintProposedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/ConstraintProposal"
+        }
+      },
+      "required": [
+        "proposal"
+      ]
+    },
+    "ConstraintDecidedPayload": {
+      "title": "ConstraintDecidedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal",
+        "decision",
+        "comment"
+      ]
+    },
+    "ChecksOverrideParams": {
+      "title": "ChecksOverrideParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "override": {
+          "$ref": "#/$defs/CheckOverride"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "project",
+        "check",
+        "override",
+        "reason"
+      ]
+    },
+    "ConstraintsDecideParams": {
+      "title": "ConstraintsDecideParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "comment": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "proposal",
+        "decision"
+      ]
+    },
+    "ConstraintsListParams": {
+      "title": "ConstraintsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        }
+      }
+    },
+    "ConstraintsListResult": {
+      "title": "ConstraintsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConstraintProposal"
+          }
+        }
+      },
+      "required": [
+        "proposals"
+      ]
+    },
+    "LlmProviderConfig": {
+      "title": "LlmProviderConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "openai-compatible",
+            "anthropic",
+            "scripted"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "enum": [
+            "local",
+            "cloud"
+          ],
+          "description": "Cloud providers may receive at most `internal` data (FR-SEC-03); local ones may receive NDA data."
+        },
+        "baseUrl": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKeySecret": {
+          "type": "string",
+          "description": "Name of the secret holding the API key."
+        },
+        "script": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "description": "Scripted provider only: the replies to give, in order."
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4096
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location"
+      ]
+    },
+    "TaskSpec": {
+      "title": "TaskSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string",
+          "pattern": "^((FR|NFR|AC)-[A-Z0-9-]+[a-z]?|goal:[a-z0-9-]+)$",
+          "description": "Requirement id or charter goal the task serves (FR-AGT-04)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "executor",
+            "verifier",
+            "reviewer"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "writeScope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns of change-set paths the task may write (FR-AGT-05)."
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "`plugin/handler` pairs the task may start."
+        },
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000
+        },
+        "loopThreshold": {
+          "type": "integer",
+          "minimum": 2,
+          "default": 3
+        }
+      },
+      "required": [
+        "project",
+        "goal",
+        "title",
+        "role",
+        "provider"
+      ]
+    },
+    "TaskRecord": {
+      "title": "TaskRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "agent": {
+          "type": "string",
+          "description": "Agent instance id; changes when the task is handed over."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "paused",
+            "finished",
+            "failed"
+          ]
+        },
+        "steps": {
+          "type": "integer"
+        },
+        "tokens": {
+          "type": "integer"
+        },
+        "result": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changesets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "spec",
+        "agent",
+        "state",
+        "steps",
+        "tokens",
+        "result",
+        "error",
+        "changesets",
+        "createdAt"
+      ]
+    },
+    "ToolCall": {
+      "title": "ToolCall",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "arguments"
+      ]
+    },
+    "AgentStepPayload": {
+      "title": "AgentStepPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolCall"
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "title": "ToolResult",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "ok",
+              "content"
+            ]
+          }
+        },
+        "tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task",
+        "agent",
+        "step",
+        "provider",
+        "model",
+        "text",
+        "toolCalls",
+        "results",
+        "tokens"
+      ]
+    },
+    "TaskCreatedPayload": {
+      "title": "TaskCreatedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskRecord"
+        }
+      },
+      "required": [
+        "task"
+      ]
+    },
+    "TaskStatePayload": {
+      "title": "TaskStatePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "paused",
+            "finished",
+            "failed"
+          ]
+        },
+        "agent": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "result": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "task",
+        "state",
+        "agent",
+        "provider",
+        "result",
+        "error"
+      ]
+    },
+    "ChangesetRecord": {
+      "title": "ChangesetRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "title": "ChangesetFile",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "hash": {
+                "$ref": "#/$defs/Hash"
+              }
+            },
+            "required": [
+              "path",
+              "hash"
+            ]
+          }
+        },
+        "author": {
+          "type": "string"
+        },
+        "review": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "title": "ChangesetReview",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "approved": {
+                  "type": "boolean"
+                },
+                "comment": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "agent",
+                "approved",
+                "comment"
+              ]
+            }
+          ]
+        },
+        "verification": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "title": "ChangesetVerification",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "verdict": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verdict"
+              ]
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "submitted",
+            "reviewed",
+            "verified",
+            "merged",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "task",
+        "project",
+        "goal",
+        "files",
+        "author",
+        "review",
+        "verification",
+        "state"
+      ],
+      "description": "A change set and its progress through the iteration loop (requirements §6.2)."
+    },
+    "ChangesetEventPayload": {
+      "title": "ChangesetEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changeset": {
+          "$ref": "#/$defs/ChangesetRecord"
+        }
+      },
+      "required": [
+        "changeset"
+      ]
+    },
+    "HandoffPack": {
+      "title": "HandoffPack",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProjectState"
+        },
+        "openIncidents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IncidentRecord"
+          }
+        },
+        "recentSteps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConstraintProposal"
+          }
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "task",
+        "goal",
+        "state",
+        "openIncidents",
+        "recentSteps",
+        "constraints",
+        "next"
+      ]
+    },
+    "TasksCreateParams": {
+      "$ref": "#/$defs/TaskSpec"
+    },
+    "TaskRefParams": {
+      "title": "TaskRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task"
+      ]
+    },
+    "TasksRunParams": {
+      "title": "TasksRunParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Stop after this many steps in this call (the task stays resumable)."
+        }
+      },
+      "required": [
+        "task"
+      ]
+    },
+    "TasksSwitchParams": {
+      "title": "TasksSwitchParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "provider"
+      ]
+    },
+    "TasksSwitchResult": {
+      "title": "TasksSwitchResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "switched": {
+          "type": "boolean"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskRecord"
+        },
+        "handoff": {
+          "$ref": "#/$defs/Hash"
+        },
+        "handoffLabel": {
+          "$ref": "#/$defs/Label"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "switched",
+        "task",
+        "handoff",
+        "handoffLabel",
+        "reasons",
+        "options"
+      ]
+    },
+    "TasksListResult": {
+      "title": "TasksListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskRecord"
+          }
+        }
+      },
+      "required": [
+        "tasks"
+      ]
+    },
+    "ChangesetsListParams": {
+      "title": "ChangesetsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string"
+        }
+      }
+    },
+    "ChangesetsListResult": {
+      "title": "ChangesetsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changesets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChangesetRecord"
+          }
+        }
+      },
+      "required": [
+        "changesets"
+      ]
+    },
+    "RuntimeTokens": {
+      "title": "RuntimeTokens",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "external": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "external"
       ]
     }
   }

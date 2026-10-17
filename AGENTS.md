@@ -67,6 +67,7 @@ Current packages:
 - `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6). The source of truth is the JSON Schema in `packages/kernel-api/schemas/`; `src/generated/` is produced from it by `yarn gen:schemas` and must not be edited by hand.
 - `kernel` — `harnessd`, the kernel daemon: event store (K1), artifact store (K2), configuration and secrets (K10), the kernel API server (IF-1) and the in-kernel plugin host.
 - `kernel` also runs out-of-process plugins: plugin registry (K9), scheduler and process supervision (K4), and the workflow engine with verdicts and approvals (K3, K6, K7).
+- `kernel` also hosts the security layer and agents: incidents, the egress gateway with labels, NDA fingerprints and declassification rules (K8), API policy for owner and external clients (K5), and the agent runtime with LLM providers, tools, change sets and handoff packs (§6).
 - `plugin-sdk` — TypeScript SDK for out-of-process plugins (IF-2).
 - `client` — kernel API client for Node.js and browsers.
 - `cli` — the `llmchip` command-line client.
@@ -122,6 +123,14 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 4. Run `yarn install`, then `yarn verify`. `yarn check:workspace` reports anything missed in steps 1–3.
 
 A package that imports a vendored package follows the same rules: declare it as `"workspace:*"` and add a reference to `../../vendor/<dir>`.
+
+### LLM providers and agents
+
+- Providers are configured in `<home>/config/config.json` under `llm.providers` (schema `LlmProviderConfig`): `openai-compatible` (DeepSeek, GPT, local OpenAI-compatible servers), `anthropic`, or `scripted` (deterministic, for tests and offline demos). Set `location` to `local` only for models running on this machine; only local providers may receive NDA data.
+- Store API keys with `llmchip secret set <name>` and reference them by `apiKeySecret`. Never put keys in configuration files or code.
+- Node's `fetch` ignores proxy environment variables; on a machine behind a proxy, start harnessd with `NODE_USE_ENV_PROXY=1`.
+- Tests use scripted providers. Real-provider behavior is covered by adapter tests against local mock servers (`tests/providers.spec.ts`).
+- `llmchip mcp` serves MCP on stdio for external agents (Claude Code, Codex, ...). It uses the kernel's external token: read-only plus starting runs and tasks; NDA content is refused.
 
 ### Adding a plugin
 

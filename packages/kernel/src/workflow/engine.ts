@@ -5,6 +5,8 @@ import {
   type ApprovalStatus,
   type ApprovalsDecideParams,
   type CheckDefinition,
+  type CheckOverride,
+  type ConstraintProposal,
   type Criterion,
   type FlowGate,
   type FlowPack,
@@ -23,6 +25,7 @@ import type { ArtifactStore } from '../artifacts/store.ts'
 import type { EventStore } from '../events/store.ts'
 import type { PluginRegistry } from '../plugins/registry.ts'
 import type { Scheduler } from '../runs/scheduler.ts'
+import type { Incidents } from '../security/incidents.ts'
 import { canonicalJson, sha256 } from '../util/canonical.ts'
 import { KernelError } from '../util/errors.ts'
 import { assertValid } from '../util/schema.ts'
@@ -47,10 +50,12 @@ export class Workflow {
   private readonly artifacts: ArtifactStore
   private readonly registry: PluginRegistry
   private readonly scheduler: Scheduler
+  private readonly incidents: Incidents
   private flows = new Map<string, { pack: FlowPack; hash: string }>()
   private checkDefs = new Map<string, CheckDefinition>()
 
-  constructor(options: { events: EventStore; artifacts: ArtifactStore; registry: PluginRegistry; scheduler: Scheduler }) {
+  constructor(options: { events: EventStore; artifacts: ArtifactStore; registry: PluginRegistry; scheduler: Scheduler; incidents: Incidents }) {
+    this.incidents = options.incidents
     this.events = options.events
     this.artifacts = options.artifacts
     this.registry = options.registry
@@ -95,8 +100,9 @@ export class Workflow {
    * condition or a missing metric all give `indeterminate`, never `pass`.
    */
   evaluate(checkId: string, runId: string, actor: Actor, project?: string): VerdictRecord {
-    const check = this.requireCheck(checkId)
     const run = this.scheduler.get(runId)
+    const projectId = project || run.project || ''
+    const check = this.effectiveCheck(checkId, projectId)
     if (run.state !== 'finished') throw new KernelError('RUN_NOT_FINISHED', `run ${runId} has not finished`, { run: runId })
     if (run.plugin !== check.plugin || run.handler !== check.handler) {
       throw new KernelError('CHECK_RUN_MISMATCH', `check ${checkId} judges ${check.plugin}/${check.handler}, run ${runId} is ${run.plugin}/${run.handler}`)
@@ -126,8 +132,92 @@ export class Workflow {
       waiver,
       createdAt: new Date().toISOString(),
     }
-    this.events.append({ kind: 'verdict.recorded', payload: { verdict: record }, actor, project: project ?? run.project, label: run.label })
+    const previous = this.verdicts({ check: check.id, limit: 1000 }).find((v) => canonicalJson(v.subjects) === canonicalJson(subjects))
+    this.events.append({ kind: 'verdict.recorded', payload: { verdict: record }, actor, project: projectId || null, label: run.label })
+    // A check that newly passes only because its standard changed must be reviewed by a human (AC-M1-13).
+    if (verdict === 'pass' && previous && previous.verdict !== 'pass' && previous.checkVersion !== record.checkVersion) {
+      this.incidents.open({
+        kind: 'standard_lowered',
+        severity: 'critical',
+        summary: { code: 'CHECK_PASSES_AFTER_STANDARD_CHANGE', params: { check: check.id, before: previous.checkVersion, after: record.checkVersion } },
+        actor,
+        project: projectId || null,
+        refs: { artifacts: subjects, runs: [run.id] },
+      })
+    }
     return record
+  }
+
+  // ---- hard constraints: project check overrides (requirements §3.2) ------
+
+  /**
+   * Requests a project-specific change of a check's standards. Check standards
+   * are hard constraints: a human's change applies at once; anyone else's is
+   * recorded as a pending proposal and as an incident, and applies only after
+   * a human approves it.
+   */
+  overrideCheck(projectId: string, checkId: string, override: CheckOverride, reason: string, actor: Actor): ConstraintProposal {
+    this.requireProject(projectId)
+    this.requireCheck(checkId)
+    const proposal: ConstraintProposal = {
+      id: ulid(),
+      project: projectId,
+      check: checkId,
+      override,
+      reason,
+      by: actor,
+      at: new Date().toISOString(),
+      status: 'pending',
+    }
+    this.events.transaction(() => {
+      this.events.append({ kind: 'constraint.proposed', payload: { proposal }, actor, project: projectId })
+      if (actor.kind === 'human') {
+        this.events.append({ kind: 'constraint.decided', payload: { proposal: proposal.id, decision: 'approved', comment: 'set by a human' }, actor, project: projectId })
+      } else {
+        this.incidents.open({
+          kind: 'hard_constraint_change',
+          severity: 'warning',
+          summary: { code: 'HARD_CONSTRAINT_CHANGE_REQUESTED', params: { check: checkId, by: `${actor.kind}:${actor.id}` } },
+          actor,
+          project: projectId,
+        })
+      }
+    })
+    return this.proposal(proposal.id)
+  }
+
+  decideConstraint(proposalId: string, decision: 'approved' | 'rejected', comment: string, actor: Actor): ConstraintProposal {
+    if (actor.kind !== 'human') throw new KernelError('APPROVAL_REQUIRES_HUMAN', 'only a human can change a hard constraint')
+    const proposal = this.proposal(proposalId)
+    if (proposal.status !== 'pending') throw new KernelError('PROPOSAL_DECIDED', `proposal ${proposalId} is already ${proposal.status}`)
+    this.events.append({ kind: 'constraint.decided', payload: { proposal: proposalId, decision, comment }, actor, project: proposal.project })
+    return this.proposal(proposalId)
+  }
+
+  constraints(projectId?: string): ConstraintProposal[] {
+    const rows = (
+      projectId
+        ? this.events.db.prepare('SELECT record FROM constraint_proposals WHERE project = ? ORDER BY seq').all(projectId)
+        : this.events.db.prepare('SELECT record FROM constraint_proposals ORDER BY seq').all()
+    ) as { record: string }[]
+    return rows.map((r) => JSON.parse(r.record))
+  }
+
+  /** A check with the project's latest approved override applied; its version identifies the standard. */
+  effectiveCheck(checkId: string, projectId: string): CheckDefinition {
+    const check = this.requireCheck(checkId)
+    const row = this.events.db
+      .prepare("SELECT record FROM constraint_proposals WHERE project = ? AND check_id = ? AND status = 'approved' ORDER BY seq DESC LIMIT 1")
+      .get(projectId, checkId) as { record: string } | undefined
+    if (!row) return check
+    const { override } = JSON.parse(row.record) as ConstraintProposal
+    return { ...check, ...override, version: `${check.version}+${sha256(canonicalJson(override)).slice(0, 12)}` }
+  }
+
+  private proposal(id: string): ConstraintProposal {
+    const row = this.events.db.prepare('SELECT record FROM constraint_proposals WHERE id = ?').get(id) as { record: string } | undefined
+    if (!row) throw new KernelError('PROPOSAL_NOT_FOUND', `constraint proposal ${id} does not exist`, { proposal: id })
+    return JSON.parse(row.record)
   }
 
   verdicts(options: { check?: string; subject?: string; limit?: number } = {}): VerdictRecord[] {

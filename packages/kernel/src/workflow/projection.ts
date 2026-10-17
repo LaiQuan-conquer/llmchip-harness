@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   ApprovalRecord,
+  ConstraintProposal,
   ProjectRecord,
   VerdictRecord,
   WaiverRecord,
@@ -14,7 +15,7 @@ import type { Projection } from '../events/store.ts'
  */
 export const workflowProjection: Projection = {
   name: 'workflow',
-  version: 1,
+  version: 2,
   setup(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
@@ -27,12 +28,13 @@ export const workflowProjection: Projection = {
       CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, project TEXT NOT NULL, branch TEXT NOT NULL, gate TEXT NOT NULL, seq INTEGER NOT NULL, invalidated INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS approvals_gate ON approvals (project, branch, gate, seq);
       CREATE TABLE IF NOT EXISTS waivers (id TEXT PRIMARY KEY, check_id TEXT NOT NULL, record TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS constraint_proposals (id TEXT PRIMARY KEY, project TEXT NOT NULL, check_id TEXT NOT NULL, status TEXT NOT NULL, seq INTEGER NOT NULL, record TEXT NOT NULL);
     `)
   },
   reset(db) {
     db.exec(`
       DROP TABLE IF EXISTS projects; DROP TABLE IF EXISTS branches; DROP TABLE IF EXISTS slot_history;
-      DROP TABLE IF EXISTS stages; DROP TABLE IF EXISTS verdicts; DROP TABLE IF EXISTS approvals; DROP TABLE IF EXISTS waivers;
+      DROP TABLE IF EXISTS stages; DROP TABLE IF EXISTS verdicts; DROP TABLE IF EXISTS approvals; DROP TABLE IF EXISTS waivers; DROP TABLE IF EXISTS constraint_proposals;
     `)
   },
   apply(event, db) {
@@ -88,6 +90,25 @@ export const workflowProjection: Projection = {
       case 'approval.invalidated':
         db.prepare('UPDATE approvals SET invalidated = 1 WHERE id = ?').run(p.approval)
         break
+      case 'constraint.proposed': {
+        const proposal = p.proposal as ConstraintProposal
+        db.prepare('INSERT INTO constraint_proposals (id, project, check_id, status, seq, record) VALUES (?, ?, ?, ?, ?, ?)').run(
+          proposal.id,
+          proposal.project,
+          proposal.check,
+          proposal.status,
+          event.seq,
+          JSON.stringify(proposal),
+        )
+        break
+      }
+      case 'constraint.decided': {
+        const row = db.prepare('SELECT record FROM constraint_proposals WHERE id = ?').get(p.proposal) as { record: string } | undefined
+        if (!row) break
+        const proposal = { ...JSON.parse(row.record), status: p.decision } as ConstraintProposal
+        db.prepare('UPDATE constraint_proposals SET status = ?, seq = ?, record = ? WHERE id = ?').run(p.decision, event.seq, JSON.stringify(proposal), proposal.id)
+        break
+      }
       case 'waiver.recorded': {
         const waiver = p.waiver as WaiverRecord
         db.prepare('INSERT INTO waivers (id, check_id, record) VALUES (?, ?, ?)').run(waiver.id, waiver.check, JSON.stringify(waiver))

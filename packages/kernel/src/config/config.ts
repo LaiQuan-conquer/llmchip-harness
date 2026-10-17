@@ -33,6 +33,7 @@ export function loadConfig(configDir: string, overrides: WorkspaceConfig = {}): 
     events: { ...file.events, ...overrides.events },
     plugins: { ...file.plugins, ...overrides.plugins },
     scheduler: { ...file.scheduler, ...overrides.scheduler },
+    llm: { ...file.llm, ...overrides.llm },
   }
   // Validation with useDefaults fills every defaulted field.
   assertValid<WorkspaceConfig>('WorkspaceConfig', merged, 'CONFIG_INVALID')

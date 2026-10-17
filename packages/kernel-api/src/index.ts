@@ -12,7 +12,7 @@ export type * from './generated/kernel.types.ts'
 export { kernelSchema } from './generated/kernel.schema.ts'
 
 /** Version of the kernel API contract. Follows semver. */
-export const KERNEL_API_VERSION = '0.2.0'
+export const KERNEL_API_VERSION = '0.3.0'
 
 /** `$id` of the kernel schema; definitions are addressed as `${KERNEL_SCHEMA_ID}#/$defs/<Name>`. */
 export const KERNEL_SCHEMA_ID = 'urn:llmchip:kernel'
@@ -51,6 +51,16 @@ export interface KernelEventPayloads {
   'approval.condition_closed': T.ConditionClosedPayload
   'approval.invalidated': T.ApprovalInvalidatedPayload
   'waiver.recorded': T.WaiverRecordedPayload
+  'incident.opened': T.IncidentOpenedPayload
+  'incident.closed': T.IncidentClosedPayload
+  'egress.decided': T.EgressDecidedPayload
+  'declass.rule_set': T.DeclassRuleSetPayload
+  'constraint.proposed': T.ConstraintProposedPayload
+  'constraint.decided': T.ConstraintDecidedPayload
+  'task.created': T.TaskCreatedPayload
+  'task.state': T.TaskStatePayload
+  'agent.step': T.AgentStepPayload
+  'changeset.updated': T.ChangesetEventPayload
 }
 
 /** Schema definition name of each kernel event kind's payload. */
@@ -77,6 +87,16 @@ export const KERNEL_EVENT_PAYLOAD_DEFS: { readonly [K in keyof KernelEventPayloa
   'approval.condition_closed': 'ConditionClosedPayload',
   'approval.invalidated': 'ApprovalInvalidatedPayload',
   'waiver.recorded': 'WaiverRecordedPayload',
+  'incident.opened': 'IncidentOpenedPayload',
+  'incident.closed': 'IncidentClosedPayload',
+  'egress.decided': 'EgressDecidedPayload',
+  'declass.rule_set': 'DeclassRuleSetPayload',
+  'constraint.proposed': 'ConstraintProposedPayload',
+  'constraint.decided': 'ConstraintDecidedPayload',
+  'task.created': 'TaskCreatedPayload',
+  'task.state': 'TaskStatePayload',
+  'agent.step': 'AgentStepPayload',
+  'changeset.updated': 'ChangesetEventPayload',
 }
 
 /** JSON-RPC methods of the kernel API (IF-1): params and result types. */
@@ -119,6 +139,22 @@ export interface KernelMethods {
   'approvals.closeCondition': { params: T.ApprovalsCloseConditionParams; result: T.ApprovalRecord }
   'approvals.list': { params: T.ProjectRefParams; result: T.ApprovalsListResult }
   'waivers.create': { params: T.WaiversCreateParams; result: T.WaiverRecord }
+  'incidents.list': { params: T.IncidentsListParams; result: T.IncidentsListResult }
+  'incidents.close': { params: T.IncidentsCloseParams; result: T.IncidentRecord }
+  'declass.setRule': { params: T.DeclassRule; result: T.OkResult }
+  'declass.listRules': { params: T.EmptyParams; result: T.DeclassRulesListResult }
+  'declass.apply': { params: T.DeclassifyParams; result: T.ArtifactMeta }
+  'checks.override': { params: T.ChecksOverrideParams; result: T.ConstraintProposal }
+  'constraints.decide': { params: T.ConstraintsDecideParams; result: T.ConstraintProposal }
+  'constraints.list': { params: T.ConstraintsListParams; result: T.ConstraintsListResult }
+  'tasks.create': { params: T.TaskSpec; result: T.TaskRecord }
+  'tasks.get': { params: T.TaskRefParams; result: T.TaskRecord }
+  'tasks.list': { params: T.EmptyParams; result: T.TasksListResult }
+  'tasks.run': { params: T.TasksRunParams; result: T.TaskRecord }
+  'tasks.pause': { params: T.TaskRefParams; result: T.TaskRecord }
+  'tasks.switch': { params: T.TasksSwitchParams; result: T.TasksSwitchResult }
+  'tasks.handoff': { params: T.TaskRefParams; result: T.HandoffPack }
+  'changesets.list': { params: T.ChangesetsListParams; result: T.ChangesetsListResult }
 }
 
 export type KernelMethod = keyof KernelMethods
@@ -163,6 +199,22 @@ export const KERNEL_METHOD_DEFS: { readonly [M in KernelMethod]: { params: strin
   'approvals.closeCondition': { params: 'ApprovalsCloseConditionParams', result: 'ApprovalRecord' },
   'approvals.list': { params: 'ProjectRefParams', result: 'ApprovalsListResult' },
   'waivers.create': { params: 'WaiversCreateParams', result: 'WaiverRecord' },
+  'incidents.list': { params: 'IncidentsListParams', result: 'IncidentsListResult' },
+  'incidents.close': { params: 'IncidentsCloseParams', result: 'IncidentRecord' },
+  'declass.setRule': { params: 'DeclassRule', result: 'OkResult' },
+  'declass.listRules': { params: 'EmptyParams', result: 'DeclassRulesListResult' },
+  'declass.apply': { params: 'DeclassifyParams', result: 'ArtifactMeta' },
+  'checks.override': { params: 'ChecksOverrideParams', result: 'ConstraintProposal' },
+  'constraints.decide': { params: 'ConstraintsDecideParams', result: 'ConstraintProposal' },
+  'constraints.list': { params: 'ConstraintsListParams', result: 'ConstraintsListResult' },
+  'tasks.create': { params: 'TaskSpec', result: 'TaskRecord' },
+  'tasks.get': { params: 'TaskRefParams', result: 'TaskRecord' },
+  'tasks.list': { params: 'EmptyParams', result: 'TasksListResult' },
+  'tasks.run': { params: 'TasksRunParams', result: 'TaskRecord' },
+  'tasks.pause': { params: 'TaskRefParams', result: 'TaskRecord' },
+  'tasks.switch': { params: 'TasksSwitchParams', result: 'TasksSwitchResult' },
+  'tasks.handoff': { params: 'TaskRefParams', result: 'HandoffPack' },
+  'changesets.list': { params: 'ChangesetsListParams', result: 'ChangesetsListResult' },
 }
 
 /** Version of the plugin protocol (IF-2). */

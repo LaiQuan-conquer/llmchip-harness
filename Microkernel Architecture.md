@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.4 (draft) |
+| Document version | v0.5 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -340,6 +340,8 @@ The six-step loop of §6.2 of the requirements document is implemented architect
 
 Only when all six steps are complete does the kernel merge the changeset into the project mainline. This is checked by the kernel, not left to agent self-discipline.
 
+Implementation in M1c: a changeset advances in the order `submitted → reviewed → verified → merged`, and the kernel checks every step (the reviewer must have the reviewer role and must not be the author; verification must cite a passing verdict that judged files of the changeset). Merging currently records the state only; writing into the project git working directory arrives with the generators in M2. Tool results are JSON, so models and scripts can refer to the ids in them.
+
 ### 6.3 Project Working Directory
 
 - Each project has a git working directory that stores agent-written generator code, constraint files, `CHARTER.md`, and stage playbooks (FR-TRC-09).
@@ -358,7 +360,7 @@ Incident rules run as subscribers on the event stream. For example, when "the sa
 
 ### 6.6 External Agents
 
-- **External clients**: the MCP service plugin maps MCP requests to kernel API calls, using the external client capability profile, and responses are checked by K8. The UI and connection instructions clearly state the control boundary (FR-AGT-01).
+- **External clients**: the MCP service plugin maps MCP requests to kernel API calls, using the external client capability profile, and responses are checked by K8. The UI and connection instructions clearly state the control boundary (FR-AGT-01). In M1c the MCP service is the `llmchip mcp` command (stdio transport). It connects to the kernel with the **external token** from the kernel's runtime file; a session holding that token has the identity `external` and may only call read-only methods and start runs and tasks, and downloaded content and event payloads pass the egress gateway (destination maximum label `internal`).
 - **External coding agents launched under management (P1)**: the workbench launches Claude Code, Codex CLI, etc. in a container that mounts only the changeset branch of the project working directory, with network only via the egress gateway proxy. Their output must likewise go through the loop of §6.2, so they become managed agents (FR-AGT-03).
 
 ---
@@ -617,7 +619,7 @@ llmchip-harness/
 | ADR-005 | Use a dedicated WSL distro with built-in Podman as the container runtime; users do not need to install Docker | Proposed |
 | ADR-006 | The event store uses SQLite (WAL, synchronous=FULL) through Node.js's built-in `node:sqlite`, with no native add-on; artifacts use a content-addressed store on the file system | Accepted (M1a) |
 | ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0, one message per line, over stdio | Accepted (M1b) |
-| ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Proposed |
+| ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Accepted (M1c) |
 | ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Accepted (M1b) |
 
 The full record of each ADR (context, alternatives, rationale, consequences) will be placed under `docs/adr/` after development starts.

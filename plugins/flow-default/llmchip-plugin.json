@@ -4,6 +4,6 @@
   "title": "Default flow: S0-S9 with gates G0-G4 (requirements §4)",
   "kinds": ["flow-pack"],
   "runtime": "data",
-  "kernelApi": "^0.2",
+  "kernelApi": "^0.3",
   "data": [{ "id": "flow", "type": "flow.pack", "path": "flow.json" }]
 }

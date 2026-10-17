@@ -1,0 +1,8 @@
+# SYNTHETIC FAKE PDK FOR INTERCEPTION TESTS. Not real foundry data.
+# Every identifier below is invented so that it is recognizable if it leaks.
+LAYER fpdkMET1_drawing 34 0
+LAYER fpdkMET2_drawing 36 0
+RULE FPDK_M1_W_0p23 width fpdkMET1_drawing >= 0.23
+RULE FPDK_M1_S_0p28 spacing fpdkMET1_drawing >= 0.28
+CELL fpdk_sc7t_nand2x1 area 10.98
+CELL fpdk_sc7t_dffrnq1 area 52.36

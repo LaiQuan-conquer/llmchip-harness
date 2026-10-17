@@ -13,7 +13,7 @@
       "${pluginDir}/plugin.ts"
     ]
   },
-  "kernelApi": "^0.2",
+  "kernelApi": "^0.3",
   "capabilities": [
     {
       "name": "sdf",
@@ -27,7 +27,8 @@
         {
           "name": "design",
           "types": [
-            "test.design"
+            "test.design",
+            "changeset.file"
           ],
           "required": true
         }

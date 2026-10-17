@@ -9,7 +9,11 @@ import { ensureHome, homeLayout, resolveHome, type HomeLayout } from './config/h
 import { Redactor, SecretStore } from './config/secrets.ts'
 import { EventStore } from './events/store.ts'
 import { PluginHost, type InKernelPlugin } from './plugin-host.ts'
+import { AgentRuntime } from './agents/runtime.ts'
 import { PluginRegistry } from './plugins/registry.ts'
+import { EgressGateway } from './security/egress.ts'
+import { Incidents } from './security/incidents.ts'
+import { Policy } from './security/policy.ts'
 import { Scheduler } from './runs/scheduler.ts'
 import { Workflow } from './workflow/engine.ts'
 import { KernelServer, type MethodHandlers } from './server.ts'
@@ -31,7 +35,10 @@ export interface KernelOptions {
 export interface RuntimeInfo {
   pid: number
   url: string
+  /** Owner token: full access. */
   token: string
+  /** Token for external clients such as MCP bridges: read-only plus starting work (requirements §6.1). */
+  externalToken: string
   version: string
   startedAt: string
 }
@@ -71,6 +78,10 @@ export class Kernel {
   readonly registry: PluginRegistry
   readonly scheduler: Scheduler
   readonly workflow: Workflow
+  readonly incidents: Incidents
+  readonly gateway: EgressGateway
+  readonly policy: Policy
+  readonly agents: AgentRuntime
   readonly startedAt = new Date().toISOString()
   readonly version = kernelVersion()
   /** Resolves once the kernel has fully stopped. */
@@ -120,7 +131,27 @@ export class Kernel {
         logger: this.logger,
         redact: (text) => redactor.text(text),
       })
-      this.workflow = new Workflow({ events: this.events, artifacts: this.artifacts, registry: this.registry, scheduler: this.scheduler })
+      this.incidents = new Incidents(this.events)
+      this.gateway = new EgressGateway(this.events, this.artifacts, this.incidents)
+      this.policy = new Policy(this.incidents, this.gateway)
+      this.workflow = new Workflow({
+        events: this.events,
+        artifacts: this.artifacts,
+        registry: this.registry,
+        scheduler: this.scheduler,
+        incidents: this.incidents,
+      })
+      this.agents = new AgentRuntime({
+        events: this.events,
+        artifacts: this.artifacts,
+        scheduler: this.scheduler,
+        workflow: this.workflow,
+        gateway: this.gateway,
+        incidents: this.incidents,
+        logger: this.logger,
+        providers: this.config.llm.providers,
+        secret: (name) => this.secrets.get(name),
+      })
       this.plugins = new PluginHost(
         { events: this.events, artifacts: this.artifacts, logger: this.logger },
         options.pluginTimeoutMs === undefined ? {} : { loadTimeoutMs: options.pluginTimeoutMs, unloadTimeoutMs: options.pluginTimeoutMs },
@@ -145,15 +176,18 @@ export class Kernel {
       kernel.scheduler.recover()
       for (const plugin of options.plugins ?? []) await kernel.plugins.load(plugin)
       const token = randomBytes(32).toString('base64url')
+      const externalToken = randomBytes(32).toString('base64url')
       kernel.server = new KernelServer({
         token,
+        externalToken,
+        policy: kernel.policy,
         handlers: kernel.handlers(),
         events: kernel.events,
         artifacts: kernel.artifacts,
         logger: kernel.logger,
       })
       kernel.url = await kernel.server.listen(kernel.config.server.host, kernel.config.server.port)
-      const runtime: RuntimeInfo = { pid: process.pid, url: kernel.url, token, version: kernel.version, startedAt: kernel.startedAt }
+      const runtime: RuntimeInfo = { pid: process.pid, url: kernel.url, token, externalToken, version: kernel.version, startedAt: kernel.startedAt }
       writeFileSync(join(kernel.layout.run, 'harnessd.json'), JSON.stringify(runtime, null, 2), { mode: 0o600 })
       kernel.scheduler.pump()
       kernel.logger.info('harnessd started', { url: kernel.url, home: kernel.layout.root })
@@ -257,6 +291,25 @@ export class Kernel {
       'approvals.closeCondition': ({ approval, condition, verdict }, session) => this.workflow.closeCondition(approval, condition, verdict, session.actor),
       'approvals.list': ({ project, branch }) => ({ approvals: this.workflow.approvals(project, branch) }),
       'waivers.create': (params, session) => this.workflow.createWaiver(params, session.actor),
+      'incidents.list': (params) => ({ incidents: this.incidents.list(params) }),
+      'incidents.close': ({ incident, cause, action }, session) => this.incidents.close(incident, cause, action, session.actor),
+      'declass.setRule': (rule, session) => {
+        this.gateway.setRule(rule, session.actor)
+        return { ok: true }
+      },
+      'declass.listRules': () => ({ rules: this.gateway.rules() }),
+      'declass.apply': ({ rule, hash }, session) => this.gateway.declassify(rule, hash, session.actor),
+      'checks.override': ({ project, check, override, reason }, session) => this.workflow.overrideCheck(project, check, override, reason, session.actor),
+      'constraints.decide': ({ proposal, decision, comment }, session) => this.workflow.decideConstraint(proposal, decision, comment ?? '', session.actor),
+      'constraints.list': ({ project }) => ({ proposals: this.workflow.constraints(project) }),
+      'tasks.create': (spec, session) => this.agents.create(spec, session.actor),
+      'tasks.get': ({ task }) => this.agents.get(task),
+      'tasks.list': () => ({ tasks: this.agents.list() }),
+      'tasks.run': ({ task, maxSteps }) => this.agents.run(task, maxSteps, () => this.scheduler.paused),
+      'tasks.pause': ({ task }) => this.agents.pause(task, 'paused by the owner'),
+      'tasks.switch': ({ task, provider }, session) => this.agents.switchProvider(task, provider, session.actor),
+      'tasks.handoff': ({ task }) => this.agents.handoff(task).pack,
+      'changesets.list': ({ task }) => ({ changesets: this.agents.changesets(task) }),
     }
   }
 }

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { readFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
@@ -10,6 +11,7 @@ import {
   RPC_WS_PATH,
   TOKEN_QUERY_PARAM,
   type Actor,
+  type ArtifactMeta,
   type ArtifactUploadQuery,
   type EventRecord,
   type KernelMethod,
@@ -38,11 +40,17 @@ type ServerMethod = 'events.subscribe' | 'events.unsubscribe'
 
 export type MethodHandlers = { [M in Exclude<KernelMethod, ServerMethod>]: MethodHandler<M> }
 
-/**
- * Clients of the local kernel act as the workbench owner. Distinct client
- * identities and capabilities arrive with the policy engine (K5, milestone M1c).
- */
+/** Clients holding the owner token act as the workbench owner. */
 const LOCAL_OWNER: Actor = { kind: 'human', id: 'local-owner' }
+
+/** Hooks of the policy engine (K5) and egress gateway (K8) into the API. */
+export interface ServerPolicy {
+  authorize(actor: Actor, method: KernelMethod): void
+  filterEvent(actor: Actor, event: EventRecord): EventRecord
+  checkDownload(actor: Actor, meta: ArtifactMeta, content: () => string): void
+  /** Called when an HTTP request is refused for lack of permission. */
+  deny(actor: Actor, action: string): never
+}
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR = -32700
@@ -69,6 +77,8 @@ export class KernelServer {
   private readonly http: Server
   private readonly wss: WebSocketServer
   private readonly token: Buffer
+  private readonly externalToken: Buffer
+  private readonly policy: ServerPolicy
   private readonly handlers: MethodHandlers
   private readonly events: EventStore
   private readonly artifacts: ArtifactStore
@@ -77,12 +87,17 @@ export class KernelServer {
 
   constructor(options: {
     token: string
+    /** Token of external clients (MCP bridges); see Policy. */
+    externalToken: string
+    policy: ServerPolicy
     handlers: MethodHandlers
     events: EventStore
     artifacts: ArtifactStore
     logger: Logger
   }) {
     this.token = Buffer.from(options.token)
+    this.externalToken = Buffer.from(options.externalToken)
+    this.policy = options.policy
     this.handlers = options.handlers
     this.events = options.events
     this.artifacts = options.artifacts
@@ -91,11 +106,12 @@ export class KernelServer {
     this.wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 })
     this.http.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
-      if (url.pathname !== RPC_WS_PATH || !this.authorized(req, url)) {
+      const actor = url.pathname === RPC_WS_PATH ? this.authenticate(req, url) : undefined
+      if (!actor) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
         return
       }
-      this.wss.handleUpgrade(req, socket, head, (ws) => this.handleSocket(ws))
+      this.wss.handleUpgrade(req, socket, head, (ws) => this.handleSocket(ws, actor))
     })
   }
 
@@ -116,18 +132,25 @@ export class KernelServer {
     await new Promise<void>((resolve) => this.http.close(() => resolve()))
   }
 
-  private authorized(req: IncomingMessage, url: URL): boolean {
+  /** The actor a request authenticates as, or undefined. */
+  private authenticate(req: IncomingMessage, url: URL): Actor | undefined {
     const header = req.headers.authorization
     const given = header?.startsWith('Bearer ') ? header.slice(7) : url.searchParams.get(TOKEN_QUERY_PARAM)
-    if (!given) return false
+    if (!given) return undefined
     const buffer = Buffer.from(given)
-    return buffer.length === this.token.length && timingSafeEqual(buffer, this.token)
+    const matches = (token: Buffer) => buffer.length === token.length && timingSafeEqual(buffer, token)
+    if (matches(this.token)) return LOCAL_OWNER
+    if (matches(this.externalToken)) {
+      const client = (url.searchParams.get('client') ?? 'external-client').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) || 'external-client'
+      return { kind: 'external', id: client }
+    }
+    return undefined
   }
 
-  private handleSocket(ws: WebSocket): void {
+  private handleSocket(ws: WebSocket, actor: Actor): void {
     const session: Session & { subscriptions: Map<string, () => void> } = {
       id: ulid(),
-      actor: LOCAL_OWNER,
+      actor,
       subscriptions: new Map(),
     }
     this.sockets.add(ws)
@@ -172,6 +195,7 @@ export class KernelServer {
       return reply(errorResponse(id, INVALID_PARAMS, e.message, e.toData()))
     }
     try {
+      this.policy.authorize(session.actor, method)
       let result: unknown
       if (method === 'events.subscribe') result = this.subscribe(ws, session, params as KernelMethods['events.subscribe']['params'])
       else if (method === 'events.unsubscribe') {
@@ -184,6 +208,10 @@ export class KernelServer {
       } else {
         const handler = this.handlers[method as Exclude<KernelMethod, ServerMethod>] as MethodHandler<KernelMethod>
         result = await handler(params as never, session)
+      }
+      if (method === 'events.list') {
+        const list = result as KernelMethods['events.list']['result']
+        result = { ...list, events: list.events.map((event) => this.policy.filterEvent(session.actor, event)) }
       }
       assertValid(defs.result, result, 'RESULT_INVALID')
       reply({ jsonrpc: '2.0', id, result })
@@ -212,7 +240,7 @@ export class KernelServer {
     const deliver = (event: EventRecord) => {
       if (event.seq <= last) return
       last = event.seq
-      send(ws, { jsonrpc: '2.0', method: EVENT_NOTIFICATION, params: { subscription, event } })
+      send(ws, { jsonrpc: '2.0', method: EVENT_NOTIFICATION, params: { subscription, event: this.policy.filterEvent(session.actor, event) } })
     }
     const unsubscribe = this.events.subscribe((event) => (replaying ? buffered.push(event) : deliver(event)))
     session.subscriptions.set(subscription, unsubscribe)
@@ -232,8 +260,16 @@ export class KernelServer {
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     try {
-      if (!this.authorized(req, url)) throw httpError(401, 'UNAUTHORIZED', 'missing or invalid token')
+      const actor = this.authenticate(req, url)
+      if (!actor) throw httpError(401, 'UNAUTHORIZED', 'missing or invalid token')
       if (url.pathname === ARTIFACT_HTTP_PATH && req.method === 'PUT') {
+        if (actor.kind !== 'human') {
+          try {
+            this.policy.deny(actor, 'upload artifacts')
+          } catch (error) {
+            throw Object.assign(error as KernelError, { status: 403 })
+          }
+        }
         const query: ArtifactUploadQuery = { type: url.searchParams.get('type') ?? '' }
         const mediaType = url.searchParams.get('mediaType')
         const label = url.searchParams.get('label')
@@ -254,6 +290,11 @@ export class KernelServer {
         if (!/^[0-9a-f]{64}$/.test(match)) throw httpError(400, 'INVALID_PARAMS', 'malformed artifact hash')
         const meta = this.artifacts.stat(match)
         if (!meta) throw httpError(404, 'ARTIFACT_NOT_FOUND', `artifact ${match} does not exist`, { hash: match })
+        try {
+          this.policy.checkDownload(actor, meta, () => readFileSync(this.artifacts.objectPath(meta.hash), 'latin1'))
+        } catch (error) {
+          throw Object.assign(error as KernelError, { status: 403 })
+        }
         res.writeHead(200, {
           'content-type': meta.mediaType,
           'content-length': meta.size,

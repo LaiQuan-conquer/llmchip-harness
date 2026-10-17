@@ -60,10 +60,10 @@ export type ApprovalStatus =
   'none' | 'approved' | 'conditional_pending' | 'conditional_closed' | 'rejected' | 'invalidated'
 
 /**
- * Who performed an action.
+ * Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements §6.1).
  */
 export interface Actor {
-  kind: 'human' | 'agent' | 'plugin' | 'kernel'
+  kind: 'human' | 'agent' | 'plugin' | 'kernel' | 'external'
   id: string
   role?: string
   provider?: string
@@ -126,6 +126,10 @@ export interface ArtifactMeta {
     at: string
     reason: string
   }
+  /**
+   * Declassification rule that produced this artifact (FR-SEC-04); only such artifacts may be labelled below their inputs.
+   */
+  declassifiedBy: string | null
 }
 /**
  * Edge of the lineage graph: `from` is an input of the run that produced `to`.
@@ -263,6 +267,30 @@ export interface WorkspaceConfig {
      */
     cancelGraceMs?: number
   }
+  llm?: {
+    providers?: LlmProviderConfig[]
+  }
+}
+export interface LlmProviderConfig {
+  id: string
+  kind: 'openai-compatible' | 'anthropic' | 'scripted'
+  /**
+   * Cloud providers may receive at most `internal` data (FR-SEC-03); local ones may receive NDA data.
+   */
+  location: 'local' | 'cloud'
+  baseUrl?: string
+  model?: string
+  /**
+   * Name of the secret holding the API key.
+   */
+  apiKeySecret?: string
+  /**
+   * Scripted provider only: the replies to give, in order.
+   */
+  script?: {
+    [k: string]: unknown | undefined
+  }[]
+  maxOutputTokens?: number
 }
 export interface KernelStartedPayload {
   version: string
@@ -933,4 +961,293 @@ export interface WaiversCreateParams {
   reason: string
   impact?: string
   acknowledgement?: Hash
+}
+/**
+ * An anomaly that must be visible to humans (requirements §3.10).
+ */
+export interface IncidentRecord {
+  id: string
+  /**
+   * e.g. permission_denied, scope_violation, egress_blocked, standard_lowered, loop_detected, budget_exceeded, run_failed.
+   */
+  kind: string
+  severity: 'info' | 'warning' | 'critical'
+  summary: Message
+  project: string | null
+  actor: Actor
+  refs: IncidentRefs
+  openedAt: string
+  closed: null | IncidentClosure
+}
+export interface IncidentRefs {
+  events?: string[]
+  artifacts?: Hash[]
+  runs?: string[]
+  tasks?: string[]
+}
+export interface IncidentClosure {
+  by: Actor
+  at: string
+  cause: string
+  action: string
+}
+export interface IncidentOpenedPayload {
+  incident: IncidentRecord
+}
+export interface IncidentClosedPayload {
+  incident: string
+  cause: string
+  action: string
+}
+export interface IncidentsListParams {
+  open?: boolean
+  kind?: string
+  limit?: number
+}
+export interface IncidentsListResult {
+  incidents: IncidentRecord[]
+}
+export interface IncidentsCloseParams {
+  incident: string
+  cause: string
+  action: string
+}
+export interface EgressSegment {
+  label: Label
+  /**
+   * Where the segment came from, e.g. an artifact hash or `system-prompt`.
+   */
+  source: string
+  hash: Hash
+}
+export interface EgressDestination {
+  id: string
+  kind: 'llm' | 'mcp' | 'network'
+  location: 'local' | 'cloud'
+  maxLabel: Label
+}
+/**
+ * Audit record of one outbound request (FR-SEC-07). Contents are never stored, only their hashes and labels.
+ */
+export interface EgressDecidedPayload {
+  destination: EgressDestination
+  segments: EgressSegment[]
+  decision: 'allowed' | 'blocked'
+  reasons: Message[]
+  bytes: number
+}
+/**
+ * A declassification rule (FR-SEC-04). Only a human can create one.
+ */
+export interface DeclassRule {
+  id: string
+  sourceType: string
+  /**
+   * JSON pointers of the structured fields that may be extracted.
+   *
+   * @minItems 1
+   */
+  fields: [string, ...string[]]
+  targetLabel: 'public' | 'internal'
+  description?: string
+}
+export interface DeclassRuleSetPayload {
+  rule: DeclassRule
+}
+export interface DeclassRulesListResult {
+  rules: DeclassRule[]
+}
+export interface DeclassifyParams {
+  rule: string
+  hash: Hash
+}
+/**
+ * Project-specific replacement of a check definition's standards. A hard constraint (requirements §3.2).
+ */
+export interface CheckOverride {
+  completeness?: Criterion[]
+  /**
+   * @minItems 1
+   */
+  criteria?: [Criterion, ...Criterion[]]
+}
+export interface ConstraintProposal {
+  id: string
+  project: string
+  check: string
+  override: CheckOverride
+  reason: string
+  by: Actor
+  at: string
+  status: 'pending' | 'approved' | 'rejected'
+}
+export interface ConstraintProposedPayload {
+  proposal: ConstraintProposal
+}
+export interface ConstraintDecidedPayload {
+  proposal: string
+  decision: 'approved' | 'rejected'
+  comment: string
+}
+export interface ChecksOverrideParams {
+  project: string
+  check: string
+  override: CheckOverride
+  reason: string
+}
+export interface ConstraintsDecideParams {
+  proposal: string
+  decision: 'approved' | 'rejected'
+  comment?: string
+}
+export interface ConstraintsListParams {
+  project?: string
+}
+export interface ConstraintsListResult {
+  proposals: ConstraintProposal[]
+}
+export interface TaskSpec {
+  project: string
+  /**
+   * Requirement id or charter goal the task serves (FR-AGT-04).
+   */
+  goal: string
+  title: string
+  instructions?: string
+  role: 'executor' | 'verifier' | 'reviewer'
+  provider: string
+  /**
+   * Glob patterns of change-set paths the task may write (FR-AGT-05).
+   */
+  writeScope?: string[]
+  /**
+   * `plugin/handler` pairs the task may start.
+   */
+  runs?: string[]
+  maxSteps?: number
+  maxTokens?: number
+  loopThreshold?: number
+}
+export interface TaskRecord {
+  id: string
+  spec: TaskSpec
+  /**
+   * Agent instance id; changes when the task is handed over.
+   */
+  agent: string
+  state: 'pending' | 'running' | 'paused' | 'finished' | 'failed'
+  steps: number
+  tokens: number
+  result: string | null
+  error: string | null
+  changesets: string[]
+  createdAt: string
+}
+export interface ToolCall {
+  id: string
+  name: string
+  arguments: {
+    [k: string]: unknown | undefined
+  }
+}
+export interface AgentStepPayload {
+  task: string
+  agent: string
+  step: number
+  provider: string
+  model: string
+  text: string
+  toolCalls: ToolCall[]
+  results: ToolResult[]
+  tokens: number
+}
+export interface ToolResult {
+  id: string
+  ok: boolean
+  content: string
+}
+export interface TaskCreatedPayload {
+  task: TaskRecord
+}
+export interface TaskStatePayload {
+  task: string
+  state: 'pending' | 'running' | 'paused' | 'finished' | 'failed'
+  agent: string
+  provider: string
+  result: string | null
+  error: string | null
+}
+/**
+ * A change set and its progress through the iteration loop (requirements §6.2).
+ */
+export interface ChangesetRecord {
+  id: string
+  task: string
+  project: string
+  goal: string
+  files: ChangesetFile[]
+  author: string
+  review: null | ChangesetReview
+  verification: null | ChangesetVerification
+  state: 'submitted' | 'reviewed' | 'verified' | 'merged' | 'rejected'
+}
+export interface ChangesetFile {
+  path: string
+  hash: Hash
+}
+export interface ChangesetReview {
+  agent: string
+  approved: boolean
+  comment: string
+}
+export interface ChangesetVerification {
+  verdict: string
+}
+export interface ChangesetEventPayload {
+  changeset: ChangesetRecord
+}
+export interface HandoffPack {
+  project: string
+  task: string
+  goal: string
+  state: ProjectState
+  openIncidents: IncidentRecord[]
+  recentSteps: string[]
+  constraints: ConstraintProposal[]
+  next: string
+}
+export interface TaskRefParams {
+  task: string
+}
+export interface TasksRunParams {
+  task: string
+  /**
+   * Stop after this many steps in this call (the task stays resumable).
+   */
+  maxSteps?: number
+}
+export interface TasksSwitchParams {
+  task: string
+  provider: string
+}
+export interface TasksSwitchResult {
+  switched: boolean
+  task: TaskRecord
+  handoff: Hash
+  handoffLabel: Label
+  reasons: Message[]
+  options: string[]
+}
+export interface TasksListResult {
+  tasks: TaskRecord[]
+}
+export interface ChangesetsListParams {
+  task?: string
+}
+export interface ChangesetsListResult {
+  changesets: ChangesetRecord[]
+}
+export interface RuntimeTokens {
+  owner: string
+  external: string
 }

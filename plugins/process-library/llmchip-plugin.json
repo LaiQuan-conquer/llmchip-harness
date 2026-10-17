@@ -4,7 +4,7 @@
   "title": "Process profiles and implementation library (empirical values)",
   "kinds": ["process-profile", "implementation-library"],
   "runtime": "data",
-  "kernelApi": "^0.2",
+  "kernelApi": "^0.3",
   "data": [
     { "id": "sephonchitech-180bcd", "type": "process.profile", "path": "data/sephonchitech-180bcd.json" },
     { "id": "gf180mcu", "type": "process.profile", "path": "data/gf180mcu.json" },

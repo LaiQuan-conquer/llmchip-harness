@@ -5,6 +5,7 @@ import { Readable, Writable } from 'node:stream'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { KernelCallError, KernelClient } from '@llmchip/client'
 import type { Label, RunRecord } from '@llmchip/kernel-api'
+import { serveMcp } from './mcp.ts'
 
 export interface Io {
   out(text: string): void
@@ -49,6 +50,13 @@ Commands:
   stage enter ID STAGE [--branch B]
   gate snapshot|release ID GATE [--branch B]
   verdict evaluate CHECK RUN [--project ID]
+  task create --project P --goal ID --title T --provider ID [--role R] [--scope GLOB]...
+  task run TASK [--steps N]
+  task list
+  task switch TASK PROVIDER
+  incident list [--all]
+  incident close ID --cause TEXT --action TEXT
+  mcp                                  Serve MCP on stdio for an external agent (read-only plus starting work)
   call METHOD [JSON]                   Any kernel API method, e.g. approvals.decide
 
 Global options:
@@ -96,6 +104,13 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         from: { type: 'string' },
         at: { type: 'string' },
         project: { type: 'string' },
+        goal: { type: 'string' },
+        provider: { type: 'string' },
+        role: { type: 'string' },
+        scope: { type: 'string', multiple: true },
+        steps: { type: 'string' },
+        cause: { type: 'string' },
+        action: { type: 'string' },
       },
       allowPositionals: true,
       strict: true,
@@ -116,7 +131,12 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     io.err(`llmchip: harnessd is not running for ${home} (no ${runtimePath}); start it with \`harnessd serve\`\n`)
     return 1
   }
-  const runtime = JSON.parse(readFileSync(runtimePath, 'utf8')) as { url: string; token: string }
+  const runtime = JSON.parse(readFileSync(runtimePath, 'utf8')) as { url: string; token: string; externalToken: string; version: string }
+  if (group === 'mcp') {
+    // Speaks MCP on stdout; nothing else may be written there.
+    await serveMcp(runtime, process.stdin, (line) => process.stdout.write(line), runtime.version)
+    return 0
+  }
 
   let client: KernelClient
   try {
@@ -347,6 +367,46 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         print(verdict, () => `${verdict.check}: ${verdict.verdict}\n${verdict.reasons.map((r) => `  ${r.code} ${JSON.stringify(r.params ?? {})}\n`).join('')}`)
         return 0
       }
+      case 'task create': {
+        if (!values.project || !values.goal || !values.title || !values.provider) return usage(io, 'task create needs --project, --goal, --title and --provider')
+        const created = await client.call('tasks.create', {
+          project: values.project,
+          goal: values.goal,
+          title: values.title,
+          provider: values.provider,
+          role: (values.role ?? 'executor') as 'executor',
+          writeScope: values.scope ?? [],
+        })
+        print(created, () => `${created.id}\n`)
+        return 0
+      }
+      case 'task run': {
+        if (!arg) return usage(io, 'task run needs TASK')
+        const result = await client.call('tasks.run', { task: arg, ...compact({ maxSteps: int(values.steps) }) })
+        print(result, () => `${result.id}\t${result.state}\t${result.steps} steps${result.result ? `\t${result.result}` : ''}${result.error ? `\t${result.error}` : ''}\n`)
+        return 0
+      }
+      case 'task list': {
+        const { tasks } = await client.call('tasks.list')
+        print(tasks, () => tasks.map((t) => `${t.id}\t${t.spec.goal}\t${t.state}\t${t.spec.provider}\t${t.spec.title}\n`).join(''))
+        return 0
+      }
+      case 'task switch': {
+        if (!arg || !arg2) return usage(io, 'task switch needs TASK and PROVIDER')
+        const result = await client.call('tasks.switch', { task: arg, provider: arg2 })
+        print(result, () => (result.switched ? `switched to ${arg2}\n` : `refused (handoff label ${result.handoffLabel}); options:\n${result.options.map((o) => `  - ${o}\n`).join('')}`))
+        return result.switched ? 0 : 1
+      }
+      case 'incident list': {
+        const { incidents } = await client.call('incidents.list', values.all ? {} : { open: true })
+        print(incidents, () => incidents.map((i) => `${i.id}\t${i.severity}\t${i.kind}\t${i.summary.code}\t${JSON.stringify(i.summary.params ?? {})}\n`).join(''))
+        return 0
+      }
+      case 'incident close':
+        if (!arg || !values.cause || !values.action) return usage(io, 'incident close needs ID, --cause and --action')
+        await client.call('incidents.close', { incident: arg, cause: values.cause, action: values.action })
+        io.out(`closed ${arg}\n`)
+        return 0
       default:
         if (group === 'call') {
           if (!action) return usage(io, 'call needs METHOD')
