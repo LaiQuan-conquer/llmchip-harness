@@ -2,31 +2,52 @@
 // actually exist, so that adding, renaming or removing a package cannot leave
 // stale or missing entries behind. Run with `yarn check:workspace`.
 //
-// Every directory under packages/ must:
-//   - have package.json (name `@llmchip/<dir>`, private, type module),
-//     tsconfig.json and src/index.ts;
-//   - export "." with the conditions development -> ./src/index.ts,
-//     types -> ./lib/index.d.ts, default -> ./lib/index.js, in that order;
-//   - be referenced from tsconfig.build.json;
-//   - declare every `@llmchip/*` package it imports from src/ as a
-//     `workspace:*` dependency, and reference that package's tsconfig.
-// Conversely, tsconfig.build.json must not reference anything that is not a
-// package, and packages must not declare workspace dependencies they never import.
+// Workspaces live in two directories:
+//   - packages/<dir>: our own packages, named `@llmchip/<dir>`. They export "."
+//     with the conditions development -> ./src/index.ts, types ->
+//     ./lib/index.d.ts, default -> ./lib/index.js, in that order.
+//   - vendor/<dir>: vendored third-party source (see vendor/README.md). They
+//     keep their upstream npm names and are consumed from their build output,
+//     so their "." export must not have a `development` condition. Each one
+//     must ship its upstream LICENSE and be listed in the vendor/README.md
+//     manifest table.
+//
+// Every workspace must have package.json (private, type module), tsconfig.json
+// and src/index.ts, and be referenced from tsconfig.build.json. Every workspace
+// package imported from src/ must be declared as a `workspace:*` dependency
+// (dependencies, peerDependencies or devDependencies) and have a matching
+// reference in the importer's tsconfig.json. Conversely, tsconfig.build.json
+// must not reference anything that is not a workspace, and packages/ must not
+// declare workspace dependencies they never import.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const scope = '@llmchip/'
-const expectedExports = {
+const packageExports = {
   development: './src/index.ts',
   types: './lib/index.d.ts',
   default: './lib/index.js',
 }
 const problems: string[] = []
 
+interface Workspace {
+  /** Path relative to the repository root, e.g. `packages/kernel`. */
+  path: string
+  kind: 'packages' | 'vendor'
+  pkg: any
+}
+
 function readJson(path: string): any {
   return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+function subdirs(dir: string): string[] {
+  const abs = join(root, dir)
+  if (!existsSync(abs)) return []
+  return readdirSync(abs)
+    .filter((name) => statSync(join(abs, name)).isDirectory())
+    .sort()
 }
 
 function sourceFiles(dir: string): string[] {
@@ -41,60 +62,85 @@ function refPaths(tsconfigPath: string): Set<string> {
   return new Set(refs.map((ref) => ref.path))
 }
 
-const packageDirs = readdirSync(join(root, 'packages'))
-  .filter((name) => statSync(join(root, 'packages', name)).isDirectory())
-  .sort()
-const packageNames = new Set(packageDirs.map((dir) => scope + dir))
+/** Bare package name of a module specifier: `@scope/name/sub` -> `@scope/name`. */
+function packageOf(specifier: string): string {
+  const parts = specifier.split('/')
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!
+}
+
+const workspaces: Workspace[] = []
+for (const kind of ['packages', 'vendor'] as const) {
+  for (const dir of subdirs(kind)) {
+    const path = `${kind}/${dir}`
+    const missing = ['package.json', 'tsconfig.json', 'src/index.ts'].filter((file) => !existsSync(join(root, path, file)))
+    if (kind === 'vendor' && !existsSync(join(root, path, 'LICENSE'))) missing.push('LICENSE')
+    for (const file of missing) problems.push(`${path}: missing ${file}`)
+    if (missing.includes('package.json') || missing.includes('tsconfig.json')) continue
+    workspaces.push({ path, kind, pkg: readJson(join(root, path, 'package.json')) })
+  }
+}
+const byName = new Map(workspaces.map((ws) => [ws.pkg.name as string, ws]))
 const buildRefs = refPaths(join(root, 'tsconfig.build.json'))
+const vendorReadme = existsSync(join(root, 'vendor/README.md')) ? readFileSync(join(root, 'vendor/README.md'), 'utf8') : ''
 
-for (const dir of packageDirs) {
-  const pkgDir = join(root, 'packages', dir)
-  const name = scope + dir
-  const where = `packages/${dir}`
+for (const ws of workspaces) {
+  const { path, kind, pkg } = ws
+  const dir = path.slice(kind.length + 1)
 
-  const missing = ['package.json', 'tsconfig.json', 'src/index.ts'].filter((file) => !existsSync(join(pkgDir, file)))
-  for (const file of missing) problems.push(`${where}: missing ${file}`)
-  if (missing.includes('package.json') || missing.includes('tsconfig.json')) continue
+  if (kind === 'packages' && pkg.name !== `@llmchip/${dir}`) {
+    problems.push(`${path}: package name is ${pkg.name}, expected @llmchip/${dir}`)
+  }
+  if (pkg.private !== true) problems.push(`${path}: package.json must set "private": true`)
+  if (pkg.type !== 'module') problems.push(`${path}: package.json must set "type": "module"`)
 
-  const pkg = readJson(join(pkgDir, 'package.json'))
-  if (pkg.name !== name) problems.push(`${where}: package name is ${pkg.name}, expected ${name}`)
-  if (pkg.private !== true) problems.push(`${where}: package.json must set "private": true`)
-  if (pkg.type !== 'module') problems.push(`${where}: package.json must set "type": "module"`)
-  if (JSON.stringify(pkg.exports?.['.']) !== JSON.stringify(expectedExports)) {
-    problems.push(`${where}: exports["."] must be ${JSON.stringify(expectedExports)}`)
+  const dotExport = pkg.exports?.['.']
+  if (kind === 'packages') {
+    if (JSON.stringify(dotExport) !== JSON.stringify(packageExports)) {
+      problems.push(`${path}: exports["."] must be ${JSON.stringify(packageExports)}`)
+    }
+  } else {
+    if (typeof dotExport?.types !== 'string' || !dotExport.types.startsWith('./lib/')) {
+      problems.push(`${path}: exports["."].types must point into ./lib/`)
+    }
+    if (dotExport && 'development' in dotExport) {
+      problems.push(`${path}: vendored packages are consumed from lib/ and must not export a "development" condition`)
+    }
+    if (!vendorReadme.includes(`| \`${dir}/\` | \`${pkg.name}\` |`)) {
+      problems.push(`vendor/README.md: manifest table has no row for \`${dir}/\` (\`${pkg.name}\`)`)
+    }
   }
 
-  if (!buildRefs.has(`./packages/${dir}`)) {
-    problems.push(`tsconfig.build.json: missing reference to ./packages/${dir}`)
-  }
+  if (!buildRefs.has(`./${path}`)) problems.push(`tsconfig.build.json: missing reference to ./${path}`)
 
-  const deps: Record<string, string> = pkg.dependencies ?? {}
-  const tsRefs = refPaths(join(pkgDir, 'tsconfig.json'))
+  const declared: Record<string, string> = { ...pkg.devDependencies, ...pkg.peerDependencies, ...pkg.dependencies }
+  const tsRefs = refPaths(join(root, path, 'tsconfig.json'))
   const imported = new Set<string>()
-  for (const file of sourceFiles(join(pkgDir, 'src'))) {
-    for (const match of readFileSync(file, 'utf8').matchAll(/\bfrom\s+['"](@llmchip\/[^'"/]+)/g)) {
-      if (match[1] !== name) imported.add(match[1]!)
+  for (const file of sourceFiles(join(root, path, 'src'))) {
+    for (const match of readFileSync(file, 'utf8').matchAll(/\b(?:from|import)\s*\(?\s*['"]([^'"./][^'"]*)['"]/g)) {
+      const name = packageOf(match[1]!)
+      if (name !== pkg.name && byName.has(name)) imported.add(name)
     }
   }
   for (const dep of imported) {
-    const depDir = dep.slice(scope.length)
-    if (!packageNames.has(dep)) {
-      problems.push(`${where}: imports ${dep}, which is not a workspace package`)
-      continue
-    }
-    if (deps[dep] !== 'workspace:*') problems.push(`${where}: imports ${dep} but does not declare it as "workspace:*"`)
-    if (!tsRefs.has(`../${depDir}`)) problems.push(`${where}/tsconfig.json: imports ${dep} but has no reference to ../${depDir}`)
+    const target = byName.get(dep)!
+    const refPath = relative(join(root, path), join(root, target.path))
+    if (declared[dep] !== 'workspace:*') problems.push(`${path}: imports ${dep} but does not declare it as "workspace:*"`)
+    if (!tsRefs.has(refPath)) problems.push(`${path}/tsconfig.json: imports ${dep} but has no reference to ${refPath}`)
   }
-  for (const dep of Object.keys(deps)) {
-    if (dep.startsWith(scope) && !imported.has(dep)) problems.push(`${where}: declares ${dep} but never imports it`)
+  for (const [dep, range] of Object.entries(declared)) {
+    if (byName.has(dep) && range !== 'workspace:*') {
+      problems.push(`${path}: workspace package ${dep} must be declared as "workspace:*", not "${range}"`)
+    }
+    // Vendored manifests keep upstream declarations even where they are broader than the imports.
+    if (kind === 'packages' && byName.has(dep) && !imported.has(dep)) {
+      problems.push(`${path}: declares ${dep} but never imports it`)
+    }
   }
 }
 
+const workspacePaths = new Set(workspaces.map((ws) => `./${ws.path}`))
 for (const ref of buildRefs) {
-  const dir = ref.replace(/^\.\/packages\//, '')
-  if (dir === ref || !packageDirs.includes(dir)) {
-    problems.push(`tsconfig.build.json: reference ${ref} is not a package under packages/`)
-  }
+  if (!workspacePaths.has(ref)) problems.push(`tsconfig.build.json: reference ${ref} is not a workspace under packages/ or vendor/`)
 }
 
 if (problems.length > 0) {
@@ -102,5 +148,6 @@ if (problems.length > 0) {
   for (const problem of problems) console.error(`  - ${problem}`)
   process.exitCode = 1
 } else {
-  console.log(`Workspace check passed: ${packageDirs.length} packages (${packageDirs.join(', ')}).`)
+  const count = (kind: Workspace['kind']) => workspaces.filter((ws) => ws.kind === kind).length
+  console.log(`Workspace check passed: ${count('packages')} packages, ${count('vendor')} vendored packages.`)
 }

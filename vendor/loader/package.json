@@ -1,0 +1,29 @@
+{
+  "name": "@cordisjs/plugin-loader",
+  "description": "Plugin loader for cordis",
+  "version": "1.0.0-rc.5",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "author": "Shigma <shigma10826@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "cosmokit": "workspace:*",
+    "schemastery": "workspace:*"
+  },
+  "peerDependencies": {
+    "cordis": "workspace:*",
+    "node-addon-require-builtin": "^0.1.9"
+  },
+  "peerDependenciesMeta": {
+    "node-addon-require-builtin": {
+      "optional": true
+    }
+  }
+}

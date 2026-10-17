@@ -4,8 +4,8 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.1 (draft) |
-| Date | 2026-10-17 |
+| Document version | v0.2 (draft) |
+| Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
 | Chinese version | [Microkernel Architecture.zh.md](<Microkernel Architecture.zh.md>) |
@@ -285,7 +285,7 @@ A typical work process is as follows:
 
 **What it does not handle**: cross-process and cross-language operation, tool crash isolation, task cancellation and timeouts, persistence, sandboxing and permissions. These are precisely the hardest parts of this workbench and must be implemented by the kernel itself (K1–K9).
 
-**Decision (status: proposed, pending M1 prototype validation)**:
+**Decision (status: item 3 carried out, the rest pending M1 prototype validation)**: the owner decided on 2026-10-18 to vendor the source first; the manifest is in `vendor/README.md`. Whether the kernel adopts Cordis is still subject to the M1 prototype validation.
 
 1. Cordis is used **only** as a tool inside harnessd for assembling kernel components and in-kernel system plugins.
 2. **Kernel interfaces do not depend on Cordis**: the kernel API, plugin protocol, and artifact types are all defined in a separate `kernel-api` package (AP-6), in which no Cordis types appear. Out-of-process plugins are completely unaware of Cordis's existence.
@@ -584,7 +584,7 @@ llmchip-harness/
                        arch-taalas, rtl-gen, sim-verilator, sim-icarus, eda-yosys,
                        eda-openroad, eda-klayout, pdk-gf180mcu, silicon-test ……
   images/              Build definitions for tool containers and the WSL distro
-  vendor/cordis/       Added only after ADR-001 is accepted
+  vendor/              Vendored Cordis and companion library sources (ADR-001 item 3, manifest in vendor/README.md)
   docs/
 ```
 
@@ -594,7 +594,7 @@ llmchip-harness/
 
 | ID | Decision | Status |
 |---|---|---|
-| ADR-001 | Cordis is used only for assembly inside harnessd, and kernel interfaces do not depend on it; based on the deepseek-harness fork with the version locked (§5) | Proposed, pending M1 prototype validation |
+| ADR-001 | Cordis is used only for assembly inside harnessd, and kernel interfaces do not depend on it; based on the deepseek-harness fork with the version locked (§5) | Source vendored (owner decision, 2026-10-18); adoption in the kernel pending M1 prototype validation |
 | ADR-002 | The desktop shell uses Tauri | Accepted (owner decision) |
 | ADR-003 | The kernel and front end use TypeScript; compute-intensive plugins use Python; plugins communicate via a unified protocol and can be written in any language | Accepted (owner decision) |
 | ADR-004 | The MVP kernel runs in WSL2, and the Windows desktop application connects to the local kernel; it can later be deployed to a private server | Accepted (owner decision) |

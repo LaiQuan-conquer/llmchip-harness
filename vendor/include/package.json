@@ -1,0 +1,24 @@
+{
+  "name": "@cordisjs/plugin-include",
+  "description": "Include files in cordis configurations",
+  "version": "1.0.4",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "author": "Shigma <shigma10826@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "cosmokit": "workspace:*",
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@cordisjs/plugin-loader": "workspace:*",
+    "cordis": "workspace:*"
+  }
+}

@@ -8,18 +8,20 @@
     "node": ">=24"
   },
   "workspaces": [
+    "vendor/*",
     "packages/*"
   ],
   "scripts": {
     "harnessd": "node --conditions=development packages/kernel/src/cli.ts",
     "build": "tsc -b tsconfig.build.json",
     "clean": "tsc -b tsconfig.build.json --clean",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.json",
+    "test": "tsc -b tsconfig.build.json && vitest run",
     "check:workspace": "node scripts/check-workspace.ts",
     "verify": "yarn check:workspace && yarn typecheck && yarn test && yarn build"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",

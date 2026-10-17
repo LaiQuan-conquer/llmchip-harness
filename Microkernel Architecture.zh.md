@@ -4,8 +4,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.1（草稿） |
-| 日期 | 2026-10-17 |
+| 文档版本 | v0.2（草稿） |
+| 日期 | 2026-10-18 |
 | 状态 | 评审中，尚未基线化（v1.0 为正式基线） |
 | 姊妹文档 | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.zh.md>)：说明"做什么"（对应版本 v0.4） |
 | 英文版 | [Microkernel Architecture.md](<Microkernel Architecture.md>) |
@@ -285,7 +285,7 @@
 
 **它不负责的部分**：跨进程和跨语言、工具崩溃隔离、任务取消与超时、持久化、沙箱与权限。这些恰恰是本工作台最难的部分，必须由内核自己实现（K1–K9）。
 
-**决策（状态：提议，待 M1 原型验证）**：
+**决策（状态：第 3 条已执行，其余待 M1 原型验证）**：负责人已于 2026-10-18 决定先拷入源码，清单见 `vendor/README.md`；是否在内核中采用 Cordis 仍以 M1 原型验证为准。
 
 1. Cordis **只** 作为 harnessd 内部组装内核组件和内核内系统插件的工具。
 2. **内核接口不依赖 Cordis**：内核 API、插件协议、产物类型都定义在独立的 `kernel-api` 包中（AP-6），其中不出现任何 Cordis 类型。进程外插件完全感知不到 Cordis 的存在。
@@ -584,7 +584,7 @@ llmchip-harness/
                        arch-taalas、rtl-gen、sim-verilator、sim-icarus、eda-yosys、
                        eda-openroad、eda-klayout、pdk-gf180mcu、silicon-test ……
   images/              工具容器与 WSL 发行版的构建定义
-  vendor/cordis/       仅当 ADR-001 被接受后才加入
+  vendor/              拷入的 Cordis 及配套库源码（ADR-001 第 3 条，清单见 vendor/README.md）
   docs/
 ```
 
@@ -594,7 +594,7 @@ llmchip-harness/
 
 | 编号 | 决策 | 状态 |
 |---|---|---|
-| ADR-001 | Cordis 只用于 harnessd 内部组装，内核接口不依赖它；以 deepseek-harness 的分支为基础并锁定版本（§5） | 提议，待 M1 原型验证 |
+| ADR-001 | Cordis 只用于 harnessd 内部组装，内核接口不依赖它；以 deepseek-harness 的分支为基础并锁定版本（§5） | 源码拷入已执行（负责人决定，2026-10-18）；在内核中采用待 M1 原型验证 |
 | ADR-002 | 桌面外壳使用 Tauri | 已接受（负责人决定） |
 | ADR-003 | 内核与前端使用 TypeScript；计算密集的插件使用 Python；插件通过统一协议通信，可以用任何语言编写 | 已接受（负责人决定） |
 | ADR-004 | MVP 内核运行在 WSL2 中，Windows 桌面应用连接本机内核；将来可以部署到私有服务器 | 已接受（负责人决定） |

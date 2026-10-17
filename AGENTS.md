@@ -44,7 +44,7 @@ Every change goes through all six steps. Skipping a step is not allowed.
 
 The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plugins (quantization, bit-accurate models) are Python. EDA tools run in containers. Plugins in any language talk to the kernel through one unified protocol.
 
-**Cordis** is the candidate substrate for the in-process TypeScript plugin layer (ADR-001). Whether to adopt it is still open, to be settled by a spike in milestone M1. Do not vendor Cordis or build on its APIs until that ADR is accepted.
+**Cordis** and its companion libraries are vendored as source under `vendor/` (ADR-001 item 3, owner decision). Cordis may only be used to assemble `harnessd` internals and in-kernel system plugins. `@llmchip/kernel-api` and the plugin protocol must never depend on it (AP-6), and out-of-process plugins must not see it. Whether the kernel adopts Cordis is still settled by the M1 prototype validation in architecture §5; until then, keep Cordis usage behind kernel-owned interfaces so it can be replaced.
 
 ## Engineering
 
@@ -56,6 +56,8 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 | `packages/<name>/src/` | Source; `src/index.ts` is the package entry point |
 | `packages/<name>/tests/` | Vitest tests, named `*.spec.ts` |
 | `packages/<name>/lib/` | Build output (ignored by git) |
+| `vendor/<name>/` | Vendored third-party source with its upstream npm name; see `vendor/README.md` |
+| `tests/` | Repository-level tests, such as smoke tests of the vendored packages |
 | `scripts/` | Repository tooling scripts |
 
 Current packages:
@@ -63,7 +65,9 @@ Current packages:
 - `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6).
 - `kernel` — `harnessd`, the kernel daemon. Only `--version` and `--help` are implemented so far.
 
-Planned directories (`apps/`, `python/`, `plugins/`, `images/`, `vendor/`) are listed in architecture §14. Create them only when the corresponding work starts.
+Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
+
+Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in architecture §14. Create them only when the corresponding work starts.
 
 ### Toolchain
 
@@ -71,6 +75,7 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`, `vendor/`) are l
 - TypeScript with project references. Node runs `.ts` sources directly; there is no separate transpiler.
 - Each package exports `"."` with the conditions `development` → `./src/index.ts`, `types` → `./lib/index.d.ts`, `default` → `./lib/index.js`. Type checking, tests and `yarn harnessd` resolve the `development` condition, so they work without a build.
 - Relative imports inside a package use the `.ts` extension; the build rewrites them to `.js`.
+- Vendored packages use syntax Node cannot run directly, so they export only `types` and `default`, both into `lib/`. Everything that imports them (tests, type checking, `harnessd`) uses their build output; `yarn typecheck` and `yarn test` build all project references first. After changing vendored code, run `yarn build` before `yarn harnessd`.
 
 ### Commands
 
@@ -78,8 +83,8 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`, `vendor/`) are l
 |---|---|
 | `yarn install` | Install dependencies |
 | `yarn check:workspace` | Check that tooling configuration matches the packages that exist |
-| `yarn typecheck` | Type-check sources, tests and scripts |
-| `yarn test` | Run all tests |
+| `yarn typecheck` | Build project references, then type-check sources, tests and scripts |
+| `yarn test` | Build project references, then run all tests |
 | `yarn build` | Compile every package to `lib/` |
 | `yarn clean` | Remove build output |
 | `yarn harnessd` | Run the kernel daemon from source |
@@ -93,6 +98,14 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`, `vendor/`) are l
 2. Add `{ "path": "./packages/<name>" }` to `tsconfig.build.json`.
 3. For every `@llmchip/*` package imported from `src/`, add it to `dependencies` as `"workspace:*"` and add a matching entry to `references` in the package's `tsconfig.json`.
 4. Run `yarn install`, then `yarn verify`. `yarn check:workspace` reports anything missed in steps 1–3.
+
+A package that imports a vendored package follows the same rules: declare it as `"workspace:*"` and add a reference to `../../vendor/<dir>`.
+
+### Vendored code
+
+- Treat `vendor/` as upstream code. Change it only when necessary, and record every change in the "Local modifications" log of `vendor/README.md` in the same commit.
+- Do not reformat vendored code, tighten its compiler options, or rename its packages.
+- To update or add a vendored package, follow the sync procedure in `vendor/README.md` and update its manifest table; `yarn check:workspace` requires a manifest row and an upstream `LICENSE` for every vendored package.
 
 ## Prohibitions
 
