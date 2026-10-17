@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.2 (draft) |
+| Document version | v0.3 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -274,7 +274,7 @@ A typical work process is as follows:
 **Responsibility**: Manages layered configuration and secrets. Satisfies NFR-07.
 
 - **Configuration layers**: built-in defaults → workspace configuration → project configuration. Each layer is validated against a schema. Configuration changes are events.
-- **Secrets**: API keys and license configurations are stored encrypted; the encryption key is provided by the operating system's credential store (on Windows, the Tauri shell retrieves it from Credential Manager and hands it to the kernel at startup).
+- **Secrets**: API keys and license configurations are stored encrypted; the encryption key is provided by the operating system's credential store (on Windows, the Tauri shell retrieves it from Credential Manager and hands it to the kernel at startup). Until the desktop shell exists (M1d), the kernel reads it from the environment variable `LLMCHIP_MASTER_KEY`; without it, a key file with mode 0600 is generated under `secrets/`.
 - **Redaction**: logs and events pass through a secret-redaction filter before being written; secrets never enter artifacts or LLM context.
 
 ---
@@ -285,20 +285,33 @@ A typical work process is as follows:
 
 **What it does not handle**: cross-process and cross-language operation, tool crash isolation, task cancellation and timeouts, persistence, sandboxing and permissions. These are precisely the hardest parts of this workbench and must be implemented by the kernel itself (K1–K9).
 
-**Decision (status: item 3 carried out, the rest pending M1 prototype validation)**: the owner decided on 2026-10-18 to vendor the source first; the manifest is in `vendor/README.md`. Whether the kernel adopts Cordis is still subject to the M1 prototype validation.
+**Decision (status: accepted; M1a prototype validation passed, subject to the constraints in item 6)**: the owner decided on 2026-10-18 to vendor the source first; the manifest is in `vendor/README.md`.
 
 1. Cordis is used **only** as a tool inside harnessd for assembling kernel components and in-kernel system plugins.
 2. **Kernel interfaces do not depend on Cordis**: the kernel API, plugin protocol, and artifact types are all defined in a separate `kernel-api` package (AP-6), in which no Cordis types appear. Out-of-process plugins are completely unaware of Cordis's existence.
 3. Based on the already-patched Cordis fork in the local `deepseek-harness` project (MIT license), copied as source into `vendor/`, **with the version locked**, and recording its origin and the list of local modifications.
 4. Critical paths do not depend on Cordis's event mechanism: event writes, verdicts, and approvals call kernel components directly. The reason is that in Cordis's synchronous event dispatch, after one listener throws an exception, subsequent listeners are not executed.
 5. **Unload order is managed explicitly**: the kernel shutdown order is fixed as: stop accepting new requests → the scheduler stops dispatching and waits for or aborts runs → stop the Agent runtime → flush the event store → close the database. It does not rely on Cordis's concurrent unloading.
+6. **Plugin host guards** (Cordis behaviors found in the M1a prototype validation, handled by `PluginHost`):
+   - Cordis waits for a plugin's setup to settle before disposing it, so a hung plugin would block shutdown forever. Loading and cleanup therefore have timeouts; a timeout is recorded as `plugin.failed`.
+   - When a service provider is unloaded directly, Cordis runs the provider's own cleanup before deactivating the plugins that depend on it. In-kernel plugins must therefore declare `provides` and `inject`, and the host unloads a provider's dependents before the provider.
+   - Plugins are unloaded one at a time, in reverse load order.
+   - Cordis cannot contain an uncaught exception thrown from an asynchronous callback of an in-kernel plugin. This is one reason only reviewed system plugins may run in the kernel (§4.9).
 
 **Exit criteria for M1 prototype validation**:
 - Unload order test: shut down the kernel while a run is in progress; no events are lost and no resources are closed prematurely.
 - Fault isolation test: an in-kernel plugin fails to load or throws an exception at runtime; the kernel and other plugins are unaffected.
 - Size and startup time meet §10.1 of the requirements document.
 
-**Fallback**: if validation fails, replace Cordis with a small in-house registry (service registration, dependency waiting, reversible registration). Because of item 2, the replacement only affects the assembly code inside harnessd.
+**Validation results (M1a, 2026-10-18)**:
+
+| Exit criterion | Result | Evidence |
+|---|---|---|
+| Unload order | Passed: a plugin in cleanup can still use the services and storage it depends on; `kernel.stopped` is written after every `plugin.unloaded`; unloading a provider directly unloads its dependents first | `packages/kernel/tests/plugin-host.spec.ts` |
+| Fault isolation | Passed: plugins that throw synchronously, reject asynchronously or hang while loading are contained and recorded, and the kernel keeps serving; a plugin whose cleanup hangs does not block shutdown | Same |
+| Size and startup | Passed: Cordis build output 256 KB (748 KB for all 9 vendored packages), import takes about 7 ms; harnessd starts in about 185 ms and idles at about 83 MB resident memory | `tests/kernel-footprint.spec.ts` |
+
+**Fallback**: if a problem is found later that these guards cannot solve, replace Cordis with a small in-house registry (service registration, dependency waiting, reversible registration). Because of item 2, the replacement only affects the assembly code inside harnessd.
 
 ---
 
@@ -570,6 +583,7 @@ llmchip-harness/
   packages/
     kernel-api/        Schemas and generated types for the kernel API, plugin protocol, artifact types (no Cordis dependency)
     kernel/            harnessd: K1–K10
+    client/            Kernel API client library (Node.js and browsers), used by the CLI, the UI and tests
     agent-runtime/     Agent runtime (in-kernel system plugin)
     llm-providers/     LLM provider plugins
     mcp-server/        MCP service plugin
@@ -594,12 +608,12 @@ llmchip-harness/
 
 | ID | Decision | Status |
 |---|---|---|
-| ADR-001 | Cordis is used only for assembly inside harnessd, and kernel interfaces do not depend on it; based on the deepseek-harness fork with the version locked (§5) | Source vendored (owner decision, 2026-10-18); adoption in the kernel pending M1 prototype validation |
+| ADR-001 | Cordis is used only for assembly inside harnessd, and kernel interfaces do not depend on it; based on the deepseek-harness fork with the version locked (§5) | Accepted (M1a prototype validation passed, 2026-10-18) |
 | ADR-002 | The desktop shell uses Tauri | Accepted (owner decision) |
 | ADR-003 | The kernel and front end use TypeScript; compute-intensive plugins use Python; plugins communicate via a unified protocol and can be written in any language | Accepted (owner decision) |
 | ADR-004 | The MVP kernel runs in WSL2, and the Windows desktop application connects to the local kernel; it can later be deployed to a private server | Accepted (owner decision) |
 | ADR-005 | Use a dedicated WSL distro with built-in Podman as the container runtime; users do not need to install Docker | Proposed |
-| ADR-006 | The event store uses SQLite (WAL), and artifacts use a content-addressed store on the file system | Proposed |
+| ADR-006 | The event store uses SQLite (WAL, synchronous=FULL) through Node.js's built-in `node:sqlite`, with no native add-on; artifacts use a content-addressed store on the file system | Accepted (M1a) |
 | ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0 over stdio | Proposed |
 | ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Proposed |
 | ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Proposed |

@@ -121,6 +121,10 @@ for (const ws of workspaces) {
       if (name !== pkg.name && byName.has(name)) imported.add(name)
     }
   }
+  // The language-neutral contracts must stay free of framework code (architecture AP-6, ADR-001).
+  if (path === 'packages/kernel-api') {
+    for (const dep of imported) problems.push(`${path}: must not import ${dep}; kernel-api has no workspace dependencies`)
+  }
   for (const dep of imported) {
     const target = byName.get(dep)!
     const refPath = relative(join(root, path), join(root, target.path))

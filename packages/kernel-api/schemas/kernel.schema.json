@@ -1,0 +1,1059 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:llmchip:kernel",
+  "title": "llmchip-harness kernel contracts",
+  "description": "Language-neutral contracts of the llmchip-harness kernel: records stored by the kernel, payloads of kernel event kinds, and the parameters and results of the kernel API (IF-1). TypeScript types are generated from this file; do not edit the generated code. See Microkernel Architecture AP-6.",
+  "$defs": {
+    "Hash": {
+      "title": "Hash",
+      "description": "Lowercase hex SHA-256 digest.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Label": {
+      "title": "Label",
+      "description": "Data label (requirements §8). Ordered public < internal < nda.",
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "nda"
+      ]
+    },
+    "Actor": {
+      "title": "Actor",
+      "description": "Who performed an action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "plugin",
+            "kernel"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      }
+    },
+    "EventKind": {
+      "title": "EventKind",
+      "description": "Dotted event kind. Kernel kinds have no namespace prefix; plugin kinds start with `plugin.<plugin-id>.`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z0-9_-]+)+$"
+    },
+    "EventRecord": {
+      "title": "EventRecord",
+      "description": "One entry of the append-only event log (K1). `hash` covers every other field and `prevHash`, forming a hash chain.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "id",
+        "ts",
+        "project",
+        "actor",
+        "kind",
+        "payload",
+        "label",
+        "causation",
+        "correlation",
+        "reqRef",
+        "prevHash",
+        "hash"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "kind": {
+          "$ref": "#/$defs/EventKind"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "causation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Id of the event that caused this one."
+        },
+        "correlation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Id grouping the events of one operation."
+        },
+        "reqRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Requirements document version or hash this event relies on."
+        },
+        "prevHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      }
+    },
+    "ArtifactMeta": {
+      "title": "ArtifactMeta",
+      "description": "Metadata of a content-addressed artifact (K2). The artifact id is its content hash.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "size",
+        "type",
+        "mediaType",
+        "label",
+        "run",
+        "inputs",
+        "creator",
+        "createdAt",
+        "reqRef",
+        "deleted"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Artifact type registered in the type registry, e.g. `model.weights`."
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Run that produced the artifact; null for imports."
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "uniqueItems": true
+        },
+        "creator": {
+          "$ref": "#/$defs/Actor"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reqRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deleted": {
+          "description": "Deletion mark. Marked artifacts stay readable until a human purges them.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "by",
+                "at",
+                "reason"
+              ],
+              "properties": {
+                "by": {
+                  "$ref": "#/$defs/Actor"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "LineageEdge": {
+      "title": "LineageEdge",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "run"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/Hash"
+        },
+        "to": {
+          "$ref": "#/$defs/Hash"
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "description": "Edge of the lineage graph: `from` is an input of the run that produced `to`."
+    },
+    "ExecutionStatus": {
+      "title": "ExecutionStatus",
+      "description": "Verdict layer ① (requirements §3.9).",
+      "type": "string",
+      "enum": [
+        "not_started",
+        "running",
+        "exited_zero",
+        "exited_nonzero",
+        "timed_out",
+        "crashed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "ParseStatus": {
+      "title": "ParseStatus",
+      "description": "Verdict layer ② (requirements §3.9).",
+      "type": "string",
+      "enum": [
+        "complete",
+        "incomplete",
+        "failed"
+      ]
+    },
+    "CheckVerdict": {
+      "title": "CheckVerdict",
+      "description": "Verdict layer ③ (requirements §3.9).",
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail",
+        "waived",
+        "indeterminate"
+      ]
+    },
+    "StageConclusion": {
+      "title": "StageConclusion",
+      "description": "Verdict layer ④ (requirements §3.9).",
+      "type": "string",
+      "enum": [
+        "incomplete",
+        "awaiting_approval",
+        "passed",
+        "rejected"
+      ]
+    },
+    "RunRecord": {
+      "title": "RunRecord",
+      "description": "One execution of a tool, plugin or agent (requirements §3.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "project",
+        "handler",
+        "inputs",
+        "outputs",
+        "execution",
+        "startedAt",
+        "endedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handler": {
+          "type": "string",
+          "description": "Plugin handler or tool adapter that executed the run."
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          }
+        },
+        "execution": {
+          "$ref": "#/$defs/ExecutionStatus"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "endedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "VerdictRecord": {
+      "title": "VerdictRecord",
+      "description": "A check verdict issued by the verdict engine (K6). Plugins never write these (AP-7).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "check",
+        "checkVersion",
+        "subjects",
+        "run",
+        "parse",
+        "verdict",
+        "reasons",
+        "reqRef"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string",
+          "description": "Check definition id."
+        },
+        "checkVersion": {
+          "type": "string"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "description": "Hashes of the checked objects."
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parse": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ParseStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verdict": {
+          "$ref": "#/$defs/CheckVerdict"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "reqRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A localizable message: a stable code plus parameters, rendered by the client in the user's language (architecture §9.1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "WorkspaceConfig": {
+      "title": "WorkspaceConfig",
+      "description": "Workspace-level configuration (K10). Stored in `<home>/config/config.json`.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string",
+              "default": "127.0.0.1"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "default": 0
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "verifyTailOnStart": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1000,
+              "description": "Number of most recent events whose hash chain is verified at startup."
+            }
+          }
+        }
+      }
+    },
+    "KernelStartedPayload": {
+      "title": "KernelStartedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "apiVersion",
+        "pid"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "apiVersion": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        }
+      }
+    },
+    "KernelStoppedPayload": {
+      "title": "KernelStoppedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "ArtifactCreatedPayload": {
+      "title": "ArtifactCreatedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactMeta"
+        }
+      }
+    },
+    "ArtifactDeletionMarkedPayload": {
+      "title": "ArtifactDeletionMarkedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "reason"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "SecretChangedPayload": {
+      "title": "SecretChangedPayload",
+      "description": "Records that a secret changed. Never contains the secret value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "change"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "set",
+            "removed"
+          ]
+        }
+      }
+    },
+    "ProjectionRebuiltPayload": {
+      "title": "ProjectionRebuiltPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection",
+        "version",
+        "events"
+      ],
+      "properties": {
+        "projection": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "events": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PluginLoadedPayload": {
+      "title": "PluginLoadedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugin"
+      ],
+      "properties": {
+        "plugin": {
+          "type": "string"
+        }
+      }
+    },
+    "PluginFailedPayload": {
+      "title": "PluginFailedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugin",
+        "error"
+      ],
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "PluginUnloadedPayload": {
+      "title": "PluginUnloadedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugin"
+      ],
+      "properties": {
+        "plugin": {
+          "type": "string"
+        }
+      }
+    },
+    "KernelInfo": {
+      "title": "KernelInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "apiVersion",
+        "pid",
+        "startedAt",
+        "head"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "harnessd"
+        },
+        "version": {
+          "type": "string"
+        },
+        "apiVersion": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "head": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sequence number of the latest event."
+        }
+      }
+    },
+    "ErrorData": {
+      "title": "ErrorData",
+      "description": "`data` member of JSON-RPC errors returned by the kernel.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "EmptyParams": {
+      "title": "EmptyParams",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "EventsListParams": {
+      "title": "EventsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Return events with seq greater than this."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        },
+        "kind": {
+          "type": "string",
+          "description": "Exact kind or a prefix ending in `.`."
+        },
+        "project": {
+          "type": "string"
+        }
+      }
+    },
+    "EventsListResult": {
+      "title": "EventsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "head"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventRecord"
+          }
+        },
+        "head": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "EventsSubscribeParams": {
+      "title": "EventsSubscribeParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Replay events after this seq before streaming new ones. Defaults to the current head."
+        }
+      }
+    },
+    "EventsSubscribeResult": {
+      "title": "EventsSubscribeResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subscription"
+      ],
+      "properties": {
+        "subscription": {
+          "type": "string"
+        }
+      }
+    },
+    "EventsUnsubscribeParams": {
+      "title": "EventsUnsubscribeParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subscription"
+      ],
+      "properties": {
+        "subscription": {
+          "type": "string"
+        }
+      }
+    },
+    "EventNotificationParams": {
+      "title": "EventNotificationParams",
+      "description": "Params of the server-to-client `events.event` notification.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subscription",
+        "event"
+      ],
+      "properties": {
+        "subscription": {
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/EventRecord"
+        }
+      }
+    },
+    "IntegrityReport": {
+      "title": "IntegrityReport",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok",
+        "checked",
+        "problems"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
+      }
+    },
+    "ArtifactRefParams": {
+      "title": "ArtifactRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      }
+    },
+    "ArtifactsListParams": {
+      "title": "ArtifactsListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "includeDeleted": {
+          "type": "boolean",
+          "default": false
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    },
+    "ArtifactsListResult": {
+      "title": "ArtifactsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifacts"
+      ],
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactMeta"
+          }
+        }
+      }
+    },
+    "ArtifactsLineageParams": {
+      "title": "ArtifactsLineageParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ],
+          "default": "up",
+          "description": "`up` follows inputs back to sources, `down` follows derived artifacts."
+        }
+      }
+    },
+    "LineageResult": {
+      "title": "LineageResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactMeta"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LineageEdge"
+          }
+        }
+      }
+    },
+    "ArtifactsMarkDeletedParams": {
+      "title": "ArtifactsMarkDeletedParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "reason"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ArtifactUploadQuery": {
+      "title": "ArtifactUploadQuery",
+      "description": "Query parameters of `PUT /v1/artifacts`. The request body is the artifact content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mediaType": {
+          "type": "string",
+          "default": "application/octet-stream"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "SecretsSetParams": {
+      "title": "SecretsSetParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "SecretsRemoveParams": {
+      "title": "SecretsRemoveParams",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "SecretsListResult": {
+      "title": "SecretsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names"
+      ],
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ProjectionsRebuildResult": {
+      "title": "ProjectionsRebuildResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rebuilt"
+      ],
+      "properties": {
+        "rebuilt": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectionRebuiltPayload"
+          }
+        }
+      }
+    },
+    "OkResult": {
+      "title": "OkResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

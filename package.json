@@ -18,11 +18,15 @@
     "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.json",
     "test": "tsc -b tsconfig.build.json && vitest run",
     "check:workspace": "node scripts/check-workspace.ts",
-    "verify": "yarn check:workspace && yarn typecheck && yarn test && yarn build"
+    "verify": "yarn check:workspace && yarn check:generated && yarn typecheck && yarn test && yarn build",
+    "gen:schemas": "node scripts/gen-schema-types.ts",
+    "check:generated": "node scripts/gen-schema-types.ts --check",
+    "llmchip": "node --conditions=development packages/cli/src/bin.ts"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.19.2",
+    "json-schema-to-typescript": "^16.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"

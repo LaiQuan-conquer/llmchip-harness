@@ -17,6 +17,12 @@
     "lib"
   ],
   "dependencies": {
-    "@llmchip/kernel-api": "workspace:*"
+    "@llmchip/kernel-api": "workspace:*",
+    "ajv": "^8.20.0",
+    "cordis": "workspace:*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
   }
 }

@@ -4,6 +4,15 @@
     "rootDir": "src",
     "outDir": "lib"
   },
-  "include": ["src"],
-  "references": [{ "path": "../kernel-api" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../kernel-api"
+    },
+    {
+      "path": "../../vendor/cordis"
+    }
+  ]
 }

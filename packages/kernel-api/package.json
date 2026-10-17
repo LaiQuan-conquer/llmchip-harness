@@ -11,6 +11,10 @@
     }
   },
   "files": [
-    "lib"
-  ]
+    "lib",
+    "schemas"
+  ],
+  "devDependencies": {
+    "ajv": "^8.20.0"
+  }
 }

@@ -1,0 +1,23 @@
+{
+  "name": "@llmchip/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "bin": {
+    "llmchip": "./lib/bin.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "dependencies": {
+    "@llmchip/client": "workspace:*",
+    "@llmchip/kernel-api": "workspace:*"
+  }
+}

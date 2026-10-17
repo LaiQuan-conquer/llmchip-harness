@@ -32,7 +32,13 @@
       "path": "./packages/kernel-api"
     },
     {
+      "path": "./packages/client"
+    },
+    {
       "path": "./packages/kernel"
+    },
+    {
+      "path": "./packages/cli"
     }
   ]
 }

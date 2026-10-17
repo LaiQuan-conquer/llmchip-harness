@@ -44,7 +44,7 @@ Every change goes through all six steps. Skipping a step is not allowed.
 
 The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plugins (quantization, bit-accurate models) are Python. EDA tools run in containers. Plugins in any language talk to the kernel through one unified protocol.
 
-**Cordis** and its companion libraries are vendored as source under `vendor/` (ADR-001 item 3, owner decision). Cordis may only be used to assemble `harnessd` internals and in-kernel system plugins. `@llmchip/kernel-api` and the plugin protocol must never depend on it (AP-6), and out-of-process plugins must not see it. Whether the kernel adopts Cordis is still settled by the M1 prototype validation in architecture §5; until then, keep Cordis usage behind kernel-owned interfaces so it can be replaced.
+**Cordis** and its companion libraries are vendored as source under `vendor/` (ADR-001 item 3, owner decision). Cordis may only be used to assemble `harnessd` internals and in-kernel system plugins. `@llmchip/kernel-api` and the plugin protocol must never depend on it (AP-6), and out-of-process plugins must not see it. ADR-001 is accepted with the plugin host guards of architecture §5 item 6: load in-kernel plugins only through `PluginHost`, declare every Cordis service a plugin provides (`provides`) or needs (`inject`), and never put Cordis events on a critical path. Keep Cordis usage behind kernel-owned interfaces so it can be replaced.
 
 ## Engineering
 
@@ -62,8 +62,10 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 
 Current packages:
 
-- `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6).
-- `kernel` — `harnessd`, the kernel daemon. Only `--version` and `--help` are implemented so far.
+- `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6). The source of truth is the JSON Schema in `packages/kernel-api/schemas/`; `src/generated/` is produced from it by `yarn gen:schemas` and must not be edited by hand.
+- `kernel` — `harnessd`, the kernel daemon: event store (K1), artifact store (K2), configuration and secrets (K10), the kernel API server (IF-1) and the in-kernel plugin host.
+- `client` — kernel API client for Node.js and browsers.
+- `cli` — the `llmchip` command-line client.
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -83,12 +85,15 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 |---|---|
 | `yarn install` | Install dependencies |
 | `yarn check:workspace` | Check that tooling configuration matches the packages that exist |
+| `yarn gen:schemas` | Regenerate `kernel-api` types from its JSON Schema |
+| `yarn check:generated` | Check that the generated `kernel-api` files are up to date |
 | `yarn typecheck` | Build project references, then type-check sources, tests and scripts |
 | `yarn test` | Build project references, then run all tests |
 | `yarn build` | Compile every package to `lib/` |
 | `yarn clean` | Remove build output |
-| `yarn harnessd` | Run the kernel daemon from source |
-| `yarn verify` | Run check:workspace, typecheck, test and build in order |
+| `yarn harnessd serve [--home DIR]` | Run the kernel daemon from source (home defaults to `$LLMCHIP_HOME` or `~/.llmchip`) |
+| `yarn llmchip <command>` | Run the CLI from source against a running kernel; `yarn llmchip --help` lists commands |
+| `yarn verify` | Run check:workspace, check:generated, typecheck, test and build in order |
 
 `yarn verify` must pass before every commit.
 
