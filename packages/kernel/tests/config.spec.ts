@@ -17,6 +17,8 @@ describe('loadConfig', () => {
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ server: { port: 8080 } }))
     expect(loadConfig(dir).server).toEqual({ host: '127.0.0.1', port: 8080 })
     expect(loadConfig(dir, { server: { port: 9090 } }).server.port).toBe(9090)
+    // An override layer without the field keeps the file's value.
+    expect(loadConfig(dir, { server: {}, plugins: {} }).server.port).toBe(8080)
   })
 
   it('rejects invalid configuration', () => {

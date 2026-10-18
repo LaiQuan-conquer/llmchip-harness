@@ -9,26 +9,29 @@
   },
   "workspaces": [
     "vendor/*",
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "harnessd": "node --conditions=development packages/kernel/src/cli.ts",
-    "build": "tsc -b tsconfig.build.json",
+    "build": "tsc -b tsconfig.build.json && yarn workspace @llmchip/web build",
     "clean": "tsc -b tsconfig.build.json --clean",
-    "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.json",
+    "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.json && tsc -p apps/web",
     "test": "tsc -b tsconfig.build.json && vitest run",
     "check:workspace": "node scripts/check-workspace.ts",
-    "verify": "yarn check:workspace && yarn check:generated && yarn check:python && yarn typecheck && yarn test && yarn build",
+    "verify": "yarn check:workspace && yarn check:generated && yarn check:python && yarn typecheck && yarn build && yarn test",
     "gen:schemas": "node scripts/gen-schema-types.ts",
     "check:generated": "node scripts/gen-schema-types.ts --check",
     "llmchip": "node --conditions=development packages/cli/src/bin.ts",
     "setup:python": "uv sync --frozen",
-    "check:python": "uv run --frozen ruff check && uv run --frozen ruff format --check && uv run --frozen pytest -q"
+    "check:python": "uv run --frozen ruff check && uv run --frozen ruff format --check && uv run --frozen pytest -q",
+    "ui": "node --conditions=development packages/cli/src/bin.ts ui"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.19.2",
     "json-schema-to-typescript": "^16.0.0",
+    "playwright-core": "^1",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"

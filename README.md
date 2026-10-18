@@ -22,6 +22,7 @@ yarn verify             # workspace and generated-file checks, Python checks, ty
 
 yarn harnessd serve &   # start the kernel (home: $LLMCHIP_HOME or ~/.llmchip)
 yarn llmchip estimate --model stories260K
+yarn ui                 # open the Web UI
 ```
 
 See [AGENTS.md](AGENTS.md#engineering) for the repository layout and all commands.

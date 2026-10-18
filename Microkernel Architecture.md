@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.6 (draft) |
+| Document version | v0.7 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -450,7 +450,7 @@ In the dedicated WSL distro, the workbench's home directory structure is as foll
 
 ### 9.4 Front End and Desktop Shell
 
-- **Front end**: a single web front end, with static assets served by harnessd, shared by the browser and the desktop application.
+- **Front end**: a single web front end, with static assets served by harnessd, shared by the browser and the desktop application. Implemented in M1d (`apps/web`, React + Vite): static assets need no authentication (they hold no data); the token reaches the page in the URL fragment (`#token=`), which browsers never send to the server, and the page removes it from the address bar after reading it. All UI text comes from the Chinese and English catalogs, and kernel messages are rendered from their codes.
 - **Tauri shell (Windows)**: responsible only for the following, containing no business logic:
   - Installation and first-launch onboarding;
   - Ensuring the WSL distro and harnessd are running;

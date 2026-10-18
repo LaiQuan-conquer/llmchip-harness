@@ -49,6 +49,7 @@ const KERNEL_ACTOR: Actor = { kind: 'kernel', id: 'harnessd' }
 // (packages/kernel/{src,lib}/ in the repository).
 const BUNDLED_PLUGINS = fileURLToPath(new URL('../../../plugins', import.meta.url))
 const BUNDLED_PYTHON = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url))
+const BUNDLED_WEB = fileURLToPath(new URL('../../../apps/web/dist', import.meta.url))
 
 export function kernelVersion(): string {
   // src/ and lib/ are both one level below the package root.
@@ -181,6 +182,7 @@ export class Kernel {
         token,
         externalToken,
         policy: kernel.policy,
+        staticDir: BUNDLED_WEB,
         handlers: kernel.handlers(),
         events: kernel.events,
         artifacts: kernel.artifacts,

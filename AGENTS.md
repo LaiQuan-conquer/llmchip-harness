@@ -53,6 +53,7 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 | Path | Contents |
 |---|---|
 | `packages/<name>/` | One TypeScript workspace package, named `@llmchip/<name>` |
+| `apps/web/` | Web UI (React, Vite), served by harnessd; texts in `src/i18n.ts` in Chinese and English |
 | `packages/<name>/src/` | Source; `src/index.ts` is the package entry point |
 | `packages/<name>/tests/` | Vitest tests, named `*.spec.ts` |
 | `packages/<name>/lib/` | Build output (ignored by git) |
@@ -108,11 +109,12 @@ Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in ar
 | `yarn check:generated` | Check that the generated `kernel-api` files are up to date |
 | `yarn typecheck` | Build project references, then type-check sources, tests and scripts |
 | `yarn test` | Build project references, then run all tests |
-| `yarn build` | Compile every package to `lib/` |
+| `yarn build` | Compile every package to `lib/` and build the Web UI to `apps/web/dist/` |
+| `yarn ui` | Open the Web UI of the running kernel in the browser (`llmchip ui`) |
 | `yarn clean` | Remove build output |
 | `yarn harnessd serve [--home DIR]` | Run the kernel daemon from source (home defaults to `$LLMCHIP_HOME` or `~/.llmchip`) |
 | `yarn llmchip <command>` | Run the CLI from source against a running kernel; `yarn llmchip --help` lists commands |
-| `yarn verify` | Run check:workspace, check:generated, check:python, typecheck, test and build in order |
+| `yarn verify` | Run check:workspace, check:generated, check:python, typecheck, build and test in order |
 
 `yarn verify` must pass before every commit.
 
@@ -132,6 +134,12 @@ A package that imports a vendored package follows the same rules: declare it as 
 - Node's `fetch` ignores proxy environment variables; on a machine behind a proxy, start harnessd with `NODE_USE_ENV_PROXY=1`.
 - Tests use scripted providers. Real-provider behavior is covered by adapter tests against local mock servers (`tests/providers.spec.ts`).
 - `llmchip mcp` serves MCP on stdio for external agents (Claude Code, Codex, ...). It uses the kernel's external token: read-only plus starting runs and tasks; NDA content is refused.
+
+### Web UI
+
+- harnessd serves `apps/web/dist` at `/` without authentication (it holds no data); the API needs the token, which `llmchip ui` passes in the URL fragment.
+- Every visible text goes through `t('key')` with the key present in both catalogs of `apps/web/src/i18n.ts`; kernel messages are rendered from their codes. `tests/web-ui.spec.ts` enforces both, and renders every page in both languages in headless Chromium (`npx playwright-core install chromium` once; the browser test is skipped without it).
+- Agent loops and other long work must yield to the event loop; `tests/ui-latency.spec.ts` checks UI queries stay fast under load.
 
 ### Containers
 

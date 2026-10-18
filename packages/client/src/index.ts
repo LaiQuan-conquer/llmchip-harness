@@ -122,7 +122,7 @@ export class KernelClient {
     if (query.mediaType) url.searchParams.set('mediaType', query.mediaType)
     if (query.label) url.searchParams.set('label', query.label)
     for (const input of query.inputs ?? []) url.searchParams.append('input', input)
-    const init: RequestInit & { duplex?: 'half' } = { method: 'PUT', body, headers: this.headers() }
+    const init: RequestInit & { duplex?: 'half' } = { method: 'PUT', body: body as RequestInit['body'], headers: this.headers() }
     if (body instanceof ReadableStream) init.duplex = 'half'
     return (await (await this.http(url, init)).json()) as ArtifactMeta
   }

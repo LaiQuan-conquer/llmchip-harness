@@ -236,6 +236,9 @@ export class AgentRuntime {
       this.setState(task, 'running', {})
       const session = this.session(task)
       for (let step = 0; step < maxSteps; step++) {
+        // Yield to I/O between steps: a fast provider (local, scripted) would otherwise
+        // run the whole loop in microtasks and starve every other request (FR-UI-04).
+        await new Promise((resolve) => setImmediate(resolve))
         task = this.get(id)
         if (task.state !== 'running') break
         if (paused()) {

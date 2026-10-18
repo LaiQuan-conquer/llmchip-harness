@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -56,6 +57,7 @@ Commands:
   task switch TASK PROVIDER
   incident list [--all]
   incident close ID --cause TEXT --action TEXT
+  ui [--no-open]                       Open the Web UI in the browser (prints its URL)
   mcp                                  Serve MCP on stdio for an external agent (read-only plus starting work)
   call METHOD [JSON]                   Any kernel API method, e.g. approvals.decide
 
@@ -111,6 +113,7 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         steps: { type: 'string' },
         cause: { type: 'string' },
         action: { type: 'string' },
+        'no-open': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: true,
@@ -132,6 +135,13 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     return 1
   }
   const runtime = JSON.parse(readFileSync(runtimePath, 'utf8')) as { url: string; token: string; externalToken: string; version: string }
+  if (group === 'ui') {
+    // The token travels in the URL fragment, which browsers never send to servers.
+    const address = `${runtime.url}/#token=${encodeURIComponent(runtime.token)}`
+    io.out(`${address}\n`)
+    if (!values['no-open']) openBrowser(address)
+    return 0
+  }
   if (group === 'mcp') {
     // Speaks MCP on stdout; nothing else may be written there.
     await serveMcp(runtime, process.stdin, (line) => process.stdout.write(line), runtime.version)
@@ -424,6 +434,21 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     throw error
   } finally {
     await client.close()
+  }
+}
+
+/** Opens a URL in the user's browser: Windows' browser from WSL, else xdg-open or open. */
+function openBrowser(url: string): void {
+  const wsl = existsSync('/mnt/c/Windows/System32/cmd.exe')
+  const [command, args] = wsl
+    ? ['/mnt/c/Windows/System32/cmd.exe', ['/c', 'start', '""', url.replaceAll('&', '^&')]]
+    : process.platform === 'darwin'
+      ? ['open', [url]]
+      : ['xdg-open', [url]]
+  try {
+    spawn(command, args as string[], { stdio: 'ignore', detached: true, cwd: wsl ? '/mnt/c' : undefined }).unref()
+  } catch {
+    // The URL is printed; the user can open it by hand.
   }
 }
 

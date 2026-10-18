@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { extname, join, normalize } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
@@ -79,6 +80,7 @@ export class KernelServer {
   private readonly token: Buffer
   private readonly externalToken: Buffer
   private readonly policy: ServerPolicy
+  private readonly staticDir: string | undefined
   private readonly handlers: MethodHandlers
   private readonly events: EventStore
   private readonly artifacts: ArtifactStore
@@ -90,6 +92,8 @@ export class KernelServer {
     /** Token of external clients (MCP bridges); see Policy. */
     externalToken: string
     policy: ServerPolicy
+    /** Built Web UI (apps/web/dist), served without authentication: it contains no data. */
+    staticDir?: string
     handlers: MethodHandlers
     events: EventStore
     artifacts: ArtifactStore
@@ -98,6 +102,7 @@ export class KernelServer {
     this.token = Buffer.from(options.token)
     this.externalToken = Buffer.from(options.externalToken)
     this.policy = options.policy
+    this.staticDir = options.staticDir
     this.handlers = options.handlers
     this.events = options.events
     this.artifacts = options.artifacts
@@ -257,8 +262,27 @@ export class KernelServer {
     return { subscription }
   }
 
+  /** Serves the Web UI; unknown paths get index.html (client-side routing). */
+  private serveStatic(pathname: string, res: ServerResponse): void {
+    const root = this.staticDir!
+    let file = normalize(join(root, decodeURIComponent(pathname)))
+    if (!file.startsWith(root) || !existsSync(file) || statSync(file).isDirectory()) file = join(root, 'index.html')
+    if (!existsSync(file)) {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('the Web UI is not built; run `yarn build`')
+      return
+    }
+    res.writeHead(200, {
+      'content-type': CONTENT_TYPES[extname(file)] ?? 'application/octet-stream',
+      'cache-control': file.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'",
+    })
+    res.end(readFileSync(file))
+  }
+
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
+    if (this.staticDir && req.method === 'GET' && !url.pathname.startsWith('/v1/')) return this.serveStatic(url.pathname, res)
     try {
       const actor = this.authenticate(req, url)
       if (!actor) throw httpError(401, 'UNAUTHORIZED', 'missing or invalid token')
@@ -312,6 +336,16 @@ export class KernelServer {
       json(res, status, { error: { ...data, message: status === 500 ? 'internal error' : (error as Error).message } })
     }
   }
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json',
 }
 
 function send(ws: WebSocket, message: object): void {

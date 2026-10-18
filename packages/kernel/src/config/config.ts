@@ -26,8 +26,9 @@ export function loadConfig(configDir: string, overrides: WorkspaceConfig = {}): 
       throw new KernelError('CONFIG_UNREADABLE', `cannot parse ${path}: ${(error as Error).message}`, { path })
     }
   }
-  assertValid<WorkspaceConfig>('WorkspaceConfig', file, 'CONFIG_INVALID')
-  assertValid<WorkspaceConfig>('WorkspaceConfig', overrides, 'CONFIG_INVALID')
+  // Validate copies: validation fills in defaults, which must not mask lower layers when merging.
+  assertValid<WorkspaceConfig>('WorkspaceConfig', structuredClone(file), 'CONFIG_INVALID')
+  assertValid<WorkspaceConfig>('WorkspaceConfig', structuredClone(overrides), 'CONFIG_INVALID')
   const merged: WorkspaceConfig = {
     server: { ...file.server, ...overrides.server },
     events: { ...file.events, ...overrides.events },

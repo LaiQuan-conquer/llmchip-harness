@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.6（草稿） |
+| 文档版本 | v0.7（草稿） |
 | 日期 | 2026-10-18 |
 | 状态 | 评审中，尚未基线化（v1.0 为正式基线） |
 | 姊妹文档 | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.zh.md>)：说明"做什么"（对应版本 v0.4） |
@@ -450,7 +450,7 @@ M1c 的实现：变更集按 `submitted → reviewed → verified → merged` �
 
 ### 9.4 前端与桌面外壳
 
-- **前端**：一套 Web 前端，由 harnessd 提供静态资源，浏览器和桌面应用共用。
+- **前端**：一套 Web 前端，由 harnessd 提供静态资源，浏览器和桌面应用共用。 M1d 实现（`apps/web`，React + Vite）：静态资源不需认证（不含数据）；令牌经 URL 片段（`#token=`）传给页面，浏览器不会把片段发给服务器，页面读取后立即从地址栏去掉。所有界面文字走中英文词表，内核消息按消息代码渲染。
 - **Tauri 外壳（Windows）**：只负责以下事情，不包含业务逻辑：
   - 安装和首次引导；
   - 确保 WSL 发行版和 harnessd 在运行；

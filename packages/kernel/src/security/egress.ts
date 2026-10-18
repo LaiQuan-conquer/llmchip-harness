@@ -121,6 +121,12 @@ export class EgressGateway {
   private readonly events: EventStore
   private readonly artifacts: ArtifactStore
   private readonly incidents: Incidents
+  /**
+   * Fingerprint hits per segment content hash. Agent conversations resend the
+   * same messages on every step; without the cache each step would rescan the
+   * whole conversation and block the event loop. Cleared when NDA data arrives.
+   */
+  private readonly scanCache = new Map<string, string[]>()
 
   constructor(events: EventStore, artifacts: ArtifactStore, incidents: Incidents) {
     this.events = events
@@ -128,6 +134,9 @@ export class EgressGateway {
     this.incidents = incidents
     events.registerProjection(fingerprintProjection((hash) => artifacts.objectPath(hash)))
     events.registerProjection(declassProjection)
+    events.subscribe((event) => {
+      if (event.kind === 'artifact.created' && event.label === 'nda') this.scanCache.clear()
+    })
   }
 
   /**
@@ -142,11 +151,21 @@ export class EgressGateway {
         reasons.push({ code: 'LABEL_EXCEEDS_DESTINATION', params: { source: segment.source, label: segment.label, destination: destination.id, max: destination.maxLabel } })
       }
     }
-    if (destination.location === 'cloud' || LABELS.indexOf(destination.maxLabel) < LABELS.indexOf('nda')) {
-      const hits = this.scan(segments.map((s) => s.text).join('\n'))
-      if (hits.length > 0) reasons.push({ code: 'NDA_FINGERPRINT', params: { destination: destination.id, matches: hits.slice(0, 5) } })
-    }
     const audit: EgressSegment[] = segments.map((s) => ({ label: s.label, source: s.source, hash: sha256(s.text) }))
+    if (destination.location === 'cloud' || LABELS.indexOf(destination.maxLabel) < LABELS.indexOf('nda')) {
+      const hits = new Set<string>()
+      segments.forEach((segment, i) => {
+        const key = audit[i]!.hash
+        let found = this.scanCache.get(key)
+        if (!found) {
+          found = this.scan(segment.text)
+          if (this.scanCache.size > 50_000) this.scanCache.clear()
+          this.scanCache.set(key, found)
+        }
+        for (const hit of found) hits.add(hit)
+      })
+      if (hits.size > 0) reasons.push({ code: 'NDA_FINGERPRINT', params: { destination: destination.id, matches: [...hits].sort().slice(0, 5) } })
+    }
     const bytes = segments.reduce((n, s) => n + Buffer.byteLength(s.text), 0)
     const decision = reasons.length === 0 ? 'allowed' : 'blocked'
     const label = segments.reduce<Label>((top, s) => (LABELS.indexOf(s.label) > LABELS.indexOf(top) ? s.label : top), 'public')
