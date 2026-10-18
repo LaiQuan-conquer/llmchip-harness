@@ -20,6 +20,13 @@
       "title": "Estimate area, cost, performance and feasibility",
       "inputs": [
         {
+          "name": "request",
+          "types": [
+            "estimate.request"
+          ],
+          "required": false
+        },
+        {
           "name": "profile",
           "types": [
             "process.profile"
@@ -58,10 +65,6 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "model",
-          "weightStorage"
-        ],
         "properties": {
           "model": {
             "type": "object",
@@ -169,7 +172,8 @@
             "type": "number",
             "exclusiveMinimum": 0
           }
-        }
+        },
+        "description": "Estimate parameters. An `estimate.request` input (JSON with the same fields) takes precedence, so the request can be part of a design snapshot (G0)."
       }
     },
     {

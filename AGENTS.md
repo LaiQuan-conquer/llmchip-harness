@@ -60,7 +60,7 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 | `vendor/<name>/` | Vendored third-party source with its upstream npm name; see `vendor/README.md` |
 | `plugins/<id>/` | Out-of-process and data plugins, each with an `llmchip-plugin.json` manifest; bundled with the workbench |
 | `python/<name>/` | Python packages of the uv workspace, such as the plugin SDK |
-| `tests/` | Repository-level and end-to-end tests; `tests/fixtures/plugins/` holds test-only plugins |
+| `tests/` | Repository-level and end-to-end tests; `tests/fixtures/plugins/` holds test-only plugins, `tests/fixtures/models/` the stories260K comparison model |
 | `scripts/` | Repository tooling scripts |
 
 Current packages:
@@ -81,7 +81,10 @@ Bundled plugins:
 
 - `estimator` (Python) — feasibility, area, cost and performance estimate (FR-EST).
 - `process-library` (data) — process profiles and the implementation library. Every value records its source and confidence; empirical values stay empirical until calibrated.
-- `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions.
+- `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions. A gate check must consume the gate's slotted artifacts as run inputs, so that its verdict counts as evidence for exactly that snapshot.
+- `model-llama` (Python) — llama2.c checkpoint and tokenizer intake into the Model IR, and the L0 FP32 reference (a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`).
+- `numeric` (Python) — quantization (int8/int4/int3/ternary, group scales), the numeric spec (§3.4.2), the L2 bit-exact integer model with observation-point traces, and the L2-vs-L0 accuracy evaluation (G1 evidence). Bundles an evaluation set.
+- `arch-taalas` (Python) — the Taalas-style hardwired architecture template: chip spec and PPA from a frozen numeric spec, and the consistency check (G2 evidence).
 - `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, ...): storage implementation calibration (FR-EST-13).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.

@@ -1,0 +1,65 @@
+{
+  "id": "numeric",
+  "version": "0.1.0",
+  "title": "Numeric co-design: quantization, numeric spec, L2 bit-exact model, accuracy (S2)",
+  "kinds": ["quantizer", "numeric-spec"],
+  "runtime": "process",
+  "entry": { "command": ["${python}", "-m", "llmchip_numeric"] },
+  "kernelApi": "^0.3",
+  "data": [{ "id": "evalset-tinystories", "type": "eval.set", "path": "data/evalset-tinystories.json", "label": "public" }],
+  "handlers": [
+    {
+      "name": "quantize",
+      "title": "Quantize the model and write its numeric spec",
+      "inputs": [
+        { "name": "ir", "types": ["model.ir"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true }
+      ],
+      "outputs": [
+        { "name": "spec", "type": "numeric.spec", "mediaType": "application/json" },
+        { "name": "weights", "type": "numeric.weights", "mediaType": "application/x-npz" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weightFormat": { "enum": ["int8", "int4", "int3", "ternary"], "default": "int4" },
+          "groupSize": { "type": "integer", "minimum": 4, "maximum": 4096, "default": 32 },
+          "contextLength": { "type": "integer", "minimum": 8, "maximum": 4096, "default": 64 }
+        }
+      },
+      "timeoutMs": 1800000
+    },
+    {
+      "name": "infer",
+      "title": "L2 generations with observation-point traces",
+      "inputs": [
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true }
+      ],
+      "outputs": [
+        { "name": "outputs", "type": "l2.outputs", "mediaType": "application/json" },
+        { "name": "trace", "type": "l2.trace", "mediaType": "application/x-npz" }
+      ],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "evaluate",
+      "title": "Accuracy of L2 against L0 (G1 evidence)",
+      "inputs": [
+        { "name": "ir", "types": ["model.ir"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true }
+      ],
+      "outputs": [{ "name": "report", "type": "accuracy.report", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 3600000
+    }
+  ]
+}

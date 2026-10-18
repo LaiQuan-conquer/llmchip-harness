@@ -1,0 +1,37 @@
+{
+  "format": "llmchip-evalset/1",
+  "description": "Evaluation set in the style of TinyStories, written for llmchip-harness (not taken from the TinyStories dataset). 20 prompts for greedy generation (64 positions each), 3 calibration prompts kept apart from them, and passages for perplexity.",
+  "steps": 64,
+  "prompts": [
+    "Once upon a time",
+    "One day, a little girl named Lily",
+    "Tom had a big red ball",
+    "The cat was sad because",
+    "There was a small bird who",
+    "Mom said to Ben,",
+    "Sara and her dog went to the park",
+    "The sun was hot and",
+    "A little boy found a box",
+    "Once there was a happy frog",
+    "The old man had a garden",
+    "Anna wanted to bake a cake",
+    "In the forest, there lived a bear",
+    "Max did not like to share",
+    "The rain came down and",
+    "Lucy saw a shiny star",
+    "The fish swam in the blue sea",
+    "Tim was scared of the dark",
+    "The kids played with a kite",
+    "Grandma gave Sue a warm hug"
+  ],
+  "calibration": [
+    "Once upon a time, there was a little dog named Spot.",
+    "The girl and her mom went to the store to buy some bread.",
+    "Ben liked to run fast. One day he fell down and cried."
+  ],
+  "passages": [
+    "Once upon a time, there was a little girl named Lily. She loved to play outside with her friends. One day, she found a big red ball in the park.",
+    "Tom had a toy car. He liked to play with it every day. One day, the car broke. Tom was sad, but his dad fixed it.",
+    "The cat sat on the mat. It was a sunny day. The cat saw a bird and wanted to play with it, but the bird flew away."
+  ]
+}

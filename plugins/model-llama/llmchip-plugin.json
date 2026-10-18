@@ -1,0 +1,37 @@
+{
+  "id": "model-llama",
+  "version": "0.1.0",
+  "title": "Llama-family model intake and L0 FP32 reference (llama2.c format)",
+  "kinds": ["model-loader"],
+  "runtime": "process",
+  "entry": { "command": ["${python}", "-m", "llmchip_model"] },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "intake",
+      "title": "Read a llama2.c checkpoint and tokenizer into the Model IR (S1)",
+      "inputs": [
+        { "name": "weights", "types": ["model.weights.llama2c"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true }
+      ],
+      "outputs": [
+        { "name": "ir", "type": "model.ir", "mediaType": "application/x-npz" },
+        { "name": "structure", "type": "model.structure", "mediaType": "application/json" }
+      ],
+      "params": { "type": "object", "additionalProperties": false, "properties": { "license": { "type": "string" } } },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "reference",
+      "title": "L0 reference outputs and perplexity on an evaluation set",
+      "inputs": [
+        { "name": "ir", "types": ["model.ir"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true }
+      ],
+      "outputs": [{ "name": "outputs", "type": "l0.outputs", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 1800000
+    }
+  ]
+}

@@ -13,7 +13,14 @@ def handle_estimate(ctx: InvokeContext) -> Result:
     library = json.loads(Path(ctx.input("library").path).read_text())
     calibrations = [json.loads(Path(i.path).read_text()) for i in ctx.inputs if i.name == "calibration"]
     library = apply_calibrations(library, calibrations)
-    report = estimate(ctx.params, profile, library)
+    params = dict(ctx.params)
+    request = [i for i in ctx.inputs if i.name == "request"]
+    if request:
+        params |= json.loads(Path(request[0].path).read_text())
+    for required in ("model", "weightStorage"):
+        if required not in params:
+            raise ValueError(f"estimate needs `{required}` in its params or request")
+    report = estimate(params, profile, library)
     out = Path(ctx.out_dir)
     (out / "estimate.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
     (out / "estimate.md").write_text(summary_markdown(report))
