@@ -81,6 +81,7 @@ Bundled plugins:
 - `estimator` (Python) — feasibility, area, cost and performance estimate (FR-EST).
 - `process-library` (data) — process profiles and the implementation library. Every value records its source and confidence; empirical values stay empirical until calibrated.
 - `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions.
+- `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, ...): storage implementation calibration (FR-EST-13).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -131,6 +132,12 @@ A package that imports a vendored package follows the same rules: declare it as 
 - Node's `fetch` ignores proxy environment variables; on a machine behind a proxy, start harnessd with `NODE_USE_ENV_PROXY=1`.
 - Tests use scripted providers. Real-provider behavior is covered by adapter tests against local mock servers (`tests/providers.spec.ts`).
 - `llmchip mcp` serves MCP on stdio for external agents (Claude Code, Codex, ...). It uses the kernel's external token: read-only plus starting runs and tasks; NDA content is refused.
+
+### Containers
+
+- `runtime: container` plugins run under Podman (`podman run -i`, IF-2 over stdio) with no network, read-only inputs and plugin directory, and only the run workspace writable. Pin `entry.image` by digest.
+- The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
+- In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 
 ### Adding a plugin
 

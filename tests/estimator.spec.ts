@@ -30,7 +30,7 @@ describe('estimator (AC-M1-10)', () => {
     const { client } = await setup()
     const { plugins, problems } = await client.call('plugins.list')
     expect(problems).toEqual([])
-    expect(plugins.map((p) => p.id).sort()).toEqual(['estimator', 'flow-default', 'process-library'])
+    expect(plugins.map((p) => p.id).sort()).toEqual(['eda-gf180', 'estimator', 'flow-default', 'process-library'])
     expect((await client.call('checks.list')).checks.map((c) => c.id)).toContain('estimate.feasibility')
   })
 

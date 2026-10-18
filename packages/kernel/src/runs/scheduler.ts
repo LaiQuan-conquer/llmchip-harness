@@ -1,5 +1,7 @@
 import { constants, copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js'
 import {
   KERNEL_API_VERSION,
@@ -27,6 +29,9 @@ import { assertValid } from '../util/schema.ts'
 import { ulid } from '../util/ulid.ts'
 
 const KERNEL_ACTOR: Actor = { kind: 'kernel', id: 'scheduler' }
+
+/** Source of the Python plugin SDK, mounted into containers (packages/kernel/{src,lib}/runs/ in the repository). */
+const PYTHON_SDK = fileURLToPath(new URL('../../../../python/llmchip-sdk/src', import.meta.url))
 
 /** Executions after which a run is retried if it has attempts left. */
 const RETRYABLE: ReadonlySet<ExecutionStatus> = new Set(['interrupted', 'crashed'])
@@ -143,6 +148,7 @@ export class Scheduler {
     for (const row of this.events.db.prepare("SELECT record, pid FROM runs WHERE state = 'running'").all() as { record: string; pid: number | null }[]) {
       const run = JSON.parse(row.record) as RunRecord
       if (row.pid) killOrphan(row.pid, run.id)
+      this.removeContainer(run.id, 'rm')
       this.finish(run, { execution: 'interrupted', error: 'the kernel stopped while the run was in progress' })
     }
     // No run is active yet, so every workspace left on disk is stale.
@@ -316,6 +322,7 @@ export class Scheduler {
     const process = active.process
     if (!process) return
     process.notify('cancel', { run: active.run.id })
+    if (this.registry.get(active.run.plugin)?.manifest.runtime === 'container') this.removeContainer(active.run.id, 'kill')
     process.kill('SIGTERM')
     const timer = setTimeout(() => process.kill('SIGKILL'), this.config.scheduler.cancelGraceMs)
     void process.exited.then(() => clearTimeout(timer))
@@ -346,16 +353,16 @@ export class Scheduler {
       return { name: input.name, hash: input.hash, type: meta.type, label: meta.label, path }
     })
 
-    const command = (plugin.manifest.entry?.command ?? []).map((part) =>
-      part
-        .replaceAll('${python}', this.config.plugins.python ?? 'python3')
-        .replaceAll('${node}', this.config.plugins.node ?? process.execPath)
-        .replaceAll('${pluginDir}', plugin.dir),
+    const container = plugin.manifest.runtime === 'container'
+    // Inside a container the run workspace and the plugin are mounted at fixed paths.
+    const at = container
+      ? { in: '/llmchip/in', out: '/llmchip/out', work: '/llmchip/work', plugin: '/llmchip/plugin', python: 'python3', node: 'node' }
+      : { in: paths.in, out: paths.out, work: paths.work, plugin: plugin.dir, python: this.config.plugins.python ?? 'python3', node: this.config.plugins.node ?? process.execPath }
+    let command = (plugin.manifest.entry?.command ?? []).map((part) =>
+      part.replaceAll('${python}', at.python).replaceAll('${node}', at.node).replaceAll('${pluginDir}', at.plugin),
     )
-    if (plugin.manifest.runtime === 'container') {
-      this.finish(run, { execution: 'crashed', error: 'container plugins are executed by the container runtime from milestone M1.5' })
-      return
-    }
+    if (container) command = this.containerCommand(run, plugin, paths, command)
+    const invokeInputs = inputs.map((input) => ({ ...input, path: input.path.replace(paths.in, at.in) }))
 
     const process_ = PluginProcess.spawn({
       command,
@@ -389,7 +396,7 @@ export class Scheduler {
         pluginDir: plugin.dir,
       })
       if (init.id !== plugin.manifest.id) throw new Error(`plugin process identifies as ${init.id}, expected ${plugin.manifest.id}`)
-      const invoke: ProtocolInvokeParams = { run: run.id, handler: run.handler, params: run.params, inputs, outDir: paths.out, workDir: paths.work }
+      const invoke: ProtocolInvokeParams = { run: run.id, handler: run.handler, params: run.params, inputs: invokeInputs, outDir: at.out, workDir: at.work }
       result = await process_.request<ProtocolInvokeResult>('invoke', invoke)
       assertValid('ProtocolInvokeResult', result, 'PLUGIN_RESULT_INVALID')
       await Promise.race([process_.request('shutdown', {}).catch(() => {}), process_.exited])
@@ -442,6 +449,52 @@ export class Scheduler {
       log: logMeta.hash,
     })
     rmSync(dir, { recursive: true, force: true })
+  }
+
+  /**
+   * Wraps a plugin command in the container engine (architecture §9.3): no
+   * network, CPU and memory limits, inputs and the plugin read-only, only the
+   * run workspace writable. The Python SDK is mounted for Python plugins.
+   */
+  private containerCommand(run: RunRecord, plugin: RegisteredPlugin, paths: { in: string; out: string; work: string }, command: string[]): string[] {
+    const { containerRuntime, containerCpus, containerMemory } = this.config.scheduler
+    const uid = process.getuid?.() ?? 0
+    const gid = process.getgid?.() ?? 0
+    const [entrypoint, ...args] = command
+    return [
+      containerRuntime,
+      'run',
+      '--rm',
+      '-i',
+      `--name=llmchip-run-${run.id.toLowerCase()}`,
+      `--label=llmchip.run=${run.id}`,
+      '--network=none',
+      `--cpus=${containerCpus}`,
+      `--memory=${containerMemory}`,
+      `--user=${uid}:${gid}`,
+      ...(uid === 0 ? [] : ['--userns=keep-id']),
+      '--security-opt=label=disable',
+      `--volume=${paths.in}:/llmchip/in:ro`,
+      `--volume=${paths.out}:/llmchip/out`,
+      `--volume=${paths.work}:/llmchip/work`,
+      `--volume=${plugin.dir}:/llmchip/plugin:ro`,
+      `--volume=${PYTHON_SDK}:/llmchip/sdk:ro`,
+      '--env=PYTHONPATH=/llmchip/sdk',
+      '--env=HOME=/llmchip/work',
+      '--workdir=/llmchip/work',
+      `--entrypoint=${entrypoint}`,
+      plugin.manifest.entry!.image!,
+      ...args,
+    ]
+  }
+
+  private removeContainer(runId: string, how: 'kill' | 'rm'): void {
+    try {
+      const name = `llmchip-run-${runId.toLowerCase()}`
+      execFileSync(this.config.scheduler.containerRuntime, how === 'kill' ? ['kill', name] : ['rm', '-f', name], { stdio: 'ignore', timeout: 30_000 })
+    } catch {
+      // No such container, or no container engine installed.
+    }
   }
 
   private async registerOutputs(run: RunRecord, plugin: RegisteredPlugin, result: ProtocolInvokeResult, outDir: string): Promise<RunRef[]> {

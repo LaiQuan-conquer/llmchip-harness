@@ -1,0 +1,37 @@
+{
+  "id": "eda-gf180",
+  "version": "0.1.0",
+  "title": "GF180MCU open-source EDA flow (Yosys, OpenROAD) in a pinned tool image",
+  "kinds": ["eda-adapter", "pdk"],
+  "runtime": "container",
+  "entry": {
+    "command": ["python3", "/llmchip/plugin/calibrate.py"],
+    "image": "docker.io/hpretl/iic-osic-tools@sha256:306585de35d198e70ea58950f77147c86f56c698726a19afea9f1c83009557be"
+  },
+  "kernelApi": "^0.3",
+  "requiresProcessCapabilities": [],
+  "handlers": [
+    {
+      "name": "calibrate",
+      "title": "Storage implementation calibration on GF180MCU (FR-EST-13)",
+      "outputs": [{ "name": "report", "type": "calibration.report", "mediaType": "application/json" }],
+      "timeoutMs": 3600000,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["implementation"],
+        "properties": {
+          "implementation": { "enum": ["gf180mcu.stdcell-rom", "gf180mcu.sram-512x8", "gf180mcu.openram-rom"] },
+          "sizes": {
+            "type": "array",
+            "description": "ROM sizes [words, width] for the standard-cell ROM, smallest first.",
+            "items": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 2, "maxItems": 2 },
+            "default": [[1024, 16], [4096, 16], [16384, 16]]
+          },
+          "utilization": { "type": "number", "minimum": 0.2, "maximum": 0.9, "default": 0.6 },
+          "seed": { "type": "integer", "default": 1 }
+        }
+      }
+    }
+  ]
+}

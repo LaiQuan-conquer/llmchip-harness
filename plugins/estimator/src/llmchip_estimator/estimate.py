@@ -144,6 +144,25 @@ def max_core_for_area(area_mm2: float, ring_mm: float, rules: dict[str, Any] | N
     return best
 
 
+def apply_calibrations(library: dict[str, Any], calibrations: list[dict[str, Any]]) -> dict[str, Any]:
+    """A copy of the library with calibrated values replacing empirical ones (FR-EST-13)."""
+    by_id = {c["implementation"]: c for c in calibrations}
+    entries = []
+    for entry in library.get("entries", []):
+        calibration = by_id.get(entry["id"])
+        if calibration:
+            entry = {**entry, "availability": calibration["availability"]}
+            if calibration["availability"] != "available":
+                missing = [f"{stage}: {', '.join(v)}" for stage, v in calibration.get("missingViews", {}).items() if v]
+                reason = calibration.get("failure") or f"missing views ({'; '.join(missing)})"
+                entry["availabilityNote"] = f"calibration found it unavailable: {reason}"
+            if calibration.get("densityUm2PerBit"):
+                entry["densityUm2PerBit"] = calibration["densityUm2PerBit"]
+                entry["peripheryFactor"] = calibration.get("peripheryFactor", entry["peripheryFactor"])
+        entries.append(entry)
+    return {**library, "entries": entries}
+
+
 def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str, Any]) -> dict[str, Any]:
     model = resolve_model(params["model"])
     weight_bits = int(params.get("weightBits", 4))
@@ -405,6 +424,10 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
                 f"typical die {die['typ']:.2f} mm2, pessimistic {die['high']:.2f} mm2, limit {limit:.2f} mm2"
             )
         for entry in used_impls:
+            if entry["availability"] == "unavailable":
+                feasibility = "infeasible"
+                reasons.append(f"{entry['title']} is unavailable: {entry.get('availabilityNote', '')}")
+                continue
             if entry["availability"] != "available":
                 conditions.append(
                     f"{entry['title']} must be available: {entry.get('availabilityNote', entry['availability'])}"
@@ -415,6 +438,8 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
                     f"{entry['title']} density is empirical; confirm with storage calibration (FR-EST-13)"
                 )
                 feasibility = "conditionally_feasible"
+    if feasibility == "infeasible":
+        conditions = []  # Conditions only qualify a feasible result.
     result["conclusion"] = {"feasibility": feasibility, "conditions": conditions, "reasons": reasons}
 
     suggestions = []

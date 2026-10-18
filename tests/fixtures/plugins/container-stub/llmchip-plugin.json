@@ -1,0 +1,20 @@
+{
+  "id": "container-stub",
+  "version": "1.0.0",
+  "title": "Container executor test plugin",
+  "kinds": ["test"],
+  "runtime": "container",
+  "entry": {
+    "command": ["python3", "/llmchip/plugin/plugin.py"],
+    "image": "docker.io/library/python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1"
+  },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "probe",
+      "inputs": [{ "name": "data", "types": ["test.design"], "required": true }],
+      "outputs": [{ "name": "copy", "type": "test.report", "mediaType": "text/plain" }]
+    },
+    { "name": "sleep", "params": { "type": "object", "required": ["ms"], "properties": { "ms": { "type": "integer" } } } }
+  ]
+}

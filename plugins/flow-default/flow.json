@@ -2,23 +2,168 @@
   "id": "default",
   "version": "0.1.0",
   "stages": [
-    { "id": "S0", "title": "Feasibility and cost estimate" },
-    { "id": "S1", "title": "Model intake", "entry": { "gates": ["G0"] } },
-    { "id": "S2", "title": "Numeric co-design", "entry": { "gates": ["G0"] } },
-    { "id": "S3", "title": "Architecture design and exploration", "entry": { "gates": ["G1"] } },
-    { "id": "S4", "title": "Hardware generation", "entry": { "gates": ["G2"] } },
-    { "id": "S5", "title": "Functional verification", "entry": { "gates": ["G2"] } },
-    { "id": "S6", "title": "Physical implementation", "entry": { "gates": ["G3"] } },
-    { "id": "S7", "title": "Signoff", "entry": { "gates": ["G3"] } },
-    { "id": "S8", "title": "Tapeout package", "entry": { "gates": ["G3"] } },
-    { "id": "S9", "title": "Post-silicon test", "entry": { "gates": ["G4"] } }
+    {
+      "id": "S0",
+      "title": "Feasibility and cost estimate"
+    },
+    {
+      "id": "S1",
+      "title": "Model intake",
+      "entry": {
+        "gates": [
+          "G0"
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "title": "Numeric co-design",
+      "entry": {
+        "gates": [
+          "G0"
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "title": "Architecture design and exploration",
+      "entry": {
+        "gates": [
+          "G1"
+        ]
+      }
+    },
+    {
+      "id": "S4",
+      "title": "Hardware generation",
+      "entry": {
+        "gates": [
+          "G2"
+        ],
+        "checks": [
+          {
+            "check": "impl.views.S4",
+            "slot": "storage-impl"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S5",
+      "title": "Functional verification",
+      "entry": {
+        "gates": [
+          "G2"
+        ]
+      }
+    },
+    {
+      "id": "S6",
+      "title": "Physical implementation",
+      "entry": {
+        "gates": [
+          "G3"
+        ],
+        "checks": [
+          {
+            "check": "impl.views.S6",
+            "slot": "storage-impl"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S7",
+      "title": "Signoff",
+      "entry": {
+        "gates": [
+          "G3"
+        ],
+        "checks": [
+          {
+            "check": "impl.views.S7",
+            "slot": "storage-impl"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S8",
+      "title": "Tapeout package",
+      "entry": {
+        "gates": [
+          "G3"
+        ]
+      }
+    },
+    {
+      "id": "S9",
+      "title": "Post-silicon test",
+      "entry": {
+        "gates": [
+          "G4"
+        ]
+      }
+    }
   ],
   "gates": [
-    { "id": "G0", "title": "Project initiation", "after": "S0", "members": ["charter", "estimate"], "checks": ["estimate.feasibility"] },
-    { "id": "G1", "title": "Accuracy signoff", "after": "S2", "members": ["numeric-spec", "l2-model", "accuracy-report"], "checks": [] },
-    { "id": "G2", "title": "Architecture freeze", "after": "S3", "members": ["numeric-spec", "chip-spec", "ppa-estimate"], "checks": [] },
-    { "id": "G3", "title": "RTL freeze", "after": "S5", "members": ["numeric-spec", "rtl", "verification-plan", "verification-report"], "checks": [] },
-    { "id": "G4", "title": "Tapeout signoff", "after": "S8", "members": ["gds", "signoff-checklist", "tapeout-package"], "checks": [] }
+    {
+      "id": "G0",
+      "title": "Project initiation",
+      "after": "S0",
+      "members": [
+        "charter",
+        "estimate"
+      ],
+      "checks": [
+        "estimate.feasibility"
+      ]
+    },
+    {
+      "id": "G1",
+      "title": "Accuracy signoff",
+      "after": "S2",
+      "members": [
+        "numeric-spec",
+        "l2-model",
+        "accuracy-report"
+      ],
+      "checks": []
+    },
+    {
+      "id": "G2",
+      "title": "Architecture freeze",
+      "after": "S3",
+      "members": [
+        "numeric-spec",
+        "chip-spec",
+        "ppa-estimate"
+      ],
+      "checks": []
+    },
+    {
+      "id": "G3",
+      "title": "RTL freeze",
+      "after": "S5",
+      "members": [
+        "numeric-spec",
+        "rtl",
+        "verification-plan",
+        "verification-report"
+      ],
+      "checks": []
+    },
+    {
+      "id": "G4",
+      "title": "Tapeout signoff",
+      "after": "S8",
+      "members": [
+        "gds",
+        "signoff-checklist",
+        "tapeout-package"
+      ],
+      "checks": []
+    }
   ],
   "checks": [
     {
@@ -27,8 +172,77 @@
       "title": "Feasibility estimate is feasible or conditionally feasible",
       "plugin": "estimator",
       "handler": "estimate",
-      "completeness": [{ "metric": "missing_count", "op": "==", "value": 0 }],
-      "criteria": [{ "metric": "feasible_or_conditional", "op": "==", "value": true }]
+      "completeness": [
+        {
+          "metric": "missing_count",
+          "op": "==",
+          "value": 0
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "feasible_or_conditional",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "impl.views.S4",
+      "version": "1",
+      "title": "Storage implementation has the integration views S4 needs",
+      "plugin": "estimator",
+      "handler": "check_views",
+      "criteria": [
+        {
+          "metric": "views.S4.complete",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "available",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "impl.views.S6",
+      "version": "1",
+      "title": "Storage implementation has the integration views S6 needs",
+      "plugin": "estimator",
+      "handler": "check_views",
+      "criteria": [
+        {
+          "metric": "views.S6.complete",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "available",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "impl.views.S7",
+      "version": "1",
+      "title": "Storage implementation has the integration views S7 needs",
+      "plugin": "estimator",
+      "handler": "check_views",
+      "criteria": [
+        {
+          "metric": "views.S7.complete",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "available",
+          "op": "==",
+          "value": true
+        }
+      ]
     }
   ]
 }

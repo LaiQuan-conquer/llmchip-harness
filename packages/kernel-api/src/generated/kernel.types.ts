@@ -266,6 +266,15 @@ export interface WorkspaceConfig {
      * Time a cancelled plugin gets to exit before it is killed.
      */
     cancelGraceMs?: number
+    /**
+     * Container engine CLI used for `runtime: container` plugins.
+     */
+    containerRuntime?: string
+    containerCpus?: number
+    /**
+     * Memory limit passed to the container engine.
+     */
+    containerMemory?: string
   }
   llm?: {
     providers?: LlmProviderConfig[]
@@ -658,6 +667,13 @@ export interface FlowStage {
 }
 export interface StageEntry {
   gates?: string[]
+  /**
+   * Checks that must pass on the artifact bound to a slot before the stage can be entered (e.g. integration views, FR-PHY-08).
+   */
+  checks?: {
+    check: string
+    slot: string
+  }[]
 }
 export interface FlowGate {
   id: string

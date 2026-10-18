@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.5 (draft) |
+| Document version | v0.6 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -178,7 +178,7 @@ A typical work process is as follows:
   | Executor | Purpose | Isolation |
   |---|---|---|
   | Out-of-process plugin process | Domain plugins written in Python and other languages | Separate process, communicating via IF-2 |
-  | Tool container | EDA tools | Podman container with CPU and memory limits, network disabled by default (implemented in M1.5, when Podman is installed) |
+  | Tool container | EDA tools | Podman container (`runtime: container` plugins): `--network=none`, CPU and memory limits, inputs and the plugin directory mounted read-only, only the run workspace writable, the Python SDK mounted read-only; containers are named and labelled by run id and removed by the kernel on cancellation, timeout and crash recovery |
   | In-kernel execution | Only for extremely lightweight, non-blocking system operations | None, so its scope is strictly limited |
 
 - **Run workspace**: every run gets a new temporary directory. Input artifacts are mounted read-only (hard links or bind mounts), and the tool can only write to the `out/` directory. After the run ends, the kernel collects the outputs from `out/` and commits them to K2.
@@ -616,7 +616,7 @@ llmchip-harness/
 | ADR-002 | The desktop shell uses Tauri | Accepted (owner decision) |
 | ADR-003 | The kernel and front end use TypeScript; compute-intensive plugins use Python; plugins communicate via a unified protocol and can be written in any language | Accepted (owner decision) |
 | ADR-004 | The MVP kernel runs in WSL2, and the Windows desktop application connects to the local kernel; it can later be deployed to a private server | Accepted (owner decision) |
-| ADR-005 | Use a dedicated WSL distro with built-in Podman as the container runtime; users do not need to install Docker | Proposed |
+| ADR-005 | Use a dedicated WSL distro with built-in Podman as the container runtime; users do not need to install Docker | Podman part accepted (M1.5, verified on the development machine: Podman 3.4, rootful; containers never have a network, so the CNI networking problem in WSL does not affect them); the dedicated distro is pending M1d |
 | ADR-006 | The event store uses SQLite (WAL, synchronous=FULL) through Node.js's built-in `node:sqlite`, with no native add-on; artifacts use a content-addressed store on the file system | Accepted (M1a) |
 | ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0, one message per line, over stdio | Accepted (M1b) |
 | ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Accepted (M1c) |

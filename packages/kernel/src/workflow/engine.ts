@@ -347,11 +347,27 @@ export class Workflow {
     const stage = this.readFlow(project.flowHash).stages.find((s) => s.id === stageId)
     if (!stage) throw new KernelError('STAGE_NOT_FOUND', `flow ${project.flow} has no stage ${stageId}`, { stage: stageId })
     const blocked = (stage.entry?.gates ?? []).map((gate) => this.release(projectId, branch, gate)).filter((r) => !r.released)
-    if (blocked.length > 0) {
-      throw new KernelError('STAGE_ENTRY_BLOCKED', `stage ${stageId} needs released gates: ${blocked.map((b) => b.gate).join(', ')}`, {
-        stage: stageId,
-        gates: blocked,
-      })
+    // Stage admission checks on bound artifacts (requirements FR-PHY-08): the latest
+    // verdict of each check on the artifact bound to the slot must pass.
+    const bound = new Map(slotsAt(this.events.db, projectId, branch).map((s) => [s.slot, s.hash]))
+    const failed: { check: string; slot: string; verdict: string; reasons: Message[]; details: Record<string, unknown> }[] = []
+    for (const { check, slot } of stage.entry?.checks ?? []) {
+      const hash = bound.get(slot)
+      const latest = hash ? this.verdicts({ check, subject: hash, limit: 1 })[0] : undefined
+      if (latest?.verdict === 'pass') continue
+      // Explanations the judged run reported, such as `views.S4.missing`.
+      const metrics = latest?.run ? this.scheduler.get(latest.run).metrics : {}
+      // Only explanations for this stage (or not stage-specific at all).
+      const relevant = (key: string) => key.endsWith('.missing') && (key.includes(`.${stageId}.`) || !/\.S\d+\./.test(key))
+      const details = Object.fromEntries(Object.entries(metrics).filter(([key, value]) => relevant(key) && value !== ''))
+      failed.push({ check, slot, verdict: latest?.verdict ?? (hash ? 'missing' : 'unbound'), reasons: latest?.reasons ?? [], details })
+    }
+    if (blocked.length > 0 || failed.length > 0) {
+      const parts = [
+        ...(blocked.length ? [`released gates: ${blocked.map((b) => b.gate).join(', ')}`] : []),
+        ...failed.map((f) => `${f.check} on ${f.slot} (${f.verdict}${Object.keys(f.details).length ? `; ${Object.values(f.details).join('; ')}` : ''})`),
+      ]
+      throw new KernelError('STAGE_ENTRY_BLOCKED', `stage ${stageId} needs ${parts.join(', ')}`, { stage: stageId, gates: blocked, checks: failed })
     }
     this.events.append({ kind: 'stage.entered', payload: { project: projectId, branch, stage: stageId }, actor, project: projectId })
   }

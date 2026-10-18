@@ -1,6 +1,6 @@
 {
   "id": "library-180nm",
-  "description": "Implementation library entries for 180nm processes (requirements §3.8). Densities are bound to a concrete implementation, not to the node. Every value is empirical until FR-EST-13 calibration replaces it.",
+  "description": "Implementation library entries for 180nm processes (requirements §3.8). Densities are bound to a concrete implementation, not to the node. Every value is empirical until FR-EST-13 calibration replaces it. GF180MCU entries carry calibrated values from the eda-gf180 plugin (M1.5); re-run calibration after changing the tool image.",
   "entries": [
     {
       "id": "sephonchitech-180bcd.foundry-rom",
@@ -9,8 +9,20 @@
       "title": "Foundry ROM compiler (mask or via ROM)",
       "availability": "pending",
       "availabilityNote": "unknown whether the foundry offers a ROM compiler (inquiry email question 6)",
-      "densityUm2PerBit": { "low": 0.4, "typ": 0.5, "high": 0.7, "confidence": "empirical", "source": "typical 180nm mask ROM" },
-      "peripheryFactor": { "low": 0.15, "typ": 0.2, "high": 0.3, "confidence": "empirical", "source": "decoders and sense amplifiers" }
+      "densityUm2PerBit": {
+        "low": 0.4,
+        "typ": 0.5,
+        "high": 0.7,
+        "confidence": "empirical",
+        "source": "typical 180nm mask ROM"
+      },
+      "peripheryFactor": {
+        "low": 0.15,
+        "typ": 0.2,
+        "high": 0.3,
+        "confidence": "empirical",
+        "source": "decoders and sense amplifiers"
+      }
     },
     {
       "id": "sephonchitech-180bcd.foundry-sram",
@@ -19,8 +31,20 @@
       "title": "Foundry SRAM compiler",
       "availability": "pending",
       "availabilityNote": "unknown whether the foundry offers an SRAM compiler (inquiry email question 6)",
-      "densityUm2PerBit": { "low": 4, "typ": 5, "high": 6, "confidence": "empirical", "source": "180nm 6T SRAM including periphery" },
-      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+      "densityUm2PerBit": {
+        "low": 4,
+        "typ": 5,
+        "high": 6,
+        "confidence": "empirical",
+        "source": "180nm 6T SRAM including periphery"
+      },
+      "peripheryFactor": {
+        "low": 0,
+        "typ": 0,
+        "high": 0,
+        "confidence": "empirical",
+        "source": "included in density"
+      }
     },
     {
       "id": "sephonchitech-180bcd.stdcell-rom",
@@ -29,8 +53,20 @@
       "title": "Standard-cell logic ROM",
       "availability": "pending",
       "availabilityNote": "1.8V standard-cell library not yet confirmed (inquiry email question 4)",
-      "densityUm2PerBit": { "low": 3, "typ": 4, "high": 5, "confidence": "empirical", "source": "synthesized constant logic; logic minimization can change this a lot" },
-      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+      "densityUm2PerBit": {
+        "low": 3,
+        "typ": 4,
+        "high": 5,
+        "confidence": "empirical",
+        "source": "synthesized constant logic; logic minimization can change this a lot"
+      },
+      "peripheryFactor": {
+        "low": 0,
+        "typ": 0,
+        "high": 0,
+        "confidence": "empirical",
+        "source": "included in density"
+      }
     },
     {
       "id": "gf180mcu.stdcell-rom",
@@ -38,18 +74,42 @@
       "kind": "rom",
       "title": "Standard-cell logic ROM (gf180mcu_fd_sc_mcu7t5v0)",
       "availability": "available",
-      "densityUm2PerBit": { "low": 3, "typ": 4, "high": 5, "confidence": "empirical", "source": "synthesized constant logic, before calibration" },
-      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+      "densityUm2PerBit": {
+        "low": 2.206,
+        "typ": 2.578,
+        "high": 3.013,
+        "confidence": "calibrated",
+        "source": "eda-gf180 0.1.0 calibration on 2026-10-18 (iic-osic-tools@sha256:306585de35d1..., Yosys 0.70, OpenROAD 26Q4-407): random-content ROMs of 16k/64k/256k bits, placed at 60% utilization; typical = 256k bits"
+      },
+      "peripheryFactor": {
+        "low": 0,
+        "typ": 0,
+        "high": 0,
+        "confidence": "calibrated",
+        "source": "decoding is part of the measured logic"
+      }
     },
     {
       "id": "gf180mcu.openram-rom",
       "process": "gf180mcu",
       "kind": "rom",
       "title": "OpenRAM ROM generator (experimental for GF180)",
-      "availability": "pending",
-      "availabilityNote": "experimental; simulation model, Liberty and LEF views must be supplied before use in S4-S6 (requirements §3.8)",
-      "densityUm2PerBit": { "low": 0.5, "typ": 0.8, "high": 1.2, "confidence": "empirical", "source": "OpenRAM ROM bitcell plus periphery, before calibration" },
-      "peripheryFactor": { "low": 0.2, "typ": 0.3, "high": 0.4, "confidence": "empirical", "source": "decoders" }
+      "availability": "unavailable",
+      "availabilityNote": "calibration 2026-10-18: OpenRAM is not in the pinned tool image, and its experimental GF180 ROM output lacks simulation model, Liberty and LEF views",
+      "densityUm2PerBit": {
+        "low": 0.5,
+        "typ": 0.8,
+        "high": 1.2,
+        "confidence": "empirical",
+        "source": "OpenRAM ROM bitcell plus periphery, before calibration"
+      },
+      "peripheryFactor": {
+        "low": 0.2,
+        "typ": 0.3,
+        "high": 0.4,
+        "confidence": "empirical",
+        "source": "decoders"
+      }
     },
     {
       "id": "gf180mcu.sram-512x8",
@@ -57,8 +117,20 @@
       "kind": "sram",
       "title": "gf180mcu_fd_ip_sram__sram512x8m8wm1 macros, tiled",
       "availability": "available",
-      "densityUm2PerBit": { "low": 5, "typ": 6, "high": 8, "confidence": "empirical", "source": "macro area per bit including periphery, before calibration" },
-      "peripheryFactor": { "low": 0, "typ": 0, "high": 0, "confidence": "empirical", "source": "included in density" }
+      "densityUm2PerBit": {
+        "low": 51.123,
+        "typ": 56.235,
+        "high": 63.904,
+        "confidence": "calibrated",
+        "source": "eda-gf180 0.1.0 calibration on 2026-10-18 (iic-osic-tools@sha256:306585de35d1..., Yosys 0.70, OpenROAD 26Q4-407): macro LEF SIZE 431.86 x 484.88 um for 4096 bits, plus 10-25% tiling halo"
+      },
+      "peripheryFactor": {
+        "low": 0,
+        "typ": 0,
+        "high": 0,
+        "confidence": "empirical",
+        "source": "included in density"
+      }
     }
   ]
 }

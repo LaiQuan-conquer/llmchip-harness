@@ -657,6 +657,21 @@ export const kernelSchema = {
               "minimum": 0,
               "default": 2000,
               "description": "Time a cancelled plugin gets to exit before it is killed."
+            },
+            "containerRuntime": {
+              "type": "string",
+              "default": "podman",
+              "description": "Container engine CLI used for `runtime: container` plugins."
+            },
+            "containerCpus": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 4
+            },
+            "containerMemory": {
+              "type": "string",
+              "default": "8g",
+              "description": "Memory limit passed to the container engine."
             }
           }
         },
@@ -1968,6 +1983,26 @@ export const kernelSchema = {
               "items": {
                 "type": "string"
               }
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "check",
+                  "slot"
+                ],
+                "properties": {
+                  "check": {
+                    "type": "string"
+                  },
+                  "slot": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Checks that must pass on the artifact bound to a slot before the stage can be entered (e.g. integration views, FR-PHY-08)."
             }
           }
         }
