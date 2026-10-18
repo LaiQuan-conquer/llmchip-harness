@@ -9,6 +9,7 @@ members = [
     "llmchip-harness-python",
     "llmchip-model",
     "llmchip-numeric",
+    "llmchip-rtl",
     "llmchip-sdk",
 ]
 
@@ -67,6 +68,7 @@ dependencies = [
     { name = "llmchip-estimator" },
     { name = "llmchip-model" },
     { name = "llmchip-numeric" },
+    { name = "llmchip-rtl" },
     { name = "llmchip-sdk" },
 ]
 
@@ -82,6 +84,7 @@ requires-dist = [
     { name = "llmchip-estimator", editable = "plugins/estimator" },
     { name = "llmchip-model", editable = "plugins/model-llama" },
     { name = "llmchip-numeric", editable = "plugins/numeric" },
+    { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
 ]
 
@@ -119,6 +122,23 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "llmchip-model", editable = "plugins/model-llama" },
+    { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
+    { name = "numpy", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "llmchip-rtl"
+version = "0.1.0"
+source = { editable = "plugins/rtl-taalas" }
+dependencies = [
+    { name = "llmchip-numeric" },
+    { name = "llmchip-sdk" },
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "llmchip-numeric", editable = "plugins/numeric" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
     { name = "numpy", specifier = ">=2.0" },
 ]

@@ -85,6 +85,8 @@ Bundled plugins:
 - `model-llama` (Python) — llama2.c checkpoint and tokenizer intake into the Model IR, and the L0 FP32 reference (a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`).
 - `numeric` (Python) — quantization (int8/int4/int3/ternary, group scales), the numeric spec (§3.4.2), the L2 bit-exact integer model with observation-point traces, and the L2-vs-L0 accuracy evaluation (G1 evidence). Bundles an evaluation set.
 - `arch-taalas` (Python) — the Taalas-style hardwired architecture template: chip spec and PPA from a frozen numeric spec, and the consistency check (G2 evidence).
+- `rtl-taalas` (Python) — RTL generator (S4): compiles the numeric spec into a microcoded vector engine (Verilog core, ROM images, microcode, Verilator testbench, instruction-level simulator `isa.py`) as one deterministic `rtl.bundle`; the weight mapping rule is reversible and round-trip checked; `check_isa` verifies the microcode against L2. Never edit a generated bundle; change the generator.
+- `sim-verilator` (container) — lint, simulator qualification, the verification plan (regression, directed, boundary, exhaustive, random, coverage; bundled default plan) with first-divergence localization (operation, element, cycle, VCD window), and L3 generations for the Chip Playground. Runs Verilator, Icarus Verilog and cocotb in the pinned `iic-osic-tools` image.
 - `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, ...): storage implementation calibration (FR-EST-13).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.

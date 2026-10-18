@@ -47,7 +47,7 @@ async function browser() {
   }
 }
 
-const PAGES = ['overview', 'agents', 'trajectory', 'estimator', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES = ['overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
 
 describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
   it('renders every page in both languages without errors or raw keys', { timeout: 120_000 }, async (ctx) => {
@@ -77,7 +77,7 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
           await page.waitForTimeout(150)
           const text = await page.innerText('.app')
           // No catalog key leaked into the page, e.g. "nav.overview".
-          expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|approvals|incidents|artifacts|settings|status|feasibility)\.[a-z]\w*/)
+          expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|approvals|incidents|artifacts|settings|status|feasibility|playground)\.[a-z]\w*/)
         }
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')

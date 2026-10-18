@@ -4,7 +4,7 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.7 (draft) |
+| Document version | v0.8 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
@@ -399,6 +399,7 @@ Artifact types are managed by a schema registry (AP-6), and plugins can register
 - Each level in the chain is a kind of artifact (L0 reference outputs, L2 model, L3 simulation results, …), and the relationship between levels is a check definition: the ≈ relationship corresponds to a statistical evaluation check, and the ≡ relationship corresponds to a bit-by-bit comparison check at the observation points of the numeric spec.
 - The golden chain state is a projection: computed from the latest verdict records and invalidation states of each link.
 - For divergence localization (FR-VER-06), the comparison check plugin produces a "first divergence point" metric, which the UI uses to jump to the corresponding waveform and tensor.
+- **M3 implementation (L2 ≡ L3)**: the RTL generator (`rtl-taalas`) compiles the numeric spec into a microcoded vector engine: weights go into ROMs by a versioned mapping rule (`lanes-interleaved/1`, reversible, round-trip checked at generation), the program ROM holds the microcode, and the RTL bundle ships its own instruction-level simulator `isa.py`. The comparison has two parts: the generator checks "microcode on the instruction-level simulator ≡ L2" (compiler verification); the simulation plugin (`sim-verilator`, in the pinned EDA image) checks "RTL ≡ instruction-level simulator / L2". The simulation plugin executes every item of the verification plan (artifact `verification.plan`) and produces metrics such as `items_*`, `*_mismatches` and `coverage_line_pct`; on a divergence it reruns up to the divergent position with the debug program (which traces the output of every operation) and produces `divergence_*` metrics (operation, element, cycle) and a waveform window around that operation (`waveform.vcd`). The qualification test of the `rtl-functional-sim` capability runs a known design and a variant with a seeded defect on both Verilator and Icarus. When a verdict is fail or indeterminate, K6 opens a `check_failed` incident automatically and carries the `divergence_*` metrics into its summary (AC-09).
 
 ---
 

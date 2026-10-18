@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "stages": [
     {
       "id": "S0",
@@ -156,10 +156,13 @@
       "members": [
         "numeric-spec",
         "rtl",
-        "verification-plan",
-        "verification-report"
+        "l2-trace",
+        "verification-plan"
       ],
-      "checks": []
+      "checks": [
+        "rtl.lint",
+        "rtl.equivalence"
+      ]
     },
     {
       "id": "G4",
@@ -303,6 +306,86 @@
         },
         {
           "metric": "fits_area",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rtl.lint",
+      "version": "1",
+      "title": "Generated RTL is lint-clean (FR-RTL-03)",
+      "plugin": "sim-verilator",
+      "handler": "lint",
+      "criteria": [
+        {
+          "metric": "lint_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "lint_warnings",
+          "op": "==",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "rtl.equivalence",
+      "version": "1",
+      "title": "Every item of the verification plan executed; L3 equals L2 bit for bit; coverage reaches the threshold (G3, AC-03)",
+      "plugin": "sim-verilator",
+      "handler": "verify",
+      "requiredCapability": "rtl-functional-sim",
+      "completeness": [
+        {
+          "metric": "items_not_executed",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "regression_prompts",
+          "op": ">=",
+          "value": 20
+        },
+        {
+          "metric": "tokens_per_prompt",
+          "op": ">=",
+          "value": 64
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "items_failed",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "regression_mismatches",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "random_mismatches",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "coverage_line_pct",
+          "op": ">=",
+          "value": 90
+        }
+      ]
+    },
+    {
+      "id": "sim-verilator.qualify.rtl-functional-sim",
+      "version": "1",
+      "title": "Qualification of the RTL functional simulation capability (FR-VER-01)",
+      "plugin": "sim-verilator",
+      "handler": "qualify",
+      "criteria": [
+        {
+          "metric": "qualified",
           "op": "==",
           "value": true
         }

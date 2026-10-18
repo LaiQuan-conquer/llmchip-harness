@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.7（草稿） |
+| 文档版本 | v0.8（草稿） |
 | 日期 | 2026-10-18 |
 | 状态 | 评审中，尚未基线化（v1.0 为正式基线） |
 | 姊妹文档 | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.zh.md>)：说明"做什么"（对应版本 v0.4） |
@@ -399,6 +399,7 @@ M1c 的实现：变更集按 `submitted → reviewed → verified → merged` �
 - 链路中的每一层都是一类产物（L0 参考输出、L2 模型、L3 仿真结果……），层与层之间的关系是一项检查定义：≈ 关系对应统计评估检查，≡ 关系对应按数值规格观测点的逐比特比较检查。
 - 等价链状态是一个投影：由各链接最新的判定记录和失效状态计算得出。
 - 分歧定位（FR-VER-06）由比较检查的插件产出"第一个分歧点"指标，界面据此跳转到对应波形和张量。
+- **M3 的实现（L2 ≡ L3）**：RTL 生成器（`rtl-taalas`）把数值规格编译成一个微码向量引擎：权重按带版本的映射规则（`lanes-interleaved/1`，可逆，生成时做往返检查）写入 ROM，程序 ROM 存放微码，同一个 RTL 包里附带指令级模拟器 `isa.py`。比较分两段：生成器自己检查"微码在指令级模拟器上 ≡ L2"（编译器验证）；仿真插件（`sim-verilator`，在固定版本的 EDA 镜像中）检查"RTL ≡ 指令级模拟器 / L2"。仿真插件执行验证计划（产物 `verification.plan`）的每一项，产出 `items_*`、`*_mismatches`、`coverage_line_pct` 等指标；出现分歧时用调试程序（每个算子后追踪其输出）重跑到分歧位置，产出 `divergence_*` 指标（算子、元素、周期）和该算子附近的波形片段（`waveform.vcd`）。仿真能力 `rtl-functional-sim` 的资格测试用一个已知设计和一个植入缺陷的变体，分别在 Verilator 和 Icarus 上运行。判定为失败或无法判定时，K6 自动开一个 `check_failed` 事故，并把 `divergence_*` 指标带进事故摘要（AC-09）。
 
 ---
 

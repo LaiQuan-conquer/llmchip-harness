@@ -134,6 +134,19 @@ export class Workflow {
     }
     const previous = this.verdicts({ check: check.id, limit: 1000 }).find((v) => canonicalJson(v.subjects) === canonicalJson(subjects))
     this.events.append({ kind: 'verdict.recorded', payload: { verdict: record }, actor, project: projectId || null, label: run.label })
+    // A failed or undecidable check is an incident, with the run's localization of the
+    // first divergence when it reports one (requirements FR-VER-06, AC-09).
+    if (verdict === 'fail' || verdict === 'indeterminate') {
+      const divergence = Object.fromEntries(Object.entries(run.metrics).filter(([key]) => key.startsWith('divergence_')))
+      this.incidents.open({
+        kind: 'check_failed',
+        severity: 'warning',
+        summary: { code: 'divergence_operation' in divergence ? 'CHECK_FAILED_DIVERGENCE' : 'CHECK_FAILED', params: { check: check.id, verdict, verdictId: record.id, ...divergence } },
+        actor,
+        project: projectId || null,
+        refs: { artifacts: subjects, runs: [run.id] },
+      })
+    }
     // A check that newly passes only because its standard changed must be reviewed by a human (AC-M1-13).
     if (verdict === 'pass' && previous && previous.verdict !== 'pass' && previous.checkVersion !== record.checkVersion) {
       this.incidents.open({

@@ -1,0 +1,40 @@
+{
+  "id": "rtl-taalas",
+  "version": "0.1.0",
+  "title": "RTL generator for the Taalas-style vector engine (S4)",
+  "kinds": ["rtl-generator"],
+  "runtime": "process",
+  "entry": { "command": ["${python}", "-m", "llmchip_rtl"] },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "generate",
+      "title": "RTL bundle (vector engine, ROM images, microcode, testbench) and storage map",
+      "inputs": [
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "chip", "types": ["chip.spec"], "required": true }
+      ],
+      "outputs": [
+        { "name": "rtl", "type": "rtl.bundle", "mediaType": "application/x-tar" },
+        { "name": "storage", "type": "storage.map", "mediaType": "application/json" }
+      ],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 1800000
+    },
+    {
+      "name": "check_isa",
+      "title": "Compiler verification: the generated program on the instruction-level simulator equals L2",
+      "inputs": [
+        { "name": "rtl", "types": ["rtl.bundle"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true }
+      ],
+      "outputs": [{ "name": "report", "type": "isa.check", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 3600000
+    }
+  ]
+}

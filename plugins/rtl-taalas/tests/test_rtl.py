@@ -1,0 +1,126 @@
+import hashlib
+import io
+import json
+import tarfile
+from pathlib import Path
+
+import numpy as np
+import pytest
+from llmchip_model import Tokenizer, load_llama2c
+from llmchip_model.evalset import load_evalset
+from llmchip_numeric import L2Model, build
+from llmchip_rtl import isa
+from llmchip_rtl.bundle import bundle_files, write_tar
+from llmchip_rtl.compiler import Compiled, map_matrix, unmap_matrix
+
+ROOT = Path(__file__).parents[3]
+FIXTURE = ROOT / "tests" / "fixtures" / "models" / "stories260K"
+EVALSET = ROOT / "plugins" / "numeric" / "data" / "evalset-tinystories.json"
+
+
+@pytest.fixture(scope="module")
+def setup(tmp_path_factory):
+    cfg, w = load_llama2c((FIXTURE / "stories260K.bin").read_bytes())
+    tok = Tokenizer((FIXTURE / "tok512.bin").read_bytes(), cfg.vocab_size)
+    evalset = load_evalset(EVALSET)
+    spec, npz = build(cfg, w, tok, evalset["calibration"], weight_format="int4")
+    d = tmp_path_factory.mktemp("l2")
+    (d / "s.json").write_text(json.dumps(spec))
+    (d / "w.npz").write_bytes(npz)
+    l2 = L2Model.load(d / "s.json", d / "w.npz")
+    return l2, tok, evalset, Compiled(l2.spec, l2.a, 8)
+
+
+@pytest.mark.parametrize("lanes", [1, 4, 8, 16])
+def test_mapping_round_trip_with_padding(lanes):
+    rng = np.random.default_rng(lanes)
+    q = rng.integers(-8, 8, (37, 24))
+    m = rng.integers(1, 2**15, (37, 3))
+    words, scales = map_matrix(q, m, lanes)
+    assert words.shape[1] == scales.shape[1] == lanes
+    back_q, back_m = unmap_matrix(words, scales, 37, 24, 3, lanes)
+    assert np.array_equal(back_q, q) and np.array_equal(back_m, m)
+    # Padding rows hold the fill values of the mapping rule: q = 0, m = 1.
+    blocks = -(-37 // lanes)
+    full = words.reshape(blocks, 24, lanes).transpose(0, 2, 1).reshape(blocks * lanes, 24)
+    assert not full[37:].any()
+
+
+def test_compiled_design_unmaps_to_the_quantized_weights(setup):
+    l2, _, _, c = setup
+    restored = c.unmap()
+    assert sorted(restored) == sorted(l2.a)
+    for k, v in l2.a.items():
+        assert np.array_equal(restored[k], v), k
+
+
+def test_instruction_encoding_round_trips():
+    fields = [0, -1, 2**31 - 1, -(2**31), 12345]
+    op, back = isa.decode(isa.encode("MATVEC", fields))
+    assert op == "MATVEC" and back[:5] == fields and not any(back[5:])
+    with pytest.raises(ValueError):
+        isa.encode("ADD", [2**31])
+
+
+def test_scalar_functions_follow_the_numeric_spec():
+    assert [isa.rsh(v, 2) for v in (5, 6, 7, -5, -6, -7)] == [1, 2, 2, -1, -1, -2]
+    assert isa.rsh(3, -2) == 12 and isa.rsh(3, 0) == 3
+    assert isa.sat(40000, 16) == 32767 and isa.sat(-40000, 16) == -32768
+    for v in (1, 2, 63, 64, 255, 256, 2**20 + 7, 2**40):
+        e2, t = isa.rsqrt_index(v)
+        assert e2 % 2 == 0 and 64 <= t < 256
+
+
+def test_isa_program_equals_l2_bit_for_bit(setup):
+    l2, tok, evalset, c = setup
+    machine = isa.Machine(c.program, c.wrom, c.srom, c.crom, c.lanes, c.dmem_words, c.context)
+    for prompt in evalset["prompts"][:3]:
+        ids = tok.encode(prompt)
+        steps: list = []
+        l2.generate(ids, 16, steps)
+        token = ids[0]
+        for pos, expected in enumerate(steps):
+            traces: list = []
+            out = machine.step(token, pos, traces)
+            got = {(t["point"], t["layer"]): t["values"] for t in traces}
+            for layer, v in enumerate(expected["attn_residual"]):
+                assert np.array_equal(got[(1, layer)], v)
+            for layer, v in enumerate(expected["ffn_residual"]):
+                assert np.array_equal(got[(2, layer)], v)
+            assert np.array_equal(got[(3, 0)], expected["logits"])
+            if pos >= len(ids) - 1:
+                assert out == expected["token"]
+            token = expected["token"]
+
+
+def test_debug_program_traces_every_operation(setup):
+    *_, c = setup
+    ops = [isa.decode(w)[0] for w in c.program]
+    computing = [i for i, op in enumerate(ops) if op not in ("TRACE", "END", "ARGMAX")]
+    assert c.debug_map == computing
+    assert len(c.debug_program) == len(c.program) + len(computing)
+
+
+def test_bundle_is_deterministic_and_self_contained(setup, tmp_path):
+    *_, c = setup
+    source = {"numericSpec": "a" * 64, "weights": "b" * 64}
+    write_tar(bundle_files(c, source), tmp_path / "a.tar")
+    write_tar(bundle_files(c, source), tmp_path / "b.tar")
+    a, b = (tmp_path / "a.tar").read_bytes(), (tmp_path / "b.tar").read_bytes()
+    assert hashlib.sha256(a).digest() == hashlib.sha256(b).digest()
+    with tarfile.open(fileobj=io.BytesIO(a)) as tar:
+        names = set(tar.getnames())
+        design = json.loads(tar.extractfile("bundle/design.json").read())
+        params = tar.extractfile("bundle/rtl/llmchip_params.vh").read().decode()
+    for name in (
+        "isa.py",
+        "isa-image.npz",
+        "rtl/llmchip_core.v",
+        "rtl/tb.cpp",
+        "rtl/wrom.hex",
+        "rtl/prog.hex",
+        "rtl/prog_debug.hex",
+    ):
+        assert f"bundle/{name}" in names
+    assert design["source"] == source
+    assert f"`define VOCAB {design['model']['vocab_size']}" in params

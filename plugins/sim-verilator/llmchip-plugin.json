@@ -1,0 +1,60 @@
+{
+  "id": "sim-verilator",
+  "version": "0.1.0",
+  "title": "RTL lint and functional verification with Verilator, Icarus Verilog and cocotb (S4-S5)",
+  "kinds": ["simulator", "eda-adapter"],
+  "runtime": "container",
+  "entry": {
+    "command": ["python3", "/llmchip/plugin/__main__.py"],
+    "image": "docker.io/hpretl/iic-osic-tools@sha256:306585de35d198e70ea58950f77147c86f56c698726a19afea9f1c83009557be"
+  },
+  "kernelApi": "^0.3",
+  "requiresProcessCapabilities": [],
+  "capabilities": [{ "name": "rtl-functional-sim", "qualification": "qualify" }],
+  "data": [{ "id": "verification-plan-default", "type": "verification.plan", "path": "data/verification-plan.json", "label": "public" }],
+  "handlers": [
+    {
+      "name": "lint",
+      "title": "Verilator lint of the generated RTL (FR-RTL-03)",
+      "inputs": [{ "name": "rtl", "types": ["rtl.bundle"], "required": true }],
+      "outputs": [{ "name": "report", "type": "lint.report", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "qualify",
+      "title": "Qualification of the rtl-functional-sim capability: a known design bit for bit, a seeded defect detected",
+      "outputs": [{ "name": "report", "type": "qualification.report", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "verify",
+      "title": "Execute a verification plan: L3 against L2 and the instruction-level simulator, divergence localization, coverage",
+      "inputs": [
+        { "name": "rtl", "types": ["rtl.bundle"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "trace", "types": ["l2.trace"], "required": true },
+        { "name": "plan", "types": ["verification.plan"], "required": true }
+      ],
+      "outputs": [
+        { "name": "report", "type": "verification.report", "mediaType": "application/json" },
+        { "name": "waveform", "type": "waveform.vcd", "mediaType": "text/plain" }
+      ],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "generate",
+      "title": "L3 generations of the RTL for the prompts of an evaluation set (Chip Playground)",
+      "inputs": [
+        { "name": "rtl", "types": ["rtl.bundle"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true }
+      ],
+      "outputs": [{ "name": "outputs", "type": "l3.outputs", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 3600000
+    }
+  ]
+}

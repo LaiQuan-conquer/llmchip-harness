@@ -7,11 +7,12 @@ import { ArtifactsView } from './views/Artifacts.tsx'
 import { EstimatorView } from './views/Estimator.tsx'
 import { IncidentsView } from './views/Incidents.tsx'
 import { OverviewView } from './views/Overview.tsx'
+import { PlaygroundView } from './views/Playground.tsx'
 import { SettingsView } from './views/Settings.tsx'
 import { TrajectoryView } from './views/Trajectory.tsx'
 import { eventLine, timeOf } from './views/common.tsx'
 
-export type Page = 'overview' | 'agents' | 'trajectory' | 'estimator' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
+export type Page = 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
 
 export interface Selection {
   project: string | null
@@ -19,7 +20,7 @@ export interface Selection {
   artifact: string | null
 }
 
-const PAGES: Page[] = ['overview', 'agents', 'trajectory', 'estimator', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES: Page[] = ['overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
 
 /** Main layout (FR-UI-05): projects and tasks on the left, the work in the middle, context on the right. */
 export function App() {
@@ -55,6 +56,7 @@ export function App() {
         {page === 'agents' && <AgentsView {...props} />}
         {page === 'trajectory' && <TrajectoryView {...props} />}
         {page === 'estimator' && <EstimatorView {...props} />}
+        {page === 'playground' && <PlaygroundView {...props} />}
         {page === 'approvals' && <ApprovalsView {...props} />}
         {page === 'incidents' && <IncidentsView {...props} />}
         {page === 'artifacts' && <ArtifactsView {...props} />}

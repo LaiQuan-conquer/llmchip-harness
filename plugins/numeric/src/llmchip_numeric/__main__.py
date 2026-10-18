@@ -58,12 +58,32 @@ def infer(ctx: InvokeContext) -> Result:
     for i, prompt in enumerate(evalset["prompts"]):
         ctx.check_cancelled()
         steps: list = []
-        tokens = model.generate(tokenizer.encode(prompt), evalset["steps"], steps)
-        generations.append({"prompt": prompt, "tokens": tokens, "text": tokenizer.decode(tokens)})
+        ids = tokenizer.encode(prompt)
+        tokens = model.generate(ids, evalset["steps"], steps)
+        traces[f"p{i}.prompt"] = np.array(ids, np.int64)
+        generations.append({"prompt": prompt, "promptTokens": ids, "tokens": tokens, "text": tokenizer.decode(tokens)})
         traces[f"p{i}.tokens"] = np.array([s["token"] for s in steps], np.int64)
         traces[f"p{i}.logits"] = np.array([s["logits"] for s in steps], np.int64)
         for point in ("attn_residual", "ffn_residual"):
             traces[f"p{i}.{point}"] = np.array([s[point] for s in steps], np.int64)
+    # Random token sequences, every position forced (constrained-random verification, FR-VER-04).
+    rnd = evalset.get("random") or {"seed": 20261018, "sequences": 4, "length": 16}
+    rng = np.random.default_rng(rnd["seed"])
+    length = min(rnd["length"], model.context)
+    for i in range(rnd["sequences"]):
+        ctx.check_cancelled()
+        ids = [1] + [int(t) for t in rng.integers(0, model.vocab, length - 1)]
+        steps = []
+        model.generate(ids, length, steps)
+        traces[f"r{i}.prompt"] = np.array(ids, np.int64)
+        traces[f"r{i}.tokens"] = np.array([s["token"] for s in steps], np.int64)
+        traces[f"r{i}.logits"] = np.array([s["logits"] for s in steps], np.int64)
+        for point in ("attn_residual", "ffn_residual"):
+            traces[f"r{i}.{point}"] = np.array([s[point] for s in steps], np.int64)
+    # Identifies what the trace was computed from, so comparisons can refuse a stale trace.
+    traces["meta.spec"] = np.array(ctx.input("spec").hash)
+    traces["meta.weights"] = np.array(ctx.input("weights").hash)
+    traces["meta.steps"] = np.array(evalset["steps"], np.int64)
     out = Path(ctx.out_dir)
     (out / "l2.json").write_text(
         json.dumps({"layer": "L2", "generations": generations, "saturations": model.saturations}, indent=2)
