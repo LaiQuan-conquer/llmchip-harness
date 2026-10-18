@@ -18,6 +18,13 @@ export function ArtifactsView({ selection, select }: { selection: Selection; sel
     [meta?.hash],
     false,
   )
+  // Images such as the rendered layout (FR-PHY-05) are shown inline.
+  const { data: image } = useQuery(
+    async () => (meta && meta.mediaType.startsWith('image/') && meta.label !== 'nda' ? URL.createObjectURL(await (await client.download(meta.hash)).blob()) : undefined),
+    [meta?.hash],
+    false,
+  )
+  const [hash, setHash] = useState('')
   return (
     <>
       {meta && (
@@ -42,9 +49,19 @@ export function ArtifactsView({ selection, select }: { selection: Selection; sel
           {meta.label === 'nda' && <p className="muted">{t('artifacts.ndaHidden')}</p>}
           <ErrorLine error={error} />
           {content !== undefined && <pre className="content">{content.slice(0, 50_000)}</pre>}
+          {image && <img className="layout" src={image} alt={meta.type} />}
         </Section>
       )}
-      <Section title={t('nav.artifacts')} actions={<input placeholder={t('artifacts.type')} value={type} onChange={(e) => setType(e.target.value)} />}>
+      <Section
+        title={t('nav.artifacts')}
+        actions={
+          <>
+            {/* A hash from a package manifest opens that artifact and its lineage (AC-08). */}
+            <input placeholder={t('artifacts.openHash')} value={hash} onChange={(e) => setHash(e.target.value.trim())} onKeyDown={(e) => e.key === 'Enter' && /^[0-9a-f]{64}$/.test(hash) && select({ artifact: hash })} />
+            <input placeholder={t('artifacts.type')} value={type} onChange={(e) => setType(e.target.value)} />
+          </>
+        }
+      >
         <table>
           <thead>
             <tr>

@@ -2,36 +2,175 @@
   "id": "model-llama",
   "version": "0.1.0",
   "title": "Llama-family model intake and L0 FP32 reference (llama2.c format)",
-  "kinds": ["model-loader"],
+  "kinds": [
+    "model-loader"
+  ],
   "runtime": "process",
-  "entry": { "command": ["${python}", "-m", "llmchip_model"] },
+  "entry": {
+    "command": [
+      "${python}",
+      "-m",
+      "llmchip_model"
+    ]
+  },
   "kernelApi": "^0.3",
   "handlers": [
+    {
+      "name": "synthesize",
+      "title": "Proxy model: the structure of a planned model with fixed-seed, untrained weights and a character tokenizer",
+      "outputs": [
+        {
+          "name": "weights",
+          "type": "model.weights.llama2c",
+          "mediaType": "application/octet-stream"
+        },
+        {
+          "name": "tokenizer",
+          "type": "model.tokenizer.llama2c",
+          "mediaType": "application/octet-stream"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dim",
+          "hiddenDim",
+          "layers",
+          "heads",
+          "kvHeads",
+          "seqLen"
+        ],
+        "properties": {
+          "dim": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 4096
+          },
+          "hiddenDim": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 16384
+          },
+          "layers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "heads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kvHeads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "seqLen": {
+            "type": "integer",
+            "minimum": 8,
+            "maximum": 4096
+          },
+          "seed": {
+            "type": "integer",
+            "default": 1
+          },
+          "chars": {
+            "type": "string",
+            "minLength": 2,
+            "description": "One token per character; must contain the space."
+          }
+        }
+      },
+      "timeoutMs": 600000
+    },
     {
       "name": "intake",
       "title": "Read a llama2.c checkpoint and tokenizer into the Model IR (S1)",
       "inputs": [
-        { "name": "weights", "types": ["model.weights.llama2c"], "required": true },
-        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true }
+        {
+          "name": "weights",
+          "types": [
+            "model.weights.llama2c"
+          ],
+          "required": true
+        },
+        {
+          "name": "tokenizer",
+          "types": [
+            "model.tokenizer.llama2c"
+          ],
+          "required": true
+        }
       ],
       "outputs": [
-        { "name": "ir", "type": "model.ir", "mediaType": "application/x-npz" },
-        { "name": "structure", "type": "model.structure", "mediaType": "application/json" }
+        {
+          "name": "ir",
+          "type": "model.ir",
+          "mediaType": "application/x-npz"
+        },
+        {
+          "name": "structure",
+          "type": "model.structure",
+          "mediaType": "application/json"
+        }
       ],
-      "params": { "type": "object", "additionalProperties": false, "properties": { "license": { "type": "string" } } },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "license": {
+            "type": "string"
+          }
+        }
+      },
       "timeoutMs": 600000
     },
     {
       "name": "reference",
       "title": "L0 reference outputs and perplexity on an evaluation set",
       "inputs": [
-        { "name": "ir", "types": ["model.ir"], "required": true },
-        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
-        { "name": "evalset", "types": ["eval.set"], "required": true }
+        {
+          "name": "ir",
+          "types": [
+            "model.ir"
+          ],
+          "required": true
+        },
+        {
+          "name": "tokenizer",
+          "types": [
+            "model.tokenizer.llama2c"
+          ],
+          "required": true
+        },
+        {
+          "name": "evalset",
+          "types": [
+            "eval.set"
+          ],
+          "required": true
+        }
       ],
-      "outputs": [{ "name": "outputs", "type": "l0.outputs", "mediaType": "application/json" }],
-      "params": { "type": "object", "additionalProperties": false },
+      "outputs": [
+        {
+          "name": "outputs",
+          "type": "l0.outputs",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "timeoutMs": 1800000
+    }
+  ],
+  "data": [
+    {
+      "id": "evalset-proxy",
+      "type": "eval.set",
+      "path": "data/evalset-proxy.json",
+      "label": "public"
     }
   ]
 }

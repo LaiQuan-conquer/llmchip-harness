@@ -1,5 +1,6 @@
 import hashlib
 import io
+import itertools
 import json
 import tarfile
 from pathlib import Path
@@ -93,12 +94,42 @@ def test_isa_program_equals_l2_bit_for_bit(setup):
             token = expected["token"]
 
 
-def test_debug_program_traces_every_operation(setup):
+def test_debug_traces_follow_every_operation_and_have_their_own_buffers(setup):
     *_, c = setup
-    ops = [isa.decode(w)[0] for w in c.program]
-    computing = [i for i, op in enumerate(ops) if op not in ("TRACE", "END", "ARGMAX")]
-    assert c.debug_map == computing
-    assert len(c.debug_program) == len(c.program) + len(computing)
+    program = [isa.decode(w) for w in c.program]
+    traced = [t["layer"] for t in c.trace_map if t["debug"]]
+    computing = [i for i, (op, _) in enumerate(program) if op not in ("TRACE", "END", "ARGMAX")]
+    assert traced == computing == c.debug_map
+    for i in computing:  # the debug trace directly follows its operation
+        op, f = program[i + 1]
+        assert op == "TRACE" and f[4] & isa.FLAG_DEBUG and f[3] == i
+    # Trace buffers lie after the working data and do not overlap.
+    spans = sorted((t["addr"], t["addr"] + t["n"]) for t in c.trace_map)
+    assert spans[0][0] >= c.data_words and all(a[1] <= b[0] for a, b in itertools.pairwise(spans))
+    assert spans[-1][1] == c.dmem_words
+
+
+def test_debug_mode_copies_more_traces_and_the_same_tokens(setup):
+    _l2, tok, evalset, c = setup
+    ids = tok.encode(evalset["prompts"][0])
+    tokens = None
+    for mode in (isa.MODE_POINTS, isa.MODE_POINTS | isa.MODE_DEBUG):
+        machine = isa.Machine(c.program, c.wrom, c.srom, c.crom, c.lanes, c.dmem_words, c.context)
+        traces: list = []
+        out = machine.step(ids[0], 0, traces, mode=mode)
+        debug = [t for t in traces if t["point"] == isa.POINTS["op"]]
+        assert bool(debug) == bool(mode & isa.MODE_DEBUG)
+        tokens = out
+    # Debug traces only copy data: the token is the same in both modes.
+    assert tokens == isa.Machine(c.program, c.wrom, c.srom, c.crom, c.lanes, c.dmem_words, c.context).step(ids[0], 0)
+
+
+def test_widths_bound_every_value(setup):
+    *_, c = setup
+    w = c.widths
+    assert w["DW"] >= 34 and w["ACCW"] <= w["DW"] and w["TOTW"] <= w["DW"] and w["CW"] <= 18
+    assert (1 << w["AW"]) >= c.dmem_words and (1 << w["PCW"]) >= len(c.program)
+    assert w["RSH_POSITIVE"] == 1 and w["SILU_FRAC_GE4"] == 1
 
 
 def test_bundle_is_deterministic_and_self_contained(setup, tmp_path):
@@ -116,10 +147,11 @@ def test_bundle_is_deterministic_and_self_contained(setup, tmp_path):
         "isa.py",
         "isa-image.npz",
         "rtl/llmchip_core.v",
+        "rtl/llmchip_chip.v",
+        "rtl/llmchip_roms.v",
         "rtl/tb.cpp",
-        "rtl/wrom.hex",
-        "rtl/prog.hex",
-        "rtl/prog_debug.hex",
+        "rtl/tb_top.v",
+        "rtl/trace.map",
     ):
         assert f"bundle/{name}" in names
     assert design["source"] == source

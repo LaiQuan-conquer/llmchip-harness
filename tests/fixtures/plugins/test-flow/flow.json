@@ -2,10 +2,56 @@
   "id": "test",
   "version": "1",
   "stages": [
-    { "id": "A", "title": "Design" },
-    { "id": "B", "title": "Signoff", "entry": { "gates": ["GA"] } }
+    {
+      "id": "A",
+      "title": "Design"
+    },
+    {
+      "id": "B",
+      "title": "Signoff",
+      "entry": {
+        "gates": [
+          "GA"
+        ]
+      }
+    },
+    {
+      "id": "C",
+      "title": "Package",
+      "entry": {
+        "gates": [
+          "GB"
+        ]
+      }
+    }
   ],
-  "gates": [{ "id": "GA", "title": "Design freeze", "after": "A", "members": ["design", "spec"], "checks": ["stub.drc"] }],
+  "gates": [
+    {
+      "id": "GA",
+      "title": "Design freeze",
+      "after": "A",
+      "members": [
+        "design",
+        "spec"
+      ],
+      "checks": [
+        "stub.drc"
+      ]
+    },
+    {
+      "id": "GB",
+      "title": "Tapeout signoff",
+      "after": "B",
+      "members": [
+        "design",
+        "registry",
+        "package"
+      ],
+      "checks": [
+        "stub.drc"
+      ]
+    }
+  ],
   "checks": [
     {
       "id": "stub.drc",
@@ -13,8 +59,20 @@
       "title": "Design rule check",
       "plugin": "stub-tool",
       "handler": "report",
-      "completeness": [{ "metric": "coverage.complete", "op": "==", "value": true }],
-      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }],
+      "completeness": [
+        {
+          "metric": "coverage.complete",
+          "op": "==",
+          "value": true
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "violations",
+          "op": "==",
+          "value": 0
+        }
+      ],
       "waiver": "risk_acceptance"
     },
     {
@@ -23,7 +81,13 @@
       "title": "Manufacturing rule check",
       "plugin": "stub-tool",
       "handler": "report",
-      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }],
+      "criteria": [
+        {
+          "metric": "violations",
+          "op": "==",
+          "value": 0
+        }
+      ],
       "waiver": "foundry_waiver"
     },
     {
@@ -33,7 +97,13 @@
       "plugin": "stub-tool",
       "handler": "report",
       "requiredCapability": "sdf",
-      "criteria": [{ "metric": "violations", "op": "==", "value": 0 }]
+      "criteria": [
+        {
+          "metric": "violations",
+          "op": "==",
+          "value": 0
+        }
+      ]
     },
     {
       "id": "stub-tool.qualify.sdf",
@@ -41,7 +111,16 @@
       "title": "Qualification of the stub tool's SDF capability",
       "plugin": "stub-tool",
       "handler": "qualify",
-      "criteria": [{ "metric": "detected", "op": "==", "value": true }]
+      "criteria": [
+        {
+          "metric": "detected",
+          "op": "==",
+          "value": true
+        }
+      ]
     }
+  ],
+  "hardConstraintSlots": [
+    "registry"
   ]
 }

@@ -21,6 +21,7 @@ import simlib
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
 HERE = Path(__file__).parent
+JOBS = max(1, min(16, os.cpu_count() or 1))  # parallel simulator processes
 
 
 def tool_versions() -> dict:
@@ -140,7 +141,7 @@ class Verification:
             )
             for i, k in enumerate(keys)
         ]
-        records = self.bundle.simulate(lines, coverage=coverage, name=name)
+        records = self.bundle.simulate(lines, coverage=coverage, name=name, jobs=JOBS)
         results = [simlib.compare_with_l2(records, self.trace, i, k, self.layers) for i, k in enumerate(keys)]
         return results, records
 
@@ -290,7 +291,11 @@ class Verification:
         key = f"p{self.prompts[-1]}"
         results, _ = self.compare_runs([key], "busy")
         status, metrics, details = self.summarize(results, [key], "start_while_busy")
-        return status, metrics, details | {"stimulus": "start pulse with token^1 and pos+1 at cycle 10 of every step"}
+        return (
+            status,
+            metrics,
+            details | {"stimulus": "a START frame with token^1 and pos+1, 1000 cycles into every step"},
+        )
 
     def directed_debug_readback(self, item: dict) -> tuple:
         key = f"p{self.prompts[0]}"
@@ -341,6 +346,9 @@ class Verification:
             "ALU_TESTS": ",".join(i["id"] for i in items),
             "ISA_PATH": str(self.bundle.root / "isa.py"),
             "H1_FRAC": str(h1_frac),
+            "DW": str(self.bundle.params["DW"]),
+            "RSH_POSITIVE": str(self.bundle.params.get("RSH_POSITIVE", 0)),
+            "SILU_FRAC_GE4": str(self.bundle.params.get("SILU_FRAC_GE4", 0)),
             "RESULTS": str(results_file),
             "PYTHONPATH": os.pathsep.join([str(HERE), *sys.path]),
             "PATH": simlib.ENV["PATH"],
@@ -362,17 +370,18 @@ class Verification:
         lines = [
             simlib.run_line(i, self.steps, [int(t) for t in self.trace[f"{k}.prompt"]]) for i, k in enumerate(keys)
         ]
+        reset_at = max((self.step_cycles or 2000) // 2, 20)
         lines.append(
-            simlib.run_line(
-                len(lines),
-                3,
-                [int(t) for t in self.trace[f"{keys[0]}.prompt"]],
-                reset_cycles=max((self.step_cycles or 2000) // 2, 20),
-            )
+            simlib.run_line(len(lines), 3, [int(t) for t in self.trace[f"{keys[0]}.prompt"]], reset_cycles=reset_at)
         )
-        self.bundle.simulate(lines, coverage=True, name="coverage")
+        files: list[str] = []
+        self.bundle.simulate(lines, coverage=True, name="coverage", jobs=JOBS)
+        files += self.bundle.coverage_files
+        self.bundle.simulate([simlib.run_line(0, 2, [1, 5])], debug=True, coverage=True, name="coverage_debug")
+        files += self.bundle.coverage_files
         self.illegal_inputs(coverage=True)
-        summary = simlib.coverage_summary(self.bundle, ["coverage.dat", "illegal.dat", "illegal_op.dat"])
+        files += ["illegal.dat", "illegal_op.dat"]
+        summary = simlib.coverage_summary(self.bundle, files)
         ok = summary["pct"] >= threshold
         return (
             ("passed" if ok else "failed"),
@@ -503,6 +512,137 @@ def verify(ctx: InvokeContext) -> Result:
     return Result(outputs=outputs, metrics=metrics, parse={"status": "complete", "parser": "sim-verilator/verify"})
 
 
+# -- gate-level simulation (L4) ---------------------------------------------------------
+
+
+def gatesim(ctx: InvokeContext) -> Result:
+    """Zero-delay functional simulation of the routed netlist against L2 (FR-SGN-03, L4), on Icarus Verilog."""
+    import tarfile
+
+    bundle = simlib.Bundle(ctx.input("rtl").path, Path(ctx.work_dir))
+    layout = Path(ctx.work_dir) / "layout"
+    with tarfile.open(ctx.input("layout").path) as tar:
+        tar.extractall(layout)
+    trace = load_trace(ctx.input("trace").path)
+    spec = ctx.input("spec")
+    if str(trace.get("meta.spec", "")) != spec.hash or bundle.design.get("source", {}).get("numericSpec") != spec.hash:
+        raise ValueError("the RTL bundle or the L2 trace belongs to a different numeric spec")
+    prompts = int(ctx.params.get("prompts", 2))
+    steps = int(ctx.params.get("steps", 16))
+    keys = sorted(
+        (k.split(".")[0] for k in trace if k.startswith("p") and k.endswith(".tokens")), key=lambda k: int(k[1:])
+    )[:prompts]
+    layers = bundle.design["model"]["n_layers"]
+    ctx.progress(0.1, "building the gate-level model")
+    bundle.build_gate(layout)
+    ctx.progress(0.3, "simulating")
+    runs = [
+        (i, min(steps, len(trace[f"{k}.tokens"])), [int(t) for t in trace[f"{k}.prompt"]]) for i, k in enumerate(keys)
+    ]
+    records = bundle.simulate_gate(layout, runs, jobs=JOBS)
+    results = []
+    for i, k in enumerate(keys):
+        r = simlib.compare_with_l2(records, {**trace, f"{k}.tokens": trace[f"{k}.tokens"][:steps]}, i, k, layers)
+        results.append({"key": k, **r})
+    steps_done = sum(r["steps"] for r in results)
+    metrics = {
+        "gl_prompts": len(keys),
+        "gl_tokens_per_prompt": min((r["steps"] for r in results), default=0),
+        "gl_steps": steps_done,
+        "gl_values": sum(r["values"] for r in results),
+        "gl_mismatches": sum(r["mismatches"] for r in results),
+        "gl_cycles_per_token": int(np.median([r["cycles"] for r in records])) if records else 0,
+    }
+    report = {
+        "level": "L4",
+        "evidence": "zero-delay gate-level simulation of the routed netlist (Icarus Verilog, PDK cell models)",
+        "netlist": "views/chip_top.nl.v",
+        "sequences": results,
+        "summary": metrics,
+    }
+    Path(ctx.out_dir, "gatesim.json").write_text(
+        json.dumps(report, indent=2, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
+    )
+    return Result(
+        outputs=[Output("report", "gatesim.json", "gatesim.report", "application/json")],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "sim-verilator/gatesim"},
+    )
+
+
+# -- SDF timing simulation (supplementary evidence, FR-VER-02/03) ------------------------
+
+TIMING_FREE = ("fill", "tap", "endcap", "antenna", "filltie", "decap", "tiel", "tieh")
+
+
+def sdfsim(ctx: InvokeContext) -> Result:
+    """Gate-level simulation with SDF back-annotation (Icarus Verilog). The result states how
+    complete the annotation was; incomplete or ignored annotation is never a pass (AC-12)."""
+    import re
+    import tarfile
+
+    work = Path(ctx.work_dir)
+    layout = work / "layout"
+    with tarfile.open(ctx.input("layout").path) as tar:
+        tar.extractall(layout)
+    models = json.loads((layout / "sim" / "models.json").read_text())
+    netlist = layout / "views" / f"{models['top']}.nl.v"
+    sdf = work / "design.sdf"
+    sdf.write_bytes(Path(ctx.input("sdf").path).read_bytes())
+    period = float(ctx.params.get("periodNs", 125))
+    # Instances with timing arcs in the netlist, and the instances the SDF annotates.
+    text = netlist.read_text()
+    cells = re.findall(r"^\s*(gf180mcu_fd_sc_\w+)\s+(\S+)\s*\(", text, re.M)
+    timed = {inst.lstrip("\\") for cell, inst in cells if not any(t in cell.split("__")[-1] for t in TIMING_FREE)}
+    sdf_text = sdf.read_text(errors="replace")
+    annotated = {i.replace("\\", "") for i in re.findall(r"\(INSTANCE\s+([^)\s]+)\s*\)", sdf_text)}
+    missing = sorted(timed - annotated)
+    cmd = [
+        f"{simlib.TOOLS}/iverilog",
+        "-g2012",
+        "-gspecify",
+        "-ginterconnect",
+        "-o",
+        "sdf.vvp",
+        f"-DPERIOD={period}",
+        f'-DSDF_FILE="{sdf}"',
+        str(HERE / "sdf_tb.v"),
+        str(netlist),
+        str(layout / models["pads"]),
+        *models["cells"],
+    ]
+    simlib.run(cmd, work, timeout=7200)
+    proc = subprocess.run(
+        [f"{simlib.TOOLS}/vvp", "-n", "sdf.vvp"], cwd=work, capture_output=True, text=True, timeout=7200, env=simlib.ENV
+    )
+    log = proc.stdout + proc.stderr
+    (Path(ctx.out_dir) / "sdfsim.log").write_text(log[-200000:])
+    # Every annotation problem the simulator reports (unknown cells, nets, arcs) is "ignored".
+    ignored = len(re.findall(r"^(?:SDF |)(?:WARNING|ERROR|Warning|Error)\b.*", log, re.M))
+    m = re.search(r"SDFTB errors (\d+)", log)
+    metrics = {
+        "sdf_instances_netlist": len(timed),
+        "sdf_instances_annotated": len(timed & annotated),
+        "sdf_missing": len(missing),
+        "sdf_ignored": ignored,
+        "sdf_annotation_errors_conditional_arcs": len(re.findall(r"Unable to match ModPath", log)),
+        "sdf_annotation_complete": not missing and ignored == 0,
+        "sim_completed": m is not None,
+        "sim_errors": int(m.group(1)) if m else -1,
+    }
+    Path(ctx.out_dir, "sdfsim.json").write_text(
+        json.dumps(
+            {"metrics": metrics, "missing": missing[:200], "evidence": "SDF timing simulation (supplementary)"},
+            indent=2,
+        )
+    )
+    return Result(
+        outputs=[Output("report", "sdfsim.json", "sdfsim.report", "application/json")],
+        metrics=metrics,
+        parse={"status": "complete" if m else "partial", "parser": "sim-verilator/sdfsim"},
+    )
+
+
 # -- playground -----------------------------------------------------------------------
 
 
@@ -542,4 +682,15 @@ def generate(ctx: InvokeContext) -> Result:
 
 
 if __name__ == "__main__":
-    run_plugin("sim-verilator", "0.1.0", {"lint": lint, "qualify": qualify, "verify": verify, "generate": generate})
+    run_plugin(
+        "sim-verilator",
+        "0.1.0",
+        {
+            "lint": lint,
+            "qualify": qualify,
+            "verify": verify,
+            "gatesim": gatesim,
+            "sdfsim": sdfsim,
+            "generate": generate,
+        },
+    )

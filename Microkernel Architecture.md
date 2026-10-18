@@ -4,10 +4,10 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.8 (draft) |
+| Document version | v0.9 (draft) |
 | Date | 2026-10-18 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
-| Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.4) |
+| Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.6) |
 | Chinese version | [Microkernel Architecture.zh.md](<Microkernel Architecture.zh.md>) |
 
 This document answers **"how llmchip-harness is organized and extended"**. "What must be built, and to what extent" is answered by the requirements document. Per the rules of §0.3 of the requirements document: this document must not modify requirements or acceptance criteria; when the two conflict, agents must escalate and must not choose on their own.
@@ -225,6 +225,10 @@ A typical work process is as follows:
 - **Release check**: `can_release(gate, snapshot)` is the single check function before advancing the flow and exporting the tapeout package. It simultaneously checks the approval state, whether the snapshot hash matches exactly, and whether any unclosed blocking conditions exist.
 - **Waivers**: internal risk acceptance and manufacturing-rule waivers are two different record types. A manufacturing-rule waiver must reference a "foundry written acceptance" artifact, and that artifact is bound to the GDS hash, rule deck version, violation type, and location.
 - **External reports**: an imported external signoff report is a kind of artifact; on import, the object hash it claims to have checked, the rule version, tool version, and check conditions are registered. The verdict engine uses it only when this information exactly matches the current snapshot (FR-SGN-06).
+- **M4 implementation**:
+  - A flow pack may declare **hard-constraint slots** (`hardConstraintSlots`; in the default flow the timing constraints, the timing exception registry and the signoff rules). Only a human may bind them; an agent's attempt is refused and opens a `hard_constraint_change` incident (requirements §3.2, FR-SGN-02b).
+  - `packages.export`: exports only when the release check passes and the package is the member of the approved snapshot. The archive holds the package, the lineage manifest (every artifact up to the weights: hash, type, label, producing run, plugin version and image, verdicts) and the approval; its label is the highest label in the lineage (FR-PKG-02/04/05).
+  - `migration.apply`: confirming a migration impact assessment invalidates every gate after its earliest restart stage, and the evidence those gates recorded before the confirmation no longer counts; restarting at S3 or earlier needs a human (FR-MIG-03/04).
 
 ### 4.8 K8 Data Labels & Egress Gateway
 
@@ -400,6 +404,7 @@ Artifact types are managed by a schema registry (AP-6), and plugins can register
 - The golden chain state is a projection: computed from the latest verdict records and invalidation states of each link.
 - For divergence localization (FR-VER-06), the comparison check plugin produces a "first divergence point" metric, which the UI uses to jump to the corresponding waveform and tensor.
 - **M3 implementation (L2 ≡ L3)**: the RTL generator (`rtl-taalas`) compiles the numeric spec into a microcoded vector engine: weights go into ROMs by a versioned mapping rule (`lanes-interleaved/1`, reversible, round-trip checked at generation), the program ROM holds the microcode, and the RTL bundle ships its own instruction-level simulator `isa.py`. The comparison has two parts: the generator checks "microcode on the instruction-level simulator ≡ L2" (compiler verification); the simulation plugin (`sim-verilator`, in the pinned EDA image) checks "RTL ≡ instruction-level simulator / L2". The simulation plugin executes every item of the verification plan (artifact `verification.plan`) and produces metrics such as `items_*`, `*_mismatches` and `coverage_line_pct`; on a divergence it reruns up to the divergent position with the debug program (which traces the output of every operation) and produces `divergence_*` metrics (operation, element, cycle) and a waveform window around that operation (`waveform.vcd`). The qualification test of the `rtl-functional-sim` capability runs a known design and a variant with a seeded defect on both Verilator and Icarus. When a verdict is fail or indeterminate, K6 opens a `check_failed` incident automatically and carries the `divergence_*` metrics into its summary (AC-09).
+- **M4 implementation (L3 → L4/L5 → package)**: the chip-level RTL keeps activations, the KV cache and the observation buffers in an external SPI SRAM; on chip remain the weight, constant and program ROMs and one set of shared arithmetic units, with widths the generator proves from the numeric spec. `eda-gf180` generates the constraints from the chip spec's interface timing (every port delay has a source) and runs LibreLane for the pad ring, place and route and parasitic extraction; each signoff check reads only what it judges: DRC (KLayout decks from the `signoff.rules` artifact, a hard constraint), LVS, STA at 9 corners (also proving the constraints complete and counting unregistered timing exceptions), zero-delay gate-level simulation (L4, against L2; on Icarus Verilog with the PDK cell models, because Verilator races on the sequential UDPs behind the clock tree buffers) and SDF timing simulation (supplementary; incomplete annotation never passes). `packager` assembles the package from the process's template and checks its integrity.
 
 ---
 

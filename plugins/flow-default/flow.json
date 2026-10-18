@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "stages": [
     {
       "id": "S0",
@@ -169,11 +169,25 @@
       "title": "Tapeout signoff",
       "after": "S8",
       "members": [
+        "numeric-spec",
+        "rtl",
+        "l2-trace",
+        "chip-spec",
+        "constraints",
+        "timing-exceptions",
+        "signoff-rules",
+        "layout",
         "gds",
-        "signoff-checklist",
+        "package-template",
         "tapeout-package"
       ],
-      "checks": []
+      "checks": [
+        "phy.drc",
+        "phy.lvs",
+        "phy.sta",
+        "phy.gatesim",
+        "package.integrity"
+      ]
     }
   ],
   "checks": [
@@ -390,6 +404,309 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "phy.drc",
+      "version": "1",
+      "title": "DRC (KLayout and Magic), antenna and density clean on the GDS (FR-SGN-01, AC-05)",
+      "plugin": "eda-gf180",
+      "handler": "drc",
+      "completeness": [
+        {
+          "metric": "klayout_drc_errors",
+          "op": ">=",
+          "value": 0
+        },
+        {
+          "metric": "magic_drc_errors",
+          "op": ">=",
+          "value": 0
+        },
+        {
+          "metric": "antenna_errors",
+          "op": ">=",
+          "value": 0
+        },
+        {
+          "metric": "density_errors",
+          "op": ">=",
+          "value": 0
+        },
+        {
+          "metric": "klayout_markers_parsed",
+          "op": "==",
+          "value": true
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "klayout_drc_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "magic_drc_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "antenna_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "density_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "magic_illegal_overlaps",
+          "op": "==",
+          "value": 0
+        }
+      ],
+      "waiver": "foundry_waiver"
+    },
+    {
+      "id": "phy.lvs",
+      "version": "1",
+      "title": "LVS: the GDS matches the netlist (FR-SGN-01, AC-05)",
+      "plugin": "eda-gf180",
+      "handler": "lvs",
+      "completeness": [
+        {
+          "metric": "lvs_complete",
+          "op": "==",
+          "value": true
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "lvs_error",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "lvs_device_difference",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "lvs_net_difference",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "lvs_unmatched_pin",
+          "op": "==",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "phy.sta",
+      "version": "1",
+      "title": "Signoff STA: every corner, setup and hold, complete constraints, no unregistered exception (FR-SGN-02/02a/02b, AC-05/06)",
+      "plugin": "eda-gf180",
+      "handler": "sta",
+      "completeness": [
+        {
+          "metric": "corners_checked",
+          "op": ">=",
+          "value": 9
+        },
+        {
+          "metric": "clock_defined",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "unconstrained_endpoints",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "unclocked_registers",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "ports_without_delay",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "port_delays_match_spec",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "combinational_loops",
+          "op": "==",
+          "value": 0
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "setup_violations",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "hold_violations",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "max_slew_violations",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "max_cap_violations",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "max_fanout_violations",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "unregistered_exceptions",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "pad_transition_within_spec",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "phy.gatesim",
+      "version": "1",
+      "title": "Gate-level (zero-delay) simulation of the routed netlist equals L2 (FR-SGN-03, L4)",
+      "plugin": "sim-verilator",
+      "handler": "gatesim",
+      "completeness": [
+        {
+          "metric": "gl_prompts",
+          "op": ">=",
+          "value": 2
+        },
+        {
+          "metric": "gl_tokens_per_prompt",
+          "op": ">=",
+          "value": 8
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "gl_mismatches",
+          "op": "==",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "package.integrity",
+      "version": "1",
+      "title": "Tapeout package complete and consistent with the snapshot (FR-PKG-03)",
+      "plugin": "packager",
+      "handler": "check",
+      "criteria": [
+        {
+          "metric": "missing_files",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "hash_mismatches",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "gds_matches_snapshot",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "top_cell_present",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "reports_bound_to_gds",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "external.signoff",
+      "version": "1",
+      "title": "Imported external signoff result bound to the current design (FR-SGN-06, AC-11)",
+      "plugin": "packager",
+      "handler": "import_external",
+      "completeness": [
+        {
+          "metric": "binding_complete",
+          "op": "==",
+          "value": true
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "matches_current_design",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "violations",
+          "op": "==",
+          "value": 0
+        }
+      ],
+      "waiver": "foundry_waiver"
+    },
+    {
+      "id": "sdf.timing",
+      "version": "1",
+      "title": "SDF timing simulation with complete back-annotation on a qualified backend (supplementary, FR-VER-02/03, AC-12)",
+      "plugin": "sim-verilator",
+      "handler": "sdfsim",
+      "completeness": [
+        {
+          "metric": "sdf_annotation_complete",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "sdf_ignored",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "sim_completed",
+          "op": "==",
+          "value": true
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "sim_errors",
+          "op": "==",
+          "value": 0
+        }
+      ],
+      "requiredCapability": "sdf-timing-sim"
     }
+  ],
+  "hardConstraintSlots": [
+    "constraints",
+    "timing-exceptions",
+    "signoff-rules"
   ]
 }

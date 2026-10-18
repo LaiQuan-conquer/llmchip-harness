@@ -104,3 +104,99 @@ export async function throughG2(client: KernelClient) {
   const g2 = await approve('G2')
   return { ir, tokenizer, evalset, spec, l2weights, l2, design, quantize, g1, g2, profile, library }
 }
+
+/** The reference model's structure, untrained (owner decision 2026-10-18): the M3/M4 design subject. */
+export const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 }
+/** The prerun die (owner decision 2026-10-18) and the clock that closes timing at every corner. */
+export const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2 }
+
+/**
+ * Creates project `chip` and takes the proxy model through G2: S0 estimate, S1 synthesis and
+ * intake (L0), S2 ternary numeric spec (L2, accuracy), S3 chip spec on the 1.2 x 2 mm prerun die.
+ * The proxy's accuracy result carries no meaning (it is untrained); G1 is approved to exercise the flow.
+ */
+export async function throughG2Proxy(client: KernelClient) {
+  const { bind, judge, approve, dataHash } = flow(client)
+  await client.call('projects.create', { id: 'chip', title: 'Proxy of the reference model on GF180MCU (prerun)' })
+  const profile = await dataHash('gf180mcu')
+  const library = await dataHash('library-180nm')
+  const model = { params: 5248, dim: PROXY.dim, layers: PROXY.layers, heads: PROXY.heads, kvHeads: PROXY.kvHeads, vocab: 35, hiddenDim: PROXY.hiddenDim, title: 'proxy' }
+  const request = await client.upload(
+    JSON.stringify({ model, weightBits: 2, activationLocation: 'offchip', contextLength: 64, weightStorage: 'gf180mcu.stdcell-rom', parallelMacs: PRERUN.parallelMacs, clockMHz: PRERUN.clockMHz, targetAreaMm2: 2.4 }),
+    { type: 'estimate.request', mediaType: 'application/json' },
+  )
+  const charter = await client.upload('# CHARTER\nGoal: run S0-S8 on GF180MCU with the proxy of the reference model.\n', { type: 'project.charter', mediaType: 'text/markdown' })
+  await bind('charter', charter.hash)
+  await bind('estimate-request', request.hash)
+  await bind('process-profile', profile)
+  await bind('impl-library', library)
+  const estimate = await run(client, 'estimator', 'estimate', { request: request.hash, profile, library })
+  expect((await judge('estimate.feasibility', estimate)).verdict).toBe('pass')
+  await approve('G0')
+
+  await client.call('stages.enter', { project: 'chip', stage: 'S1' })
+  const proxy = await run(client, 'model-llama', 'synthesize', {}, PROXY)
+  expect(proxy.metrics).toMatchObject({ parameters: 5248, proxy: true, trained: false })
+  const tokenizer = out(proxy, 'tokenizer')
+  const intake = await run(client, 'model-llama', 'intake', { weights: out(proxy, 'weights'), tokenizer }, { license: 'proxy (untrained)' })
+  const ir = out(intake, 'ir')
+  const evalset = await dataHash('evalset-proxy')
+  await run(client, 'model-llama', 'reference', { ir, tokenizer, evalset })
+
+  await client.call('stages.enter', { project: 'chip', stage: 'S2' })
+  const q = await run(client, 'numeric', 'quantize', { ir, tokenizer, evalset }, { weightFormat: 'ternary', groupSize: 16, contextLength: 64 })
+  const spec = out(q, 'spec')
+  const l2weights = out(q, 'weights')
+  for (const [slot, hash] of [['model-ir', ir], ['tokenizer', tokenizer], ['eval-set', evalset], ['numeric-spec', spec], ['l2-weights', l2weights]] as const) {
+    await bind(slot, hash)
+  }
+  const accuracy = await run(client, 'numeric', 'evaluate', { ir, tokenizer, evalset, spec, weights: l2weights })
+  expect(accuracy.metrics).toMatchObject({ prompts_evaluated: 20, tokens_per_prompt: 64 })
+  expect((await judge('accuracy.budget', accuracy)).verdict).toBe('pass')
+  await approve('G1')
+  await client.call('stages.enter', { project: 'chip', stage: 'S3' })
+  const l2 = await run(client, 'numeric', 'infer', { spec, weights: l2weights, tokenizer, evalset })
+
+  const design = await run(client, 'arch-taalas', 'design', { spec, weights: l2weights, profile, library }, {
+    weightStorage: 'gf180mcu.stdcell-rom',
+    parallelMacs: PRERUN.parallelMacs,
+    clockMHz: PRERUN.clockMHz,
+    die: PRERUN.die,
+    targetAreaMm2: 2.4,
+  })
+  await bind('chip-spec', out(design, 'chip'))
+  await bind('ppa-estimate', out(design, 'ppa'))
+  const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa') })
+  expect((await judge('arch.spec', archCheck)).verdict).toBe('pass')
+  await approve('G2')
+  return { ir, tokenizer, evalset, spec, l2weights, l2, design, profile, library }
+}
+
+/** S4 and S5 on top of throughG2Proxy: RTL, lint, the whole verification plan, G3. */
+export async function throughG3Proxy(client: KernelClient) {
+  const { bind, judge, approve, dataHash } = flow(client)
+  const g2 = await throughG2Proxy(client)
+  const { spec, l2weights, l2, design, tokenizer, evalset } = g2
+  const calibration = await run(client, 'eda-gf180', 'calibrate', {}, { implementation: 'gf180mcu.stdcell-rom', sizes: [[256, 16]] })
+  const views = await run(client, 'estimator', 'check_views', { calibration: out(calibration, 'report') })
+  expect((await judge('impl.views.S4', views)).verdict).toBe('pass')
+  await bind('storage-impl', out(calibration, 'report'))
+  await client.call('stages.enter', { project: 'chip', stage: 'S4' })
+  const generated = await run(client, 'rtl-taalas', 'generate', { spec, weights: l2weights, chip: out(design, 'chip') })
+  const rtl = out(generated, 'rtl')
+  const isa = await run(client, 'rtl-taalas', 'check_isa', { rtl, spec, weights: l2weights, tokenizer, evalset })
+  expect(isa.metrics).toMatchObject({ mismatches: 0 })
+  expect((await judge('rtl.lint', await run(client, 'sim-verilator', 'lint', { rtl }))).verdict).toBe('pass')
+  await client.call('stages.enter', { project: 'chip', stage: 'S5' })
+  const plan = await dataHash('verification-plan-default')
+  const trace = out(l2, 'trace')
+  await bind('rtl', rtl)
+  await bind('l2-trace', trace)
+  await bind('verification-plan', plan)
+  const qualify = await run(client, 'sim-verilator', 'qualify', {})
+  expect((await judge('sim-verilator.qualify.rtl-functional-sim', qualify)).verdict).toBe('pass')
+  const verify = await run(client, 'sim-verilator', 'verify', { rtl, spec, trace, plan })
+  expect((await judge('rtl.equivalence', verify)).verdict).toBe('pass')
+  await approve('G3')
+  return { ...g2, calibration, views, rtl, trace, plan, verify }
+}

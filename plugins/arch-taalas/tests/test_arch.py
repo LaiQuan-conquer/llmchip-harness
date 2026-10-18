@@ -41,7 +41,10 @@ def test_chip_spec_references_the_numeric_spec_and_covers_observation_points(l2)
     chip, ppa = run(l2)
     assert chip["numericSpec"]["hash"] == "a" * 64
     assert chip["dataflow"]["accumulatorBits"] == l2.spec["accumulator"]["bits"]
-    assert {r["point"] for r in chip["observability"]["registers"]} == {p["id"] for p in l2.spec["observationPoints"]}
+    assert {r["point"] for r in chip["observability"]["points"]} == {p["id"] for p in l2.spec["observationPoints"]}
+    # Every port has an interface timing entry: the source of the IO delay constraints.
+    timed = set(chip["timing"]["inputs"]) | set(chip["timing"]["outputs"]) | {chip["timing"]["clock"]["port"]}
+    assert timed == {p["name"] for p in chip["pins"]}
     assert "storage:gf180mcu.stdcell-rom" in chip["processCapabilities"]
     assert chip["storage"]["weights"]["bits"] == storage_bits(l2.spec, l2.a)["weights"]
     assert ppa["performance"]["tokensPerSecond"] > 0

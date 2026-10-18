@@ -47,14 +47,19 @@ class Bundle:
         self.isa = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.isa)
         self.binaries: dict[str, Path] = {}
+        self.coverage_files: list[str] = []
 
     @property
     def params(self) -> dict:
         return self.design["params"]
 
+    @property
+    def sources(self) -> list[str]:
+        return [Path(p).name for p in self.design["sources"]]
+
     def lint(self) -> dict:
         proc = subprocess.run(
-            [f"{TOOLS}/verilator", "--lint-only", "llmchip_core.v"],
+            [f"{TOOLS}/verilator", "--lint-only", "--top-module", self.design["top"], *self.sources],
             cwd=self.rtl,
             capture_output=True,
             text=True,
@@ -65,8 +70,8 @@ class Bundle:
         errors = sum(1 for line in text.splitlines() if line.startswith("%Error") and "Exiting due to" not in line)
         return {"lint_warnings": warnings, "lint_errors": errors, "lint_exit": proc.returncode, "log": text}
 
-    def build(self, coverage: bool = False) -> Path:
-        key = "cov" if coverage else "fast"
+    def build(self, coverage: bool = False, trace: bool = False) -> Path:
+        key = "cov" if coverage else "trace" if trace else "fast"
         if key in self.binaries:
             return self.binaries[key]
         mdir = f"obj_{key}"
@@ -75,24 +80,33 @@ class Bundle:
             "--cc",
             "--exe",
             "--build",
-            "-O3",
+            "-O3" if not trace else "-O1",
             "--x-assign",
             "fast",
             "--x-initial",
             "fast",
+            "-Wno-fatal",
+            "-Wno-lint",
+            "-Wno-style",
             "-j",
             str(os.cpu_count() or 4),
             "--Mdir",
             mdir,
             "-o",
             "Vsim",
-            "llmchip_core.v",
+            "--top-module",
+            "tb_top",
+            "tb_top.v",
+            "spi_sram_model.v",
+            *self.sources,
             "tb.cpp",
             "-CFLAGS",
             "-O2",
         ]
         if coverage:
             cmd.insert(1, "--coverage-line")
+        if trace:
+            cmd.insert(1, "--trace")
         run(cmd, self.rtl, timeout=3600)
         self.binaries[key] = self.rtl / mdir / "Vsim"
         return self.binaries[key]
@@ -105,25 +119,110 @@ class Bundle:
         coverage: bool = False,
         name: str = "sim",
         prog: str | None = None,
+        extra: list[str] | None = None,
+        trace: bool = False,
+        jobs: int = 1,
     ) -> list[dict]:
-        """Plays a stimulus; `prog` replaces the program ROM image; a coverage run writes `<name>.dat`."""
-        binary = self.build(coverage)
-        stim = self.rtl / f"{name}.stim"
-        out = self.rtl / f"{name}.bin"
-        stim.write_text("\n".join(stimulus) + "\n")
-        prog = prog or ("prog_debug.hex" if debug else None)
-        args = (
-            [str(binary)]
-            + ([f"+prog={prog}"] if prog else [])
-            + ([f"+cov={name}.dat"] if coverage else [])
-            + [stim.name, out.name]
+        """Plays a stimulus (debug: every step also copies the debug traces); `prog` replaces the
+        program ROM image; a coverage run writes `<name>.dat`. With jobs > 1 the RUN lines are
+        split over parallel simulator processes (each run is independent: it starts at position 0)."""
+        binary = self.build(coverage, trace)
+        mode = f"MODE {3 if debug else 1}"
+        groups = (
+            [stimulus]
+            if jobs <= 1 or len(stimulus) < 2
+            else [stimulus[k::jobs] for k in range(min(jobs, len(stimulus)))]
         )
-        run(args, self.rtl, timeout=7200)
-        return parse(out.read_bytes())
+        procs = []
+        for k, lines in enumerate(groups):
+            part = name if len(groups) == 1 else f"{name}.{k}"
+            (self.rtl / f"{part}.stim").write_text("\n".join([mode, *lines]) + "\n")
+            args = [str(binary)] + ([f"+prog={prog}"] if prog else []) + ([f"+cov={part}.dat"] if coverage else [])
+            args += (extra or []) + ["trace.map", f"{part}.stim", f"{part}.bin"]
+            procs.append(
+                (
+                    part,
+                    subprocess.Popen(
+                        args, cwd=self.rtl, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=ENV
+                    ),
+                )
+            )
+        records: list[dict] = []
+        for part, proc in procs:
+            output, _ = proc.communicate(timeout=7200)
+            if proc.returncode != 0:
+                raise RuntimeError(f"simulation {part} failed ({proc.returncode}):\n{output[-4000:]}")
+            records += parse((self.rtl / f"{part}.bin").read_bytes())
+        self.coverage_files = [f"{part}.dat" for part, _ in procs] if coverage else []
+        return records
 
-    def machine(self, debug: bool = False):
+    def build_gate(self, layout: Path, sdf: Path | None = None) -> Path:
+        """Icarus Verilog model of the gate-level netlist with the cell and pad models the layout
+        bundle names, driven by gl_tb.v. Icarus is event driven, so the clock tree and the PDK's
+        sequential UDP cell models behave as in a simulator with delays (zero delay unless an SDF
+        is given)."""
+        key = "gate-sdf" if sdf else "gate"
+        if key in self.binaries:
+            return self.binaries[key]
+        models = json.loads((layout / "sim" / "models.json").read_text())
+        netlist = layout / "views" / f"{models['top']}.nl.v"
+        out = self.rtl / f"{key}.vvp"
+        cmd = [
+            f"{TOOLS}/iverilog",
+            "-g2012",
+            "-o",
+            str(out),
+            "-I",
+            str(self.rtl),
+            f"-DGATE_TOP={models['top']}",
+            *[f"-D{d}" for d in models["defines"] if not sdf or d != "FUNCTIONAL"],
+            *([f'-DSDF_FILE="{sdf}"', "-gspecify"] if sdf else []),
+            "gl_tb.v",
+            "spi_sram_model.v",
+            str(netlist),
+            str(layout / models["pads"]),
+            *models["cells"],
+        ]
+        run(cmd, self.rtl, timeout=7200)
+        self.binaries[key] = out
+        return out
+
+    def simulate_gate(
+        self,
+        layout: Path,
+        runs: list[tuple[int, int, list[int]]],
+        name: str = "gate",
+        jobs: int = 1,
+        sdf: Path | None = None,
+    ) -> list[dict]:
+        """Plays (run id, steps, prompt tokens) on the gate-level model, one vvp process per run."""
+        model = self.build_gate(layout, sdf)
+        procs = []
+        for k, (rid, steps, tokens) in enumerate(runs):
+            part = f"{name}.{k}"
+            (self.rtl / f"{part}.stim").write_text(f"{rid} {steps} {len(tokens)} " + " ".join(map(str, tokens)) + "\n")
+            args = [f"{TOOLS}/vvp", "-n", str(model), f"+stim={part}.stim", "+map=trace.map", f"+out={part}.txt"]
+            procs.append(
+                (
+                    part,
+                    subprocess.Popen(
+                        args, cwd=self.rtl, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=ENV
+                    ),
+                )
+            )
+            while len([p for _, p in procs if p.poll() is None]) >= max(jobs, 1):
+                procs[[p.poll() is None for _, p in procs].index(True)][1].wait()
+        records: list[dict] = []
+        for part, proc in procs:
+            output, _ = proc.communicate(timeout=4 * 3600)
+            if proc.returncode != 0:
+                raise RuntimeError(f"gate-level simulation {part} failed ({proc.returncode}):\n{output[-4000:]}")
+            records += parse_text((self.rtl / f"{part}.txt").read_text())
+        return records
+
+    def machine(self):
         img = np.load(self.root / "isa-image.npz")
-        program = [int(w) for w in img["debug" if debug else "program"]]
+        program = [int(w) for w in img["program"]]
         p = self.params
         return self.isa.Machine(program, img["wrom"], img["srom"], img["crom"], p["LANES"], p["NDMEM"], p["CTX"])
 
@@ -155,6 +254,41 @@ def parse(data: bytes) -> list[dict]:
                 "groups": groups,
             }
         )
+    return records
+
+
+def parse_text(text: str) -> list[dict]:
+    """Records of gl_tb.v's text log, in the shape `parse` returns."""
+    records: list[dict] = []
+    for line in text.splitlines():
+        f = line.split()
+        if not f:
+            continue
+        if f[0] == "S":
+            rid, pos, token_in, token_out, nxt, cycles, error = (int(v) for v in f[1:8])
+            records.append(
+                {
+                    "run": rid,
+                    "pos": pos,
+                    "token_in": token_in,
+                    "token_out": token_out,
+                    "next": nxt,
+                    "cycles": cycles,
+                    "error": error,
+                    "timeout": 0,
+                    "groups": [],
+                }
+            )
+        elif f[0] == "G":
+            point, layer, n = (int(v) for v in f[1:4])
+            records[-1]["groups"].append(
+                {
+                    "point": point,
+                    "layer": layer,
+                    "start": 0,
+                    "values": np.array([int(v) for v in f[4 : 4 + n]], np.int64),
+                }
+            )
     return records
 
 
@@ -263,12 +397,12 @@ def compare_debug(bundle: Bundle, tokens: list[int], upto: int, name: str = "deb
     """Runs positions 0..upto with the debug program, which traces the output of every
     operation, and compares every trace with the instruction-level simulator."""
     records = bundle.simulate([run_line(0, upto + 1, tokens[: upto + 1])], debug=True, name=name)
-    machine = bundle.machine(debug=True)
+    machine = bundle.machine()
     descriptions = bundle.design["program"]
     result: dict = {"steps": len(records), "operations": 0, "values": 0, "mismatches": 0, "first": None}
     for r in records:
         expected: list = []
-        machine.step(tokens[r["pos"]], r["pos"], expected)
+        machine.step(tokens[r["pos"]], r["pos"], expected, mode=3)
         got = [g for g in r["groups"] if g["point"] == 15]
         want = [t for t in expected if t["point"] == 15]
         if len(got) != len(want):
@@ -321,45 +455,13 @@ def locate(bundle: Bundle, tokens: list[int], upto: int) -> dict | None:
 
 
 def waveform(bundle: Bundle, tokens: list[int], pos: int, start: int, end: int, path: Path) -> Path:
-    """VCD of cycles start..end of the step at `pos` (debug program, normal run up to that step)."""
-    if "trace" not in bundle.binaries:
-        cmd = [
-            f"{TOOLS}/verilator",
-            "--cc",
-            "--exe",
-            "--build",
-            "-O1",
-            "--trace",
-            "--x-assign",
-            "fast",
-            "--x-initial",
-            "fast",
-            "-j",
-            str(os.cpu_count() or 4),
-            "--Mdir",
-            "obj_trace",
-            "-o",
-            "Vsim",
-            "llmchip_core.v",
-            "tb.cpp",
-        ]
-        run(cmd, bundle.rtl, timeout=3600)
-        bundle.binaries["trace"] = bundle.rtl / "obj_trace" / "Vsim"
-    stim = bundle.rtl / "wave.stim"
-    stim.write_text(run_line(0, pos + 1, tokens[: pos + 1]) + "\n")
-    run(
-        [
-            str(bundle.binaries["trace"]),
-            "+prog=prog_debug.hex",
-            f"+vcd={path}",
-            f"+vcd_pos={pos}",
-            f"+vcd_from={max(start, 0)}",
-            f"+vcd_to={end}",
-            stim.name,
-            "wave.bin",
-        ],
-        bundle.rtl,
-        timeout=7200,
+    """VCD of cycles start..end of the step at `pos` (debug mode, normal run up to that step)."""
+    bundle.simulate(
+        [run_line(0, pos + 1, tokens[: pos + 1])],
+        debug=True,
+        name="wave",
+        trace=True,
+        extra=[f"+vcd={path}", f"+vcd_pos={pos}", f"+vcd_from={max(start, 0)}", f"+vcd_to={end}"],
     )
     return path
 
@@ -370,7 +472,13 @@ def coverage_summary(bundle: Bundle, data_files: list[str]) -> dict:
     annotate = bundle.rtl / "coverage-annotated"
     run([f"{TOOLS}/verilator_coverage", "--annotate", str(annotate), "--annotate-min", "1", *data_files], bundle.rtl)
     files, uncovered = {}, []
-    for file in sorted(annotate.glob("*.v*")):
+    # Logic only: the ROM case tables are data (their lines are the table entries a run happens
+    # to read) and the testbench is not part of the design.
+    logic = {Path(p).name for p in bundle.design["sources"] + bundle.design["includes"]} - {
+        "llmchip_roms.v",
+        "llmchip_params.vh",
+    }
+    for file in sorted(f for f in annotate.glob("*.v*") if f.name in logic):
         counted = covered = 0
         for number, line in enumerate(file.read_text().splitlines(), 1):
             m = re.match(r"([ %])(\d{6,})", line)

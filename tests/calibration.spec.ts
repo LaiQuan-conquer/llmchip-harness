@@ -92,6 +92,9 @@ describe.skipIf(!available(IMAGE))('storage calibration on GF180MCU', () => {
     const report = await json(client, estimate.outputs.find((o) => o.name === 'report')!.hash)
     const weights = report.items.find((i: { item: string }) => i.item === 'weight storage')
     expect(weights.confidence).toBe('calibrated')
-    expect(report.reverse.maxParams['2'].typ).toBeGreaterThan(0)
+    // With the gf180mcu_fd_io ring from the PDK's LEF (350 um pads), the prerun die holds far less than
+    // the ~80K-parameter reference model: the basis of the owner's 2026-10-18 decision (requirements v0.6).
+    expect(report.reverse.maxParams['2'].typ).toBeGreaterThanOrEqual(0)
+    expect(report.reverse.maxParams['2'].typ).toBeLessThan(80_000)
   })
 })

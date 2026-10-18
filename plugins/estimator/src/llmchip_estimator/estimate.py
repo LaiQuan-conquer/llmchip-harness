@@ -170,6 +170,7 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
     kv_bits = int(params.get("kvBits", 8))
     context = int(params.get("contextLength", 64))
     kv_location = params.get("kvLocation", "offchip")
+    act_location = params.get("activationLocation", "onchip")
     parallel = int(params.get("parallelMacs", 8))
     clock_mhz = float(params.get("clockMHz", 50))
     bandwidth = float(params.get("offchipBandwidthMBps", 25))
@@ -243,12 +244,17 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
         )
         if "dim" not in model:
             raise Missing("model structure (dim, hiddenDim, heads)", "provide the model structure")
-        bits = (6 * model["dim"] + 2 * model.get("hiddenDim", 4 * model["dim"]) + model["heads"] * context) * act_bits
-        return (
-            scale(flop, bits / 1e6),
-            f"activation and attention-score buffers ({bits:,} bit in flip-flops)",
-            logic["flopBitAreaUm2"].get("confidence"),
-        )
+        if act_location == "offchip":
+            # Activations live in the external memory; on chip only the operand and
+            # accumulator registers of the datapath remain (one per MAC lane plus a working set).
+            bits = (2 * parallel + 8) * 2 * act_bits
+            what = f"working registers, activations off chip ({bits:,} bit in flip-flops)"
+        else:
+            bits = (
+                6 * model["dim"] + 2 * model.get("hiddenDim", 4 * model["dim"]) + model["heads"] * context
+            ) * act_bits
+            what = f"activation and attention-score buffers ({bits:,} bit in flip-flops)"
+        return scale(flop, bits / 1e6), what, logic["flopBitAreaUm2"].get("confidence")
 
     def compute_units():
         mac = rng(logic.get("macAreaUm2"), "logic.macAreaUm2", "synthesize one MAC unit (FR-EST-13)")
@@ -281,6 +287,7 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
             "kvBits": kv_bits,
             "contextLength": context,
             "kvLocation": kv_location,
+            "activationLocation": act_location,
             "parallelMacs": parallel,
             "clockMHz": clock_mhz,
             "offchipBandwidthMBps": bandwidth,

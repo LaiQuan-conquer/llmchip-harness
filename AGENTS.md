@@ -68,6 +68,7 @@ Current packages:
 - `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6). The source of truth is the JSON Schema in `packages/kernel-api/schemas/`; `src/generated/` is produced from it by `yarn gen:schemas` and must not be edited by hand.
 - `kernel` — `harnessd`, the kernel daemon: event store (K1), artifact store (K2), configuration and secrets (K10), the kernel API server (IF-1) and the in-kernel plugin host.
 - `kernel` also runs out-of-process plugins: plugin registry (K9), scheduler and process supervision (K4), and the workflow engine with verdicts and approvals (K3, K6, K7).
+- `kernel` also releases and exports: the release check, hard-constraint slots only a human binds, package export with the lineage manifest, and confirmed migration assessments that invalidate later gates (K7, FR-PKG, FR-MIG).
 - `kernel` also hosts the security layer and agents: incidents, the egress gateway with labels, NDA fingerprints and declassification rules (K8), API policy for owner and external clients (K5), and the agent runtime with LLM providers, tools, change sets and handoff packs (§6).
 - `plugin-sdk` — TypeScript SDK for out-of-process plugins (IF-2).
 - `client` — kernel API client for Node.js and browsers.
@@ -80,14 +81,15 @@ Python (uv workspace, root `pyproject.toml`):
 Bundled plugins:
 
 - `estimator` (Python) — feasibility, area, cost and performance estimate (FR-EST).
-- `process-library` (data) — process profiles and the implementation library. Every value records its source and confidence; empirical values stay empirical until calibrated.
+- `process-library` (data) — process profiles (with technology data for migration), the implementation library, the GF180 package template and signoff rules. Every value records its source and confidence; empirical values stay empirical until calibrated.
 - `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions. A gate check must consume the gate's slotted artifacts as run inputs, so that its verdict counts as evidence for exactly that snapshot.
-- `model-llama` (Python) — llama2.c checkpoint and tokenizer intake into the Model IR, and the L0 FP32 reference (a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`).
+- `model-llama` (Python) — llama2.c checkpoint and tokenizer intake into the Model IR, proxy models (a planned model's structure, fixed seed, untrained; with the bundled `evalset-proxy`), and the L0 FP32 reference (a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`).
 - `numeric` (Python) — quantization (int8/int4/int3/ternary, group scales), the numeric spec (§3.4.2), the L2 bit-exact integer model with observation-point traces, and the L2-vs-L0 accuracy evaluation (G1 evidence). Bundles an evaluation set.
 - `arch-taalas` (Python) — the Taalas-style hardwired architecture template: chip spec and PPA from a frozen numeric spec, and the consistency check (G2 evidence).
-- `rtl-taalas` (Python) — RTL generator (S4): compiles the numeric spec into a microcoded vector engine (Verilog core, ROM images, microcode, Verilator testbench, instruction-level simulator `isa.py`) as one deterministic `rtl.bundle`; the weight mapping rule is reversible and round-trip checked; `check_isa` verifies the microcode against L2. Never edit a generated bundle; change the generator.
-- `sim-verilator` (container) — lint, simulator qualification, the verification plan (regression, directed, boundary, exhaustive, random, coverage; bundled default plan) with first-divergence localization (operation, element, cycle, VCD window), and L3 generations for the Chip Playground. Runs Verilator, Icarus Verilog and cocotb in the pinned `iic-osic-tools` image.
-- `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, ...): storage implementation calibration (FR-EST-13).
+- `rtl-taalas` (Python) — RTL generator (S4): compiles the numeric spec into a microcoded vector engine (Verilog core with data in an external SPI SRAM, SPI host interface, ROMs as generated case tables, microcode, Verilator testbench with an SRAM model, instruction-level simulator `isa.py`) as one deterministic `rtl.bundle`; the weight mapping rule is reversible and round-trip checked; `check_isa` verifies the microcode against L2. Never edit a generated bundle; change the generator.
+- `sim-verilator` (container) — lint, simulator qualification, the verification plan (regression, directed, boundary, exhaustive, random, coverage; bundled default plan) with first-divergence localization (operation, element, cycle, VCD window), gate-level simulation of the routed netlist (L4, Icarus Verilog with the PDK cell models), SDF timing simulation with annotation statistics (a supplementary capability, not qualified yet), and L3 generations for the Chip Playground. Runs Verilator, Icarus Verilog and cocotb in the pinned `iic-osic-tools` image.
+- `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, Magic, KLayout, Netgen, OpenSTA): storage implementation calibration (FR-EST-13), constraints from the chip spec, physical implementation with the pad ring (LibreLane Chip flow), and signoff checks (DRC, LVS, multi-corner STA with constraint completeness), each on exactly the artifacts it judges.
+- `packager` (Python) — tapeout package from the process's template, its integrity check, and import of external signoff reports bound to a GDS (FR-PKG, FR-SGN-06).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -150,6 +152,7 @@ A package that imports a vendored package follows the same rules: declare it as 
 
 - `runtime: container` plugins run under Podman (`podman run -i`, IF-2 over stdio) with no network, read-only inputs and plugin directory, and only the run workspace writable. Pin `entry.image` by digest.
 - The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
+- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about half an hour and is opt-in: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks.
 - In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 
 ### Adding a plugin
@@ -158,6 +161,12 @@ A package that imports a vendored package follows the same rules: declare it as 
 2. Python plugins are uv workspace members: add `plugins/<id>` to `[tool.uv.workspace].members` and to the root dependencies in `pyproject.toml`, then run `uv lock` and `yarn setup:python`.
 3. Handlers return outputs, metrics and a parse status, never verdicts (AP-7). Judging is done by check definitions in a flow pack.
 4. Test the plugin directly (pytest or Vitest) and end to end through the kernel (`tests/`).
+
+### Generated hardware
+
+- Every register of generated RTL has a reset value: synthesized logic is X-pessimistic in four-state gate-level simulation, and un-reset control registers turn the whole netlist X.
+- Gate-level simulation of a routed netlist runs on an event-driven simulator (Icarus Verilog) with the PDK's cell models; Verilator races on the PDK's sequential UDPs behind clock-tree buffers.
+- Do not call Verilog functions with local variables inside clocked blocks of generated RTL: synthesis turns the locals into registers.
 
 ### Vendored code
 

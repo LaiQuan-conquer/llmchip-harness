@@ -1,0 +1,37 @@
+{
+  "format": "llmchip-evalset/1",
+  "description": "Lower-case version of evalset-tinystories for proxy models with the default character tokenizer (space, a-z and . , ' ! ?). 20 prompts for greedy generation (64 positions each), 3 calibration prompts and passages for perplexity. A proxy is untrained: these results show that the flow runs, not that a model is accurate.",
+  "steps": 64,
+  "prompts": [
+    "once upon a time",
+    "one day, a little girl named lily",
+    "tom had a big red ball",
+    "the cat was sad because",
+    "there was a small bird who",
+    "mom said to ben,",
+    "sara and her dog went to the park",
+    "the sun was hot and",
+    "a little boy found a box",
+    "once there was a happy frog",
+    "the old man had a garden",
+    "anna wanted to bake a cake",
+    "in the forest, there lived a bear",
+    "max did not like to share",
+    "the rain came down and",
+    "lucy saw a shiny star",
+    "the fish swam in the blue sea",
+    "tim was scared of the dark",
+    "the kids played with a kite",
+    "grandma gave sue a warm hug"
+  ],
+  "calibration": [
+    "once upon a time, there was a little dog named spot.",
+    "the girl and her mom went to the store to buy some bread.",
+    "ben liked to run fast. one day he fell down and cried."
+  ],
+  "passages": [
+    "once upon a time, there was a little girl named lily. she loved to play outside with her friends. one day, she found a big red ball in the park.",
+    "tom had a toy car. he liked to play with it every day. one day, the car broke. tom was sad, but his dad fixed it.",
+    "the cat sat on the mat. it was a sunny day. the cat saw a bird and wanted to play with it, but the bird flew away."
+  ]
+}

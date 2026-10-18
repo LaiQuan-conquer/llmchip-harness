@@ -4,13 +4,17 @@ import {
   type ApprovalRecord,
   type ApprovalStatus,
   type ApprovalsDecideParams,
+  type ArtifactMeta,
   type CheckDefinition,
   type CheckOverride,
   type ConstraintProposal,
   type Criterion,
+  type ExportResult,
   type FlowGate,
   type FlowPack,
+  type Label,
   type Message,
+  type MigrationApplyResult,
   type ProjectRecord,
   type ProjectState,
   type ReleaseResult,
@@ -27,6 +31,7 @@ import type { PluginRegistry } from '../plugins/registry.ts'
 import type { Scheduler } from '../runs/scheduler.ts'
 import type { Incidents } from '../security/incidents.ts'
 import { canonicalJson, sha256 } from '../util/canonical.ts'
+import { tarArchive } from '../util/tar.ts'
 import { KernelError } from '../util/errors.ts'
 import { assertValid } from '../util/schema.ts'
 import { ulid } from '../util/ulid.ts'
@@ -36,6 +41,12 @@ import { slotsAt, workflowProjection } from './projection.ts'
 export const FLOW_PACK_TYPE = 'flow.pack'
 /** Artifact type of a foundry's written acknowledgement of a waiver. */
 export const FOUNDRY_ACK_TYPE = 'foundry.waiver_ack'
+/** Artifact type of a migration impact assessment (FR-MIG). */
+export const MIGRATION_REPORT_TYPE = 'migration.report'
+/** Artifact type of an export archive (FR-PKG-05). */
+export const EXPORT_TYPE = 'tapeout.export'
+/** Stages from which a migration needs the owner's approval (FR-MIG-04). */
+const OWNER_MIGRATION_STAGES = new Set(['S0', 'S1', 'S2', 'S3'])
 
 const KERNEL_ACTOR: Actor = { kind: 'kernel', id: 'workflow' }
 
@@ -337,6 +348,20 @@ export class Workflow {
     this.requireBranch(projectId, branch)
     const meta = this.artifacts.require(hash)
     const previous = slotsAt(this.events.db, projectId, branch).find((s) => s.slot === slot)?.hash ?? null
+    // Hard constraints (for example the timing exception registry): an agent may propose
+    // an artifact, only a human binds it (requirements §3.2, FR-SGN-02b).
+    const project = this.requireProject(projectId)
+    if (actor.kind !== 'human' && (this.readFlow(project.flowHash).hardConstraintSlots ?? []).includes(slot)) {
+      this.incidents.open({
+        kind: 'hard_constraint_change',
+        severity: 'warning',
+        summary: { code: 'HARD_CONSTRAINT_REQUIRES_HUMAN', params: { slot, by: actor.id, hash } },
+        actor,
+        project: projectId,
+        refs: { artifacts: [hash] },
+      })
+      throw new KernelError('HARD_CONSTRAINT_REQUIRES_HUMAN', `slot ${slot} holds a hard constraint; only a human may bind it`, { slot })
+    }
     if (previous === hash) return
     this.events.transaction(() => {
       this.events.append({ kind: 'project.slot_bound', payload: { project: projectId, branch, slot, hash, previous }, actor, project: projectId, label: meta.label })
@@ -395,9 +420,15 @@ export class Workflow {
     const members: SnapshotMember[] = gate.members.filter((slot) => bound.has(slot)).map((slot) => ({ slot, hash: bound.get(slot)! }))
     const missing = gate.members.filter((slot) => !bound.has(slot))
     const hashes = new Set(members.map((m) => m.hash))
+    // A confirmed migration voids the evidence recorded before it for the gates it reaches.
+    const migration = this.migration(projectId, branch)
+    const since = migration?.gates.includes(gateId) ? migration.ts : ''
     // Evidence: the latest verdict of each gate check whose subjects all belong to this snapshot.
     const evidence = gate.checks
-      .map((check) => this.verdicts({ check, limit: 1000 }).find((v) => v.subjects.length > 0 && v.subjects.every((s) => hashes.has(s)))?.id)
+      .map(
+        (check) =>
+          this.verdicts({ check, limit: 1000 }).find((v) => v.subjects.length > 0 && v.subjects.every((s) => hashes.has(s)) && v.createdAt > since)?.id,
+      )
       .filter((id): id is string => id !== undefined)
     return {
       project: projectId,
@@ -494,14 +525,14 @@ export class Workflow {
   release(projectId: string, branch: string, gateId: string): ReleaseResult {
     this.requireGate(projectId, gateId)
     const row = this.events.db
-      .prepare('SELECT record FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
-      .get(projectId, branch, gateId) as { record: string } | undefined
+      .prepare('SELECT record, invalidated FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
+      .get(projectId, branch, gateId) as { record: string; invalidated: number } | undefined
     if (!row) return { gate: gateId, status: 'none', released: false, approval: null, reasons: [{ code: 'APPROVAL_MISSING', params: { gate: gateId } }] }
     const approval = JSON.parse(row.record) as ApprovalRecord
     const snapshot = this.snapshot(projectId, branch, gateId)
     let status: ApprovalStatus
     const reasons: Message[] = []
-    if (snapshot.hash !== approval.snapshotHash) {
+    if (snapshot.hash !== approval.snapshotHash || row.invalidated) {
       status = 'invalidated'
       reasons.push({ code: 'APPROVAL_INVALIDATED', params: { gate: gateId, approval: approval.id } })
     } else if (approval.decision === 'rejected') {
@@ -543,6 +574,148 @@ export class Workflow {
     }
     this.events.append({ kind: 'waiver.recorded', payload: { waiver }, actor })
     return waiver
+  }
+
+  // ---- FR-MIG: confirmed migration impact assessments ---------------------
+
+  /**
+   * Applies a confirmed migration impact assessment: the approvals of every gate
+   * after the earliest stage to restart become invalid, and the evidence recorded
+   * before the migration no longer counts for them (FR-MIG-03). Restarting at S3
+   * or earlier is the owner's decision (FR-MIG-04).
+   */
+  applyMigration(projectId: string, branch: string, reportHash: string, comment: string, actor: Actor): MigrationApplyResult {
+    const project = this.requireProject(projectId)
+    this.requireBranch(projectId, branch)
+    const meta = this.artifacts.require(reportHash)
+    if (meta.type !== MIGRATION_REPORT_TYPE) throw new KernelError('MIGRATION_REPORT_INVALID', `artifact ${reportHash} is not a ${MIGRATION_REPORT_TYPE}`)
+    const report = JSON.parse(readFileSync(this.artifacts.objectPath(reportHash), 'utf8')) as { restartStage?: string | null }
+    const flow = this.readFlow(project.flowHash)
+    const stages = flow.stages.map((s) => s.id)
+    const restart = report.restartStage
+    if (!restart) return { restartStage: 'none', invalidatedGates: [] }
+    if (!stages.includes(restart)) throw new KernelError('MIGRATION_REPORT_INVALID', `unknown restart stage ${restart}`)
+    if (OWNER_MIGRATION_STAGES.has(restart) && actor.kind !== 'human') {
+      throw new KernelError('MIGRATION_REQUIRES_OWNER', `restarting at ${restart} needs the owner's approval`, { restartStage: restart })
+    }
+    const gates = flow.gates.filter((g) => stages.indexOf(g.after) >= stages.indexOf(restart)).map((g) => g.id)
+    this.events.transaction(() => {
+      this.events.append({
+        kind: 'migration.applied',
+        payload: { project: projectId, branch, report: reportHash, restartStage: restart, gates, ...(comment ? { comment } : {}) },
+        actor,
+        project: projectId,
+      })
+      for (const gate of gates) {
+        const row = this.events.db
+          .prepare('SELECT id, invalidated FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
+          .get(projectId, branch, gate) as { id: string; invalidated: number } | undefined
+        if (!row || row.invalidated) continue
+        this.events.append({
+          kind: 'approval.invalidated',
+          payload: { approval: row.id, gate, reason: { code: 'MIGRATION_APPLIED', params: { restartStage: restart, report: reportHash } } },
+          actor: KERNEL_ACTOR,
+          project: projectId,
+        })
+      }
+    })
+    return { restartStage: restart, invalidatedGates: gates }
+  }
+
+  private migration(projectId: string, branch: string): { ts: string; gates: string[] } | undefined {
+    const rows = this.events.db
+      .prepare("SELECT ts, payload FROM events WHERE kind = 'migration.applied' AND project = ? ORDER BY seq DESC")
+      .all(projectId) as { ts: string; payload: string }[]
+    for (const row of rows) {
+      const p = JSON.parse(row.payload) as { branch: string; gates: string[] }
+      if (p.branch === branch) return { ts: row.ts, gates: p.gates }
+    }
+    return undefined
+  }
+
+  // ---- FR-PKG-02/04/05: export of a released package -----------------------
+
+  /**
+   * Exports the package bound to `slot` when the gate releases it and the package is
+   * the one in the approved snapshot. The archive holds the package, its lineage
+   * manifest (every artifact up to the weights: hash, type, label, producing run,
+   * plugin and tool version, verdicts) and the approval.
+   */
+  async exportPackage(projectId: string, branch: string, gateId: string, slot: string, actor: Actor): Promise<ExportResult> {
+    const release = this.release(projectId, branch, gateId)
+    if (!release.released) {
+      throw new KernelError('EXPORT_BLOCKED', `gate ${gateId} does not release the export (${release.status})`, { gate: gateId, status: release.status, reasons: release.reasons })
+    }
+    const snapshot = this.snapshot(projectId, branch, gateId)
+    const member = snapshot.members.find((m) => m.slot === slot)
+    if (!member) throw new KernelError('EXPORT_BLOCKED', `slot ${slot} is not a member of the ${gateId} snapshot`, { slot })
+    const lineage = this.artifacts.lineage(member.hash, 'up')
+    const label = lineage.nodes.reduce<Label>((max, n) => (labelRank(n.label) > labelRank(max) ? n.label : max), 'public')
+    if (label === 'nda' && actor.kind !== 'human') {
+      throw new KernelError('EXPORT_LABEL_DENIED', 'only a human may export a package that contains NDA material', { label })
+    }
+    const verdictsBySubject = new Map<string, string[]>()
+    for (const v of this.verdicts({ limit: 100000 })) {
+      for (const s of v.subjects) verdictsBySubject.set(s, [...(verdictsBySubject.get(s) ?? []), `${v.check}:${v.verdict}:${v.id}`])
+    }
+    const runs = new Map<string, Record<string, unknown>>()
+    for (const node of lineage.nodes) {
+      if (!node.run || runs.has(node.run)) continue
+      const run = this.scheduler.get(node.run)
+      const plugin = this.registry.get(run.plugin)?.manifest
+      runs.set(node.run, {
+        id: run.id,
+        plugin: run.plugin,
+        pluginVersion: plugin?.version ?? null,
+        handler: run.handler,
+        image: plugin?.entry?.image ?? null,
+        params: run.params,
+        execution: run.execution,
+        endedAt: run.endedAt,
+      })
+    }
+    const manifest = {
+      format: 'llmchip-lineage/1',
+      project: projectId,
+      branch,
+      gate: gateId,
+      approval: release.approval,
+      snapshot: { hash: snapshot.hash, members: snapshot.members, evidence: snapshot.evidence },
+      root: member.hash,
+      artifacts: lineage.nodes.map((n: ArtifactMeta) => ({
+        hash: n.hash,
+        type: n.type,
+        label: n.label,
+        size: n.size,
+        run: n.run,
+        creator: n.creator,
+        verdicts: verdictsBySubject.get(n.hash) ?? [],
+      })),
+      edges: lineage.edges,
+      runs: [...runs.values()],
+    }
+    const approval = this.approvals(projectId, branch).find((a) => a.id === release.approval)
+    const archive = tarArchive([
+      { name: `package/${slot}.tar`, data: readFileSync(this.artifacts.objectPath(member.hash)) },
+      { name: 'lineage.json', data: Buffer.from(JSON.stringify(manifest, null, 2)) },
+      { name: 'approval.json', data: Buffer.from(JSON.stringify(approval ?? null, null, 2)) },
+    ])
+    const meta = await this.artifacts.put(archive, {
+      type: EXPORT_TYPE,
+      mediaType: 'application/x-tar',
+      label,
+      inputs: [member.hash],
+      creator: actor.kind === 'human' ? { kind: 'human', id: actor.id } : { kind: 'kernel', id: 'workflow' },
+      project: projectId,
+    })
+    this.events.append({
+      kind: 'package.exported',
+      payload: { project: projectId, branch, gate: gateId, approval: release.approval!, package: member.hash, archive: meta.hash },
+      actor,
+      project: projectId,
+      label,
+    })
+    return { archive: meta, package: member.hash, approval: release.approval!, lineageArtifacts: lineage.nodes.length }
   }
 
   // ---- helpers -----------------------------------------------------------
@@ -634,4 +807,10 @@ function evaluateCriterion(criterion: Criterion, metrics: RunRecord['metrics']):
       if (criterion.op === '>') return actual > expected
       return actual >= expected
   }
+}
+
+const LABELS = ['public', 'internal', 'nda']
+function labelRank(label: string): number {
+  const k = LABELS.indexOf(label)
+  return k < 0 ? LABELS.length : k
 }

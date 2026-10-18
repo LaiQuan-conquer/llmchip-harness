@@ -6,6 +6,7 @@ from pathlib import Path
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
 from .estimate import apply_calibrations, estimate, summary_markdown
+from .migration import assess
 
 
 def handle_estimate(ctx: InvokeContext) -> Result:
@@ -60,5 +61,27 @@ def handle_check_views(ctx: InvokeContext) -> Result:
     return Result(metrics=metrics, parse={"status": "complete", "parser": "llmchip-estimator/check-views"})
 
 
+def handle_migrate(ctx: InvokeContext) -> Result:
+    """Migration impact assessment from the current to a target process (FR-MIG)."""
+    load = lambda name: json.loads(Path(ctx.input(name).path).read_text())  # noqa: E731
+    report = assess(load("chip"), load("current"), load("target"), load("library"))
+    Path(ctx.out_dir, "migration.json").write_text(json.dumps(report, indent=2))
+    affecting = [d for d in report["differences"] if d["affectsDesign"]]
+    return Result(
+        outputs=[Output("report", "migration.json", "migration.report", "application/json")],
+        metrics={
+            "differences": len(report["differences"]),
+            "affecting_differences": len(affecting),
+            "restart_stage": report["restartStage"] or "none",
+            "needs_owner_approval": report["needsOwnerApproval"],
+        },
+        parse={"status": "complete", "parser": "llmchip-estimator/migration"},
+    )
+
+
 if __name__ == "__main__":
-    run_plugin("estimator", "0.1.0", {"estimate": handle_estimate, "check_views": handle_check_views})
+    run_plugin(
+        "estimator",
+        "0.1.0",
+        {"estimate": handle_estimate, "check_views": handle_check_views, "migrate": handle_migrate},
+    )

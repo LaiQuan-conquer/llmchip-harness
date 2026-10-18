@@ -22,6 +22,9 @@ def design(
     lanes = int(params.get("parallelMacs", 8))
     clock = float(params.get("clockMHz", 50))
     kv_location = params.get("kvLocation", "offchip")
+    # The engine of this template keeps its working data (activations, attention scratch,
+    # trace buffers) in the external memory with the KV cache (rtl-taalas).
+    act_location = params.get("activationLocation", "offchip")
     impl = params["weightStorage"]
     context = spec["context"]["maxTokens"]
     wbits = spec["weights"]["storageBits"]
@@ -30,7 +33,13 @@ def design(
 
     matrix_macs = layers * (2 * dim * dim + 2 * dim * kv_dim + 3 * dim * hidden) + vocab * dim
     attn_macs = 2 * layers * dim * context
-    cycles = math.ceil((matrix_macs + attn_macs) / lanes * 1.1)  # 10% for norms, nonlinear tables and control
+    if act_location == "offchip":
+        # Memory bound: every input word of a matrix block and every attention operand is one
+        # 32-bit transfer over the SPI memory port (SCK = clk / 2: about 70 cycles per word).
+        words = matrix_macs / lanes + 2 * attn_macs + 6 * layers * (dim + hidden)
+        cycles = math.ceil(words * 70)
+    else:
+        cycles = math.ceil((matrix_macs + attn_macs) / lanes * 1.1)  # 10% for norms, tables and control
     compute_ms = cycles / (clock * 1e3)
     kv_bytes_token = layers * 2 * kv_dim * 2  # int16 K and V
     bandwidth = float(params.get("offchipBandwidthMBps", 25))
@@ -55,6 +64,7 @@ def design(
         "kvBits": 16,
         "contextLength": context,
         "kvLocation": kv_location,
+        "activationLocation": act_location,
         "weightStorage": impl,
         "parallelMacs": lanes,
         "clockMHz": clock,
@@ -83,37 +93,74 @@ def design(
         {"name": "host_miso", "dir": "out"},
         {"name": "busy", "dir": "out"},
     ]
-    if kv_location == "offchip":
+    if kv_location == "offchip" or act_location == "offchip":
+        # The memory bus is driven only while busy; when idle the host may use it.
         pins += [
-            {"name": f"kv_{n}", "dir": d}
-            for n, d in (("sclk", "out"), ("cs_n", "out"), ("mosi", "out"), ("miso", "in"))
+            {"name": "kv_sclk", "dir": "out", "enable": "busy"},
+            {"name": "kv_cs_n", "dir": "out", "enable": "busy"},
+            {"name": "kv_mosi", "dir": "out", "enable": "busy"},
+            {"name": "kv_miso", "dir": "in"},
         ]
+    period = 1000.0 / clock
+    # Interface timing (FR-SGN-02a: the source of every input and output delay constraint).
+    asynchronous = "asynchronous to clk; two-flop synchronizer on chip"
+    timing = {
+        "clock": {"port": "clk", "periodNs": round(period, 3)},
+        "inputs": {
+            "rst_n": {"maxNs": round(0.5 * period, 3), "minNs": 0.0, "kind": asynchronous},
+            "host_sclk": {"maxNs": round(0.5 * period, 3), "minNs": 0.0, "kind": asynchronous},
+            "host_cs_n": {"maxNs": round(0.5 * period, 3), "minNs": 0.0, "kind": asynchronous},
+            "host_mosi": {"maxNs": round(0.5 * period, 3), "minNs": 0.0, "kind": asynchronous},
+        },
+        "outputs": {
+            "host_miso": {"maxNs": round(0.25 * period, 3), "minNs": 0.0},
+            "busy": {"maxNs": round(0.25 * period, 3), "minNs": 0.0},
+        },
+        # Board environment of the interface: load on outputs, edge rate of inputs, and the
+        # slowest edge the board accepts at a pad (the pad's off-chip side).
+        "board": {"outputLoadPf": 5.0, "inputTransitionNs": 2.0, "maxPadTransitionNs": round(0.05 * period, 3)},
+        "notes": "Host SPI SCK at most clk / 8. Memory SPI SCK = clk / 2: kv_miso is sampled one clock after "
+        "the falling SCK edge, so external SRAM access time plus board and pad delays must stay below "
+        "the kv_miso input delay.",
+    }
+    if any(p["name"] == "kv_miso" for p in pins):
+        timing["inputs"]["kv_miso"] = {"maxNs": round(0.6 * period, 3), "minNs": 0.0, "kind": "synchronous (SRAM data)"}
+        for name in ("kv_sclk", "kv_cs_n", "kv_mosi"):
+            timing["outputs"][name] = {"maxNs": round(0.25 * period, 3), "minNs": 0.0}
     points = spec["observationPoints"]
-    registers, address = [], 0x100
-    for point in points:
-        registers.append(
-            {
-                "point": point["id"],
-                "address": address,
-                "format": point["format"],
-                "shape": point["shape"],
-                "readback": "host SPI command 0x5x",
-            }
-        )
-        address += 0x100
+    registers = [
+        {
+            "point": point["id"],
+            "format": point["format"],
+            "shape": point["shape"],
+            "readback": "trace buffer in the external memory, read by the host while the chip is idle",
+        }
+        for point in points
+    ]
+    die = params.get("die")
     chip = {
         "format": "llmchip-chip-spec/1",
         "architecture": ARCHITECTURE,
         "numericSpec": {"hash": spec_hash, "version": spec["version"], "format": spec["format"]},
         "weights": {"hash": weights_hash},
         "process": {"id": profile["id"], "title": profile.get("title")},
-        "targets": {"areaLimitMm2": area_limit, "clockMHz": clock, "contextTokens": context},
+        "targets": {
+            "areaLimitMm2": area_limit,
+            "clockMHz": clock,
+            "contextTokens": context,
+            **(
+                {"die": {"xMm": die["xMm"], "yMm": die["yMm"], "areaMm2": round(die["xMm"] * die["yMm"], 4)}}
+                if die
+                else {}
+            ),
+        },
         "function": "autoregressive token generation of the hardwired model: the host sends prompt tokens over SPI, "
         "the chip returns one greedy-decoded token per step (decoding rule of the numeric spec)",
         "dataflow": {
             "kind": "weight-stationary, sequential layers, one weight per lane per cycle",
             "lanes": lanes,
-            "activations": "int16 registers, formats from the numeric spec",
+            "activations": "int16, formats from the numeric spec; "
+            + ("in the external memory with the KV cache" if act_location == "offchip" else "in on-chip registers"),
             "accumulatorBits": spec["accumulator"]["bits"],
             "nonlinear": [
                 "rsqrt table (rmsnorm)",
@@ -152,19 +199,29 @@ def design(
         },
         "interfaces": {
             "host": {
-                "kind": "SPI slave, mode 0",
+                "kind": "SPI slave, mode 0, SCK at most clk / 8",
                 "commands": {
-                    "0x01": "reset sequence",
-                    "0x02": "push token",
-                    "0x03": "read next token",
-                    "0x5x": "debug readback",
-                    "0x60": "single step",
+                    "0x10": "START token[15:0] pos[15:0] mode[7:0]: run one step (mode bit 0: copy the observation "
+                    "points, bit 1: also the debug traces); ignored while busy",
+                    "0x20": "STATUS: returns busy, error, done, 13 zero bits, token[15:0]",
                 },
             },
-            **({"kvMemory": {"kind": "SPI master to an external SRAM"}} if kv_location == "offchip" else {}),
+            **(
+                {
+                    "memory": {
+                        "kind": "SPI master, mode 0, SCK = clk / 2, 23LC1024-style serial SRAM (READ 0x03, "
+                        "WRITE 0x02, 24-bit byte address, sequential mode), 32-bit words most significant byte first",
+                        "holds": ["KV cache"]
+                        + (["activations", "attention scratch", "trace buffers"] if act_location == "offchip" else []),
+                    }
+                }
+                if any(p["name"] == "kv_miso" for p in pins)
+                else {}
+            ),
         },
+        "timing": timing,
         "pins": pins,
-        "observability": {"registers": registers, "singleStep": True, "covers": [p["id"] for p in points]},
+        "observability": {"points": registers, "covers": [p["id"] for p in points]},
         "performance": ppa["performance"],
         "processCapabilities": sorted(
             {f"storage:{impl}", "stdcell-logic", "io-pads"}

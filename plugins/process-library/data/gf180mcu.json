@@ -4,18 +4,129 @@
   "nodeNm": 180,
   "source": "https://gf180mcu-pdk.readthedocs.io; empirical values marked as such",
   "foundry": null,
-  "prerunConstraint": { "areaMm2": 2, "dieYOptionsMm": [2, 3, 5], "dieXMinMm": 1, "note": "prerun designs follow the target foundry's 2 mm2 size rules (requirements §11.1)" },
+  "prerunConstraint": {
+    "dieMm": {
+      "x": 1.2,
+      "y": 2
+    },
+    "areaMm2": 2.4,
+    "dieYOptionsMm": [
+      2,
+      3,
+      5
+    ],
+    "dieXMinMm": 1,
+    "note": "Owner decision 2026-10-18: the GF180 prerun uses a 1.2 x 2 mm die (2.4 mm2). With the 350 um gf180mcu_fd_io pads a 1 x 2 mm die leaves too little core for the engine; compressing to 2 mm2 is a follow-up for the target process."
+  },
   "ring": {
-    "ioRingWidthMm": { "low": 0.13, "typ": 0.15, "high": 0.18, "confidence": "empirical", "source": "gf180mcu_fd_io pads, before calibration" },
-    "sealRingWidthMm": { "low": 0.01, "typ": 0.02, "high": 0.03, "confidence": "empirical", "source": "typical seal ring" }
+    "ioRingWidthMm": {
+      "low": 0.376,
+      "typ": 0.376,
+      "high": 0.376,
+      "confidence": "datasheet",
+      "source": "gf180mcu_fd_io LEF: pads 75x350 um, corners 355x355 um, placed 26 um from the die edge (LibreLane PAD_EDGE_SPACING of the PDK); the only IO library of gf180mcuD"
+    },
+    "sealRingWidthMm": {
+      "low": 0.01,
+      "typ": 0.02,
+      "high": 0.03,
+      "confidence": "empirical",
+      "source": "typical seal ring"
+    }
   },
   "logic": {
-    "macAreaUm2": { "low": 3000, "typ": 5000, "high": 8000, "confidence": "empirical", "source": "8x4-bit MAC with 20-bit accumulator" },
-    "flopBitAreaUm2": { "low": 25, "typ": 35, "high": 50, "confidence": "empirical", "source": "gf180mcu_fd_sc_mcu7t5v0 flip-flop, before calibration" },
-    "controlAreaMm2": { "low": 0.03, "typ": 0.05, "high": 0.1, "confidence": "empirical", "source": "sequencer, interfaces, debug readback" },
-    "utilization": { "low": 0.75, "typ": 0.7, "high": 0.6, "confidence": "empirical", "source": "placement utilization" },
-    "powerOverhead": { "low": 0.05, "typ": 0.07, "high": 0.1, "confidence": "empirical", "source": "power grid share of core area" }
+    "macAreaUm2": {
+      "low": 3000,
+      "typ": 5000,
+      "high": 8000,
+      "confidence": "empirical",
+      "source": "8x4-bit MAC with 20-bit accumulator"
+    },
+    "flopBitAreaUm2": {
+      "low": 63.66,
+      "typ": 75,
+      "high": 90,
+      "confidence": "datasheet",
+      "source": "gf180mcu_fd_sc_mcu7t5v0__dffq_1 area 63.66 um2 (Liberty tt_025C); typ/high add enable and read multiplexing"
+    },
+    "controlAreaMm2": {
+      "low": 0.03,
+      "typ": 0.05,
+      "high": 0.1,
+      "confidence": "empirical",
+      "source": "sequencer, interfaces, debug readback"
+    },
+    "utilization": {
+      "low": 0.75,
+      "typ": 0.7,
+      "high": 0.6,
+      "confidence": "empirical",
+      "source": "placement utilization"
+    },
+    "powerOverhead": {
+      "low": 0.05,
+      "typ": 0.07,
+      "high": 0.1,
+      "confidence": "empirical",
+      "source": "power grid share of core area"
+    }
   },
-  "implementations": ["gf180mcu.stdcell-rom", "gf180mcu.openram-rom", "gf180mcu.sram-512x8"],
-  "reticleLimitMm2": 850
+  "implementations": [
+    "gf180mcu.stdcell-rom",
+    "gf180mcu.openram-rom",
+    "gf180mcu.sram-512x8"
+  ],
+  "reticleLimitMm2": 850,
+  "technology": {
+    "stdcell": {
+      "library": "gf180mcu_fd_sc_mcu7t5v0",
+      "voltageV": 5.0,
+      "tracks": 7,
+      "corners": [
+        "tt_025C_5v00",
+        "ss_125C_4v50",
+        "ff_n40C_5v50"
+      ],
+      "confidence": "datasheet"
+    },
+    "io": {
+      "library": "gf180mcu_fd_io",
+      "padUm": [
+        75,
+        350
+      ],
+      "cornerUm": 355,
+      "voltageV": 5.0,
+      "confidence": "datasheet"
+    },
+    "metalLayers": 5,
+    "voltageDomains": [
+      "5V core and IO (single domain)"
+    ],
+    "parasitics": [
+      "nom",
+      "min",
+      "max"
+    ],
+    "signoff": {
+      "drc": [
+        "KLayout gf180mcu.drc",
+        "Magic gf180mcuD"
+      ],
+      "lvs": [
+        "Netgen"
+      ],
+      "antenna": [
+        "KLayout"
+      ],
+      "density": [
+        "KLayout"
+      ],
+      "sta": [
+        "OpenSTA"
+      ],
+      "openTools": true
+    },
+    "source": "gf180mcuD in the pinned iic-osic-tools image"
+  }
 }

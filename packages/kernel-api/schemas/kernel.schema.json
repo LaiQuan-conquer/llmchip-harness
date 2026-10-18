@@ -12,7 +12,7 @@
     },
     "Label": {
       "title": "Label",
-      "description": "Data label (requirements §8). Ordered public < internal < nda.",
+      "description": "Data label (requirements \u00a78). Ordered public < internal < nda.",
       "type": "string",
       "enum": [
         "public",
@@ -22,7 +22,7 @@
     },
     "Actor": {
       "title": "Actor",
-      "description": "Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements §6.1).",
+      "description": "Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements \u00a76.1).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -274,7 +274,7 @@
     },
     "ExecutionStatus": {
       "title": "ExecutionStatus",
-      "description": "Verdict layer ① (requirements §3.9).",
+      "description": "Verdict layer \u2460 (requirements \u00a73.9).",
       "type": "string",
       "enum": [
         "not_started",
@@ -289,7 +289,7 @@
     },
     "ParseStatus": {
       "title": "ParseStatus",
-      "description": "Verdict layer ② (requirements §3.9).",
+      "description": "Verdict layer \u2461 (requirements \u00a73.9).",
       "type": "string",
       "enum": [
         "complete",
@@ -299,7 +299,7 @@
     },
     "CheckVerdict": {
       "title": "CheckVerdict",
-      "description": "Verdict layer ③ (requirements §3.9).",
+      "description": "Verdict layer \u2462 (requirements \u00a73.9).",
       "type": "string",
       "enum": [
         "pass",
@@ -310,7 +310,7 @@
     },
     "StageConclusion": {
       "title": "StageConclusion",
-      "description": "Verdict layer ④ (requirements §3.9).",
+      "description": "Verdict layer \u2463 (requirements \u00a73.9).",
       "type": "string",
       "enum": [
         "incomplete",
@@ -473,7 +473,7 @@
         "endedAt",
         "maxAttempts"
       ],
-      "description": "One execution of a plugin handler or tool (requirements §3.3). `execution` is verdict layer ①."
+      "description": "One execution of a plugin handler or tool (requirements \u00a73.3). `execution` is verdict layer \u2460."
     },
     "VerdictRecord": {
       "title": "VerdictRecord",
@@ -556,7 +556,7 @@
     },
     "Message": {
       "title": "Message",
-      "description": "A localizable message: a stable code plus parameters, rendered by the client in the user's language (architecture §9.1).",
+      "description": "A localizable message: a stable code plus parameters, rendered by the client in the user's language (architecture \u00a79.1).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1290,7 +1290,7 @@
         "status",
         "parser"
       ],
-      "description": "How completely a tool report was parsed (verdict layer ②)."
+      "description": "How completely a tool report was parsed (verdict layer \u2461)."
     },
     "Metrics": {
       "title": "Metrics",
@@ -1550,7 +1550,7 @@
         "runtime",
         "kernelApi"
       ],
-      "description": "Contents of `llmchip-plugin.json` (architecture §4.9)."
+      "description": "Contents of `llmchip-plugin.json` (architecture \u00a74.9)."
     },
     "PluginInfo": {
       "title": "PluginInfo",
@@ -1947,7 +1947,7 @@
             "foundry_waiver"
           ],
           "default": "none",
-          "description": "Which kind of waiver may apply (requirements §3.7.4)."
+          "description": "Which kind of waiver may apply (requirements \u00a73.7.4)."
         }
       },
       "required": [
@@ -2075,6 +2075,13 @@
           "items": {
             "$ref": "#/$defs/CheckDefinition"
           }
+        },
+        "hardConstraintSlots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Slots whose artifacts are hard constraints (e.g. the timing exception registry): only a human may bind them (requirements \u00a73.2, FR-SGN-02b)."
         }
       },
       "required": [
@@ -2084,7 +2091,7 @@
         "gates",
         "checks"
       ],
-      "description": "Stages, gates and check definitions of a workflow (architecture §4.3)."
+      "description": "Stages, gates and check definitions of a workflow (architecture \u00a74.3)."
     },
     "ProjectRecord": {
       "title": "ProjectRecord",
@@ -2183,7 +2190,7 @@
         "evidenceHash",
         "missing"
       ],
-      "description": "Design snapshot of a gate plus its evidence manifest (requirements §3.7.2)."
+      "description": "Design snapshot of a gate plus its evidence manifest (requirements \u00a73.7.2)."
     },
     "ApprovalCondition": {
       "title": "ApprovalCondition",
@@ -2313,7 +2320,7 @@
         "rejected",
         "invalidated"
       ],
-      "description": "Approval states of requirements §3.7.3, plus `none` and `invalidated`."
+      "description": "Approval states of requirements \u00a73.7.3, plus `none` and `invalidated`."
     },
     "ReleaseResult": {
       "title": "ReleaseResult",
@@ -2349,7 +2356,7 @@
         "approval",
         "reasons"
       ],
-      "description": "Result of the single release check before advancing or exporting (architecture §4.7)."
+      "description": "Result of the single release check before advancing or exporting (architecture \u00a74.7)."
     },
     "WaiverRecord": {
       "title": "WaiverRecord",
@@ -3414,7 +3421,7 @@
         "openedAt",
         "closed"
       ],
-      "description": "An anomaly that must be visible to humans (requirements §3.10)."
+      "description": "An anomaly that must be visible to humans (requirements \u00a73.10)."
     },
     "IncidentOpenedPayload": {
       "title": "IncidentOpenedPayload",
@@ -3710,7 +3717,7 @@
           "minItems": 1
         }
       },
-      "description": "Project-specific replacement of a check definition's standards. A hard constraint (requirements §3.2)."
+      "description": "Project-specific replacement of a check definition's standards. A hard constraint (requirements \u00a73.2)."
     },
     "ConstraintProposal": {
       "title": "ConstraintProposal",
@@ -4328,7 +4335,7 @@
         "verification",
         "state"
       ],
-      "description": "A change set and its progress through the iteration loop (requirements §6.2)."
+      "description": "A change set and its progress through the iteration loop (requirements \u00a76.2)."
     },
     "ChangesetEventPayload": {
       "title": "ChangesetEventPayload",
@@ -4540,6 +4547,173 @@
       "required": [
         "owner",
         "external"
+      ]
+    },
+    "PackagesExportParams": {
+      "title": "PackagesExportParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "gate": {
+          "type": "string",
+          "default": "G4",
+          "description": "Gate whose approval releases the export."
+        },
+        "slot": {
+          "type": "string",
+          "default": "tapeout-package",
+          "description": "Snapshot member holding the package."
+        }
+      },
+      "required": [
+        "project"
+      ]
+    },
+    "ExportResult": {
+      "title": "ExportResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "archive": {
+          "$ref": "#/$defs/ArtifactMeta"
+        },
+        "package": {
+          "$ref": "#/$defs/Hash"
+        },
+        "approval": {
+          "type": "string"
+        },
+        "lineageArtifacts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "archive",
+        "package",
+        "approval",
+        "lineageArtifacts"
+      ],
+      "description": "An export archive: the released package with its lineage manifest (FR-PKG-02/04/05)."
+    },
+    "MigrationApplyParams": {
+      "title": "MigrationApplyParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "report": {
+          "$ref": "#/$defs/Hash"
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "report"
+      ]
+    },
+    "MigrationApplyResult": {
+      "title": "MigrationApplyResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "restartStage": {
+          "type": "string"
+        },
+        "invalidatedGates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "restartStage",
+        "invalidatedGates"
+      ],
+      "description": "Effect of a confirmed migration impact assessment (FR-MIG-03)."
+    },
+    "MigrationAppliedPayload": {
+      "title": "MigrationAppliedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/$defs/Hash"
+        },
+        "restartStage": {
+          "type": "string"
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "report",
+        "restartStage",
+        "gates"
+      ]
+    },
+    "PackageExportedPayload": {
+      "title": "PackageExportedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "approval": {
+          "type": "string"
+        },
+        "package": {
+          "$ref": "#/$defs/Hash"
+        },
+        "archive": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "gate",
+        "approval",
+        "package",
+        "archive"
       ]
     }
   }

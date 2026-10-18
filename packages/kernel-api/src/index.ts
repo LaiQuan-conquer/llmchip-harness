@@ -61,6 +61,8 @@ export interface KernelEventPayloads {
   'task.state': T.TaskStatePayload
   'agent.step': T.AgentStepPayload
   'changeset.updated': T.ChangesetEventPayload
+  'migration.applied': T.MigrationAppliedPayload
+  'package.exported': T.PackageExportedPayload
 }
 
 /** Schema definition name of each kernel event kind's payload. */
@@ -97,6 +99,8 @@ export const KERNEL_EVENT_PAYLOAD_DEFS: { readonly [K in keyof KernelEventPayloa
   'task.state': 'TaskStatePayload',
   'agent.step': 'AgentStepPayload',
   'changeset.updated': 'ChangesetEventPayload',
+  'migration.applied': 'MigrationAppliedPayload',
+  'package.exported': 'PackageExportedPayload',
 }
 
 /** JSON-RPC methods of the kernel API (IF-1): params and result types. */
@@ -138,6 +142,8 @@ export interface KernelMethods {
   'approvals.decide': { params: T.ApprovalsDecideParams; result: T.ApprovalRecord }
   'approvals.closeCondition': { params: T.ApprovalsCloseConditionParams; result: T.ApprovalRecord }
   'approvals.list': { params: T.ProjectRefParams; result: T.ApprovalsListResult }
+  'packages.export': { params: T.PackagesExportParams; result: T.ExportResult }
+  'migration.apply': { params: T.MigrationApplyParams; result: T.MigrationApplyResult }
   'waivers.create': { params: T.WaiversCreateParams; result: T.WaiverRecord }
   'incidents.list': { params: T.IncidentsListParams; result: T.IncidentsListResult }
   'incidents.close': { params: T.IncidentsCloseParams; result: T.IncidentRecord }
@@ -198,6 +204,8 @@ export const KERNEL_METHOD_DEFS: { readonly [M in KernelMethod]: { params: strin
   'approvals.decide': { params: 'ApprovalsDecideParams', result: 'ApprovalRecord' },
   'approvals.closeCondition': { params: 'ApprovalsCloseConditionParams', result: 'ApprovalRecord' },
   'approvals.list': { params: 'ProjectRefParams', result: 'ApprovalsListResult' },
+  'packages.export': { params: 'PackagesExportParams', result: 'ExportResult' },
+  'migration.apply': { params: 'MigrationApplyParams', result: 'MigrationApplyResult' },
   'waivers.create': { params: 'WaiversCreateParams', result: 'WaiverRecord' },
   'incidents.list': { params: 'IncidentsListParams', result: 'IncidentsListResult' },
   'incidents.close': { params: 'IncidentsCloseParams', result: 'IncidentRecord' },

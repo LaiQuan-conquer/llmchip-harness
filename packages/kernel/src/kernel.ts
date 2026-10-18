@@ -292,6 +292,10 @@ export class Kernel {
       'approvals.decide': (params, session) => this.workflow.decide(params, session.actor),
       'approvals.closeCondition': ({ approval, condition, verdict }, session) => this.workflow.closeCondition(approval, condition, verdict, session.actor),
       'approvals.list': ({ project, branch }) => ({ approvals: this.workflow.approvals(project, branch) }),
+      'packages.export': ({ project, branch, gate, slot }, session) =>
+        this.workflow.exportPackage(project, branch ?? 'main', gate ?? 'G4', slot ?? 'tapeout-package', session.actor),
+      'migration.apply': ({ project, branch, report, comment }, session) =>
+        this.workflow.applyMigration(project, branch ?? 'main', report, comment ?? '', session.actor),
       'waivers.create': (params, session) => this.workflow.createWaiver(params, session.actor),
       'incidents.list': (params) => ({ incidents: this.incidents.list(params) }),
       'incidents.close': ({ incident, cause, action }, session) => this.incidents.close(incident, cause, action, session.actor),

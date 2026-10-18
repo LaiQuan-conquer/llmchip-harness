@@ -1,6 +1,6 @@
 {
   "id": "library-180nm",
-  "description": "Implementation library entries for 180nm processes (requirements §3.8). Densities are bound to a concrete implementation, not to the node. Every value is empirical until FR-EST-13 calibration replaces it. GF180MCU entries carry calibrated values from the eda-gf180 plugin (M1.5); re-run calibration after changing the tool image.",
+  "description": "Implementation library entries for 180nm processes (requirements \u00a73.8). Densities are bound to a concrete implementation, not to the node. Every value is empirical until FR-EST-13 calibration replaces it. GF180MCU entries carry calibrated values from the eda-gf180 plugin (M1.5); re-run calibration after changing the tool image.",
   "entries": [
     {
       "id": "sephonchitech-180bcd.foundry-rom",
@@ -22,7 +22,8 @@
         "high": 0.3,
         "confidence": "empirical",
         "source": "decoders and sense amplifiers"
-      }
+      },
+      "form": "macro"
     },
     {
       "id": "sephonchitech-180bcd.foundry-sram",
@@ -44,7 +45,8 @@
         "high": 0,
         "confidence": "empirical",
         "source": "included in density"
-      }
+      },
+      "form": "macro"
     },
     {
       "id": "sephonchitech-180bcd.stdcell-rom",
@@ -66,7 +68,8 @@
         "high": 0,
         "confidence": "empirical",
         "source": "included in density"
-      }
+      },
+      "form": "stdcell"
     },
     {
       "id": "gf180mcu.stdcell-rom",
@@ -87,7 +90,8 @@
         "high": 0,
         "confidence": "calibrated",
         "source": "decoding is part of the measured logic"
-      }
+      },
+      "form": "stdcell"
     },
     {
       "id": "gf180mcu.openram-rom",
@@ -109,7 +113,8 @@
         "high": 0.4,
         "confidence": "empirical",
         "source": "decoders"
-      }
+      },
+      "form": "macro"
     },
     {
       "id": "gf180mcu.sram-512x8",
@@ -130,7 +135,8 @@
         "high": 0,
         "confidence": "empirical",
         "source": "included in density"
-      }
+      },
+      "form": "macro"
     }
   ]
 }

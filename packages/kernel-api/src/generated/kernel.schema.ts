@@ -2078,6 +2078,13 @@ export const kernelSchema = {
           "items": {
             "$ref": "#/$defs/CheckDefinition"
           }
+        },
+        "hardConstraintSlots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Slots whose artifacts are hard constraints (e.g. the timing exception registry): only a human may bind them (requirements §3.2, FR-SGN-02b)."
         }
       },
       "required": [
@@ -4543,6 +4550,173 @@ export const kernelSchema = {
       "required": [
         "owner",
         "external"
+      ]
+    },
+    "PackagesExportParams": {
+      "title": "PackagesExportParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "gate": {
+          "type": "string",
+          "default": "G4",
+          "description": "Gate whose approval releases the export."
+        },
+        "slot": {
+          "type": "string",
+          "default": "tapeout-package",
+          "description": "Snapshot member holding the package."
+        }
+      },
+      "required": [
+        "project"
+      ]
+    },
+    "ExportResult": {
+      "title": "ExportResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "archive": {
+          "$ref": "#/$defs/ArtifactMeta"
+        },
+        "package": {
+          "$ref": "#/$defs/Hash"
+        },
+        "approval": {
+          "type": "string"
+        },
+        "lineageArtifacts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "archive",
+        "package",
+        "approval",
+        "lineageArtifacts"
+      ],
+      "description": "An export archive: the released package with its lineage manifest (FR-PKG-02/04/05)."
+    },
+    "MigrationApplyParams": {
+      "title": "MigrationApplyParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "report": {
+          "$ref": "#/$defs/Hash"
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "report"
+      ]
+    },
+    "MigrationApplyResult": {
+      "title": "MigrationApplyResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "restartStage": {
+          "type": "string"
+        },
+        "invalidatedGates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "restartStage",
+        "invalidatedGates"
+      ],
+      "description": "Effect of a confirmed migration impact assessment (FR-MIG-03)."
+    },
+    "MigrationAppliedPayload": {
+      "title": "MigrationAppliedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/$defs/Hash"
+        },
+        "restartStage": {
+          "type": "string"
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "report",
+        "restartStage",
+        "gates"
+      ]
+    },
+    "PackageExportedPayload": {
+      "title": "PackageExportedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "approval": {
+          "type": "string"
+        },
+        "package": {
+          "$ref": "#/$defs/Hash"
+        },
+        "archive": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "gate",
+        "approval",
+        "package",
+        "archive"
       ]
     }
   }

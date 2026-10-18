@@ -7,7 +7,7 @@
     { "id": "directed.single_token", "category": "directed", "description": "Generation from the BOS token alone matches the reference" },
     { "id": "directed.max_context", "category": "directed", "description": "A sequence filling the whole context matches the reference; a step beyond the context raises `error`" },
     { "id": "directed.illegal_input", "category": "directed", "description": "A position beyond the context or a token beyond the vocabulary ends the step with `error`" },
-    { "id": "directed.start_while_busy", "category": "directed", "description": "A start pulse with a different token and position while busy is ignored (the testbench pulses start inside every step)" },
+    { "id": "directed.start_while_busy", "category": "directed", "description": "A START frame with a different token and position while busy is ignored (the testbench sends one inside every step)" },
     { "id": "directed.debug_readback", "category": "directed", "description": "The debug program traces every operation; all traces equal the instruction-level simulator", "params": { "positions": 4 } },
     { "id": "boundary.alu", "category": "boundary", "description": "Rounding ties, saturation edges, table index edges and rsqrt normalization at powers of two" },
     { "id": "exhaustive.silu_index", "category": "exhaustive", "description": "Sigmoid table index for every int16 input" },
@@ -15,6 +15,6 @@
     { "id": "exhaustive.rsqrt", "category": "exhaustive", "description": "rsqrt normalization for every value up to 2^16" },
     { "id": "random.alu", "category": "random", "description": "Random shifts, saturations and normalizations" },
     { "id": "random.tokens", "category": "random", "description": "Random token sequences of the L2 trace, every position forced: all observation points of L3 equal L2" },
-    { "id": "coverage.line", "category": "coverage", "description": "Line coverage of llmchip_core over two regression prompts, a mid-inference reset and illegal inputs", "params": { "threshold": 90 } }
+    { "id": "coverage.line", "category": "coverage", "description": "Line coverage of the chip RTL (engine, memory port, host interface) over two regression prompts, a debug-mode run, a mid-inference reset and illegal inputs", "params": { "threshold": 90 } }
   ]
 }

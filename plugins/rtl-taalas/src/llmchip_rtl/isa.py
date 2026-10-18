@@ -8,7 +8,8 @@ functions are the reference for the RTL arithmetic unit tests.
 Semantics follow the numeric spec operator by operator; `rtl-taalas` checks
 on the host that this simulator reproduces the L2 model bit for bit.
 
-Instruction word: opcode in bits [7:0], then 16 signed 32-bit fields F0..F15.
+Instruction word: opcode in bits [7:0], then 16 signed 32-bit fields F0..F15
+(the RTL program ROM stores only the bits each field needs).
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ OP_NAMES = {v: k for k, v in OPS.items()}
 POINTS = {"attn_residual": 1, "ffn_residual": 2, "logits": 3, "op": 15}
 FLAG_SAT32 = 1
 FLAG_POS = 2
+FLAG_DEBUG = 4  # TRACE executed only in debug mode
+MODE_POINTS = 1  # step mode bit: copy the observation points of the numeric spec
+MODE_DEBUG = 2  # step mode bit: also copy the output of every operation
 
 # -- scalar functions (reference for the RTL arithmetic unit) -----------------
 
@@ -121,8 +125,9 @@ class Machine:
         )
         return w[:out], m[:out]
 
-    def step(self, token: int, pos: int, traces: list | None = None) -> int:
-        """Runs the program for one (token, position); returns the argmax token."""
+    def step(self, token: int, pos: int, traces: list | None = None, mode: int = MODE_POINTS) -> int:
+        """Runs the program for one (token, position); returns the argmax token. TRACE
+        copies an observation point into its trace buffer (data memory) when `mode` enables it."""
         if pos >= self.context:
             raise ValueError(f"position {pos} exceeds the context of {self.context}")
         d = self.dmem
@@ -187,8 +192,11 @@ class Machine:
                 x, y, n = f[:3]
                 d[x : x + n] = sat(d[x : x + n] + d[y : y + n], 16)
             elif op == "TRACE":
-                addr, n, point, layer, flags, stride = f[:6]
+                addr, n, point, layer, flags, stride, buffer = f[:7]
+                if not mode & (MODE_DEBUG if flags & FLAG_DEBUG else MODE_POINTS):
+                    continue
                 base = addr + (pos * stride if flags & FLAG_POS else 0)
+                d[buffer : buffer + n] = d[base : base + n]
                 if traces is not None:
                     traces.append({"op": index, "point": point, "layer": layer, "values": d[base : base + n].copy()})
             elif op == "ARGMAX":

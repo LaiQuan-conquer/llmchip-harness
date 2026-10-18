@@ -117,6 +117,11 @@ const TOOLS: ToolSpec[] = [
     parameters: obj({ check: { type: 'string' }, run: { type: 'string' } }, ['check', 'run']),
   },
   {
+    name: 'bind_slot',
+    description: "Bind a slot of the task's project to an artifact (hard-constraint slots such as timing exceptions are for humans only).",
+    parameters: obj({ slot: { type: 'string' }, hash: { type: 'string' } }, ['slot', 'hash']),
+  },
+  {
     name: 'propose_check_override',
     description: "Propose a change of a check's standards for this project (a hard constraint; a human must approve).",
     parameters: obj({ check: { type: 'string' }, override: { type: 'object' }, reason: { type: 'string' } }, ['check', 'override', 'reason']),
@@ -478,6 +483,15 @@ export class AgentRuntime {
       case 'evaluate_check': {
         const verdict = this.workflow.evaluate(String(args.check), String(args.run), actor, spec.project)
         return { ok: true, content: JSON.stringify({ id: verdict.id, verdict: verdict.verdict, reasons: verdict.reasons }), label: 'internal' }
+      }
+      case 'bind_slot': {
+        try {
+          this.workflow.bind(spec.project, 'main', String(args.slot), String(args.hash), actor)
+        } catch (error) {
+          // The workflow already opened an incident for a hard-constraint slot.
+          return { ok: false, content: `${(error as { code?: string }).code ?? 'ERROR'}: ${(error as Error).message}`, label: 'public' }
+        }
+        return { ok: true, content: JSON.stringify({ slot: args.slot, hash: args.hash }), label: 'internal' }
       }
       case 'propose_check_override': {
         const proposal = this.workflow.overrideCheck(spec.project, String(args.check), args.override, String(args.reason ?? ''), actor)

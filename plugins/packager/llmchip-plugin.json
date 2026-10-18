@@ -1,0 +1,205 @@
+{
+  "id": "packager",
+  "version": "0.1.0",
+  "title": "Tapeout package builder and integrity check (S8)",
+  "kinds": [
+    "package-template",
+    "signoff-check"
+  ],
+  "runtime": "process",
+  "entry": {
+    "command": [
+      "${python}",
+      "-m",
+      "llmchip_packager"
+    ]
+  },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "build",
+      "title": "Tapeout package from the process's template (FR-PKG-01)",
+      "inputs": [
+        {
+          "name": "template",
+          "types": [
+            "package.template"
+          ],
+          "required": true
+        },
+        {
+          "name": "gds",
+          "types": [
+            "layout.gds"
+          ],
+          "required": true
+        },
+        {
+          "name": "layout",
+          "types": [
+            "layout.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "pads",
+          "types": [
+            "pad.list"
+          ],
+          "required": true
+        },
+        {
+          "name": "drc",
+          "types": [
+            "drc.report"
+          ],
+          "required": true
+        },
+        {
+          "name": "lvs",
+          "types": [
+            "lvs.report"
+          ],
+          "required": true
+        },
+        {
+          "name": "sta",
+          "types": [
+            "sta.report"
+          ],
+          "required": true
+        },
+        {
+          "name": "constraints",
+          "types": [
+            "timing.constraints"
+          ],
+          "required": true
+        },
+        {
+          "name": "exceptions",
+          "types": [
+            "timing.exceptions"
+          ],
+          "required": true
+        },
+        {
+          "name": "measurements",
+          "types": [
+            "measurement.record"
+          ],
+          "required": true
+        },
+        {
+          "name": "l2",
+          "types": [
+            "l2.outputs"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "package",
+          "type": "tapeout.package",
+          "mediaType": "application/x-tar"
+        },
+        {
+          "name": "manifest",
+          "type": "package.manifest",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "check",
+      "title": "Integrity check of a tapeout package before G4 (FR-PKG-03)",
+      "inputs": [
+        {
+          "name": "package",
+          "types": [
+            "tapeout.package"
+          ],
+          "required": true
+        },
+        {
+          "name": "template",
+          "types": [
+            "package.template"
+          ],
+          "required": true
+        },
+        {
+          "name": "gds",
+          "types": [
+            "layout.gds"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "package.integrity",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "import_external",
+      "title": "Import an external signoff report bound to a GDS (FR-SGN-06)",
+      "inputs": [
+        {
+          "name": "report",
+          "types": [
+            "external.report"
+          ],
+          "required": true
+        },
+        {
+          "name": "gds",
+          "types": [
+            "layout.gds"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "record",
+          "type": "external.signoff",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 60000
+    }
+  ]
+}

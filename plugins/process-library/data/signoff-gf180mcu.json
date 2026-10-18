@@ -1,0 +1,36 @@
+{
+  "format": "llmchip-signoff-rules/1",
+  "id": "signoff-gf180mcu",
+  "process": "gf180mcu",
+  "description": "Signoff rule configuration of the GF180MCU prerun: the PDK's KLayout DRC decks as LibreLane runs them, Magic DRC, KLayout antenna and density, Netgen LVS, OpenSTA at every corner. Cell exclusions apply only to markers inside the named cells or inside the placed footprint of their instances; excluded markers are still reported. A change is a hard constraint (requirements \u00a73.2): only a human binds a different rules artifact, with the reason recorded in it.",
+  "klayoutDrc": {
+    "variant": "gf180mcuD",
+    "decks": "all,-antenna,-density"
+  },
+  "magicDrc": true,
+  "antenna": true,
+  "density": true,
+  "changes": [
+    {
+      "date": "2026-10-18",
+      "by": "owner",
+      "change": "cellExclusions: CUP.3 and DCF.1a inside gf180mcu_fd_io cells and their footprints (M4 prerun signoff)"
+    }
+  ],
+  "cellExclusions": [
+    {
+      "rules": [
+        "CUP.3",
+        "DCF.1a"
+      ],
+      "cells": [
+        "Bondpad_*",
+        "gf180mcu_fd_io__*"
+      ],
+      "footprints": true,
+      "reason": "Markers inside the PDK's own IO cells and their footprints: the gf180mcu_fd_io bond pad is a non-CUP pad (gf180mcu_fd_io documentation), yet the gf180mcuD KLayout deck applies CUP.3 to it; DCF.1a is reported at an IO filler (fill10) between two pads. The same CUP.3 exclusion for Bondpad_* and gf180mcu_fd_io__* is used by gdscheck for gf180mcuD. Excluded markers stay listed in the DRC report and are counted apart; markers anywhere else still fail.",
+      "approvedBy": "owner",
+      "approvedAt": "2026-10-18"
+    }
+  ]
+}

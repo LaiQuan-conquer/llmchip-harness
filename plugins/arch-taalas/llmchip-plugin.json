@@ -2,37 +2,136 @@
   "id": "arch-taalas",
   "version": "0.1.0",
   "title": "Taalas-style hardwired architecture template (S3)",
-  "kinds": ["architecture"],
+  "kinds": [
+    "architecture"
+  ],
   "runtime": "process",
-  "entry": { "command": ["${python}", "-m", "llmchip_arch"] },
+  "entry": {
+    "command": [
+      "${python}",
+      "-m",
+      "llmchip_arch"
+    ]
+  },
   "kernelApi": "^0.3",
-  "requiresProcessCapabilities": ["stdcell-logic", "io-pads", "storage:<weightStorage>"],
+  "requiresProcessCapabilities": [
+    "stdcell-logic",
+    "io-pads",
+    "storage:<weightStorage>"
+  ],
   "handlers": [
     {
       "name": "design",
       "title": "Chip spec and PPA estimate from a frozen numeric spec",
       "inputs": [
-        { "name": "spec", "types": ["numeric.spec"], "required": true },
-        { "name": "weights", "types": ["numeric.weights"], "required": true },
-        { "name": "profile", "types": ["process.profile"], "required": true },
-        { "name": "library", "types": ["implementation.library"], "required": true }
+        {
+          "name": "spec",
+          "types": [
+            "numeric.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "weights",
+          "types": [
+            "numeric.weights"
+          ],
+          "required": true
+        },
+        {
+          "name": "profile",
+          "types": [
+            "process.profile"
+          ],
+          "required": true
+        },
+        {
+          "name": "library",
+          "types": [
+            "implementation.library"
+          ],
+          "required": true
+        }
       ],
       "outputs": [
-        { "name": "chip", "type": "chip.spec", "mediaType": "application/json" },
-        { "name": "ppa", "type": "ppa.estimate", "mediaType": "application/json" }
+        {
+          "name": "chip",
+          "type": "chip.spec",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "ppa",
+          "type": "ppa.estimate",
+          "mediaType": "application/json"
+        }
       ],
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["weightStorage"],
+        "required": [
+          "weightStorage"
+        ],
         "properties": {
-          "weightStorage": { "type": "string" },
-          "kvStorage": { "type": "string" },
-          "kvLocation": { "enum": ["offchip", "onchip"], "default": "offchip" },
-          "parallelMacs": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 8 },
-          "clockMHz": { "type": "number", "exclusiveMinimum": 0, "default": 50 },
-          "offchipBandwidthMBps": { "type": "number", "exclusiveMinimum": 0, "default": 25 },
-          "targetAreaMm2": { "type": "number", "exclusiveMinimum": 0 }
+          "weightStorage": {
+            "type": "string"
+          },
+          "kvStorage": {
+            "type": "string"
+          },
+          "kvLocation": {
+            "enum": [
+              "offchip",
+              "onchip"
+            ],
+            "default": "offchip"
+          },
+          "parallelMacs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096,
+            "default": 8
+          },
+          "clockMHz": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 50
+          },
+          "offchipBandwidthMBps": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 25
+          },
+          "targetAreaMm2": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "activationLocation": {
+            "enum": [
+              "offchip",
+              "onchip"
+            ],
+            "default": "offchip",
+            "description": "Where the engine keeps its working data; the rtl-taalas generator implements offchip."
+          },
+          "die": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "xMm",
+              "yMm"
+            ],
+            "properties": {
+              "xMm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "yMm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "description": "Die size chosen within the foundry's size rules (S6 uses it)."
+          }
         }
       },
       "timeoutMs": 600000
@@ -41,12 +140,33 @@
       "name": "verify_spec",
       "title": "Chip spec consistency with the numeric spec and the area limit (G2 evidence)",
       "inputs": [
-        { "name": "chip", "types": ["chip.spec"], "required": true },
-        { "name": "spec", "types": ["numeric.spec"], "required": true },
-        { "name": "ppa", "types": ["ppa.estimate"], "required": true }
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "spec",
+          "types": [
+            "numeric.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "ppa",
+          "types": [
+            "ppa.estimate"
+          ],
+          "required": true
+        }
       ],
       "outputs": [],
-      "params": { "type": "object", "additionalProperties": false },
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "timeoutMs": 60000
     }
   ]

@@ -4,7 +4,7 @@
 name = "llmchip-harness-python"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl"]
+dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl", "llmchip-packager"]
 
 [dependency-groups]
 dev = [
@@ -22,9 +22,10 @@ llmchip-model = { workspace = true }
 llmchip-numeric = { workspace = true }
 llmchip-arch = { workspace = true }
 llmchip-rtl = { workspace = true }
+llmchip-packager = { workspace = true }
 
 [tool.uv.workspace]
-members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas"]
+members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager"]
 
 [tool.ruff]
 line-length = 120

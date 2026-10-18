@@ -699,6 +699,10 @@ export interface FlowPack {
   stages: [FlowStage, ...FlowStage[]]
   gates: FlowGate[]
   checks: CheckDefinition[]
+  /**
+   * Slots whose artifacts are hard constraints (e.g. the timing exception registry): only a human may bind them (requirements §3.2, FR-SGN-02b).
+   */
+  hardConstraintSlots?: string[]
 }
 export interface ProjectRecord {
   id: string
@@ -1266,4 +1270,54 @@ export interface ChangesetsListResult {
 export interface RuntimeTokens {
   owner: string
   external: string
+}
+export interface PackagesExportParams {
+  project: string
+  branch?: string
+  /**
+   * Gate whose approval releases the export.
+   */
+  gate?: string
+  /**
+   * Snapshot member holding the package.
+   */
+  slot?: string
+}
+/**
+ * An export archive: the released package with its lineage manifest (FR-PKG-02/04/05).
+ */
+export interface ExportResult {
+  archive: ArtifactMeta
+  package: Hash
+  approval: string
+  lineageArtifacts: number
+}
+export interface MigrationApplyParams {
+  project: string
+  branch?: string
+  report: Hash
+  comment?: string
+}
+/**
+ * Effect of a confirmed migration impact assessment (FR-MIG-03).
+ */
+export interface MigrationApplyResult {
+  restartStage: string
+  invalidatedGates: string[]
+}
+export interface MigrationAppliedPayload {
+  project: string
+  branch: string
+  report: Hash
+  restartStage: string
+  gates: string[]
+  comment?: string
+}
+export interface PackageExportedPayload {
+  project: string
+  branch: string
+  gate: string
+  approval: string
+  package: Hash
+  archive: Hash
 }

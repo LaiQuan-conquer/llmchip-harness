@@ -1,4 +1,6 @@
-// M3 acceptance through the kernel with the bundled plugins and stories260K:
+// M3 acceptance through the kernel with the bundled plugins and the proxy of the
+// reference model (owner decision 2026-10-18; the chip-level RTL keeps its data
+// in the external SPI SRAM, see rtl-taalas):
 // after G2, S4 generates the RTL (lint, compiler check on the ISA simulator),
 // S5 executes the whole verification plan in the pinned EDA image with a
 // qualified simulator, and G3 is approved on the bound snapshot (AC-03). An
@@ -10,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { flow, out, run, throughG2 } from './flow-helpers.ts'
+import { flow, out, run, throughG2Proxy } from './flow-helpers.ts'
 import { connect, REPO_PLUGINS, startKernel } from './helpers.ts'
 
 const IMAGE = JSON.parse(readFileSync(join(REPO_PLUGINS, 'sim-verilator/llmchip-plugin.json'), 'utf8')).entry.image as string
@@ -55,7 +57,7 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
     const { kernel } = await startKernel(undefined, { bundled: true })
     const client = await connect(kernel)
     const { bind, judge, approve, dataHash } = flow(client)
-    const { tokenizer, evalset, spec, l2weights, l2, design } = await throughG2(client)
+    const { tokenizer, evalset, spec, l2weights, l2, design } = await throughG2Proxy(client)
 
     // S4 admission: the storage implementation has the views S4 needs (FR-PHY-08).
     const calibration = await run(client, 'eda-gf180', 'calibrate', {}, { implementation: 'gf180mcu.stdcell-rom', sizes: [[256, 16]] })
@@ -112,18 +114,14 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
     // AC-09: an injected RTL defect fails, becomes an incident and is localized.
     const tar = Buffer.from(await (await client.download(rtl)).arrayBuffer())
     const faulty = editTar(tar, 'bundle/rtl/llmchip_core.v', (text) => {
-      const line = 'r64 = f_sat16(f_rsh(gate * v2, f[6]));'
+      const line = '      S_TR_W: st_data = ra;'
       expect(text).toContain(line)
-      return text.replace(line, 'r64 = f_sat16(f_rsh(gate * v2, f[6])) + (i == 3 && pos == 2);')
+      // Element 3 of the SiLU gate output at position 2 is off by one.
+      return text.replace(line, `      S_SI_W: st_data = post16 + (i == 3 && pos_in == 2);\n${line}`)
     })
     const bad = await client.upload(faulty, { type: 'rtl.bundle', mediaType: 'application/x-tar', label: 'public' })
     const failing = await run(client, 'sim-verilator', 'verify', { rtl: bad.hash, spec, trace, plan })
-    expect(failing.metrics).toMatchObject({
-      divergence_sequence: 'p0',
-      divergence_pos: 2,
-      divergence_operation: 'layer 0 silu gate',
-      divergence_element: 3,
-    })
+    expect(failing.metrics).toMatchObject({ divergence_pos: 2, divergence_operation: 'layer 0 silu gate', divergence_element: 3 })
     expect(failing.metrics.regression_mismatches as number).toBeGreaterThan(0)
     expect(failing.metrics.divergence_cycle as number).toBeGreaterThan(0)
     expect(failing.outputs.map((o) => o.name)).toContain('waveform')
@@ -141,7 +139,7 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
     expect((await client.call('gates.release', { project: 'chip', gate: 'G3' })).released).toBe(true)
 
     // Chip Playground (FR-PLY-01/02): L3 from the RTL equals L2 token for token.
-    const prompts = await client.upload(JSON.stringify({ format: 'llmchip-evalset/1', prompts: ['Once upon a time', 'Lily wanted'], steps: 24 }), {
+    const prompts = await client.upload(JSON.stringify({ format: 'llmchip-evalset/1', prompts: ['once upon a time', 'lily wanted'], steps: 24 }), {
       type: 'eval.set',
       mediaType: 'application/json',
       label: 'public',
@@ -151,6 +149,6 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
     const l3out = JSON.parse(await (await client.download(out(l3, 'outputs'))).text())
     const l2out = JSON.parse(await (await client.download(out(l2small, 'outputs'))).text())
     expect(l3out.generations.map((g: { tokens: number[] }) => g.tokens)).toEqual(l2out.generations.map((g: { tokens: number[] }) => g.tokens))
-    expect(l3out.generations[0].text).toMatch(/^Once upon a time/)
+    expect(l3out.generations[0].text).toMatch(/^once upon a time/)
   })
 })

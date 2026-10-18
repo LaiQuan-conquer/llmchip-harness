@@ -1,11 +1,17 @@
 {
   "id": "eda-gf180",
-  "version": "0.1.0",
-  "title": "GF180MCU open-source EDA flow (Yosys, OpenROAD) in a pinned tool image",
-  "kinds": ["eda-adapter", "pdk"],
+  "version": "0.2.0",
+  "title": "GF180MCU open-source EDA flow (Yosys, OpenROAD, Magic, KLayout, Netgen, OpenSTA) in a pinned tool image",
+  "kinds": [
+    "eda-adapter",
+    "pdk"
+  ],
   "runtime": "container",
   "entry": {
-    "command": ["python3", "/llmchip/plugin/calibrate.py"],
+    "command": [
+      "python3",
+      "/llmchip/plugin/main.py"
+    ],
     "image": "docker.io/hpretl/iic-osic-tools@sha256:306585de35d198e70ea58950f77147c86f56c698726a19afea9f1c83009557be"
   },
   "kernelApi": "^0.3",
@@ -14,24 +20,291 @@
     {
       "name": "calibrate",
       "title": "Storage implementation calibration on GF180MCU (FR-EST-13)",
-      "outputs": [{ "name": "report", "type": "calibration.report", "mediaType": "application/json" }],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "calibration.report",
+          "mediaType": "application/json"
+        }
+      ],
       "timeoutMs": 3600000,
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["implementation"],
+        "required": [
+          "implementation"
+        ],
         "properties": {
-          "implementation": { "enum": ["gf180mcu.stdcell-rom", "gf180mcu.sram-512x8", "gf180mcu.openram-rom"] },
+          "implementation": {
+            "enum": [
+              "gf180mcu.stdcell-rom",
+              "gf180mcu.sram-512x8",
+              "gf180mcu.openram-rom"
+            ]
+          },
           "sizes": {
             "type": "array",
             "description": "ROM sizes [words, width] for the standard-cell ROM, smallest first.",
-            "items": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 2, "maxItems": 2 },
-            "default": [[1024, 16], [4096, 16], [16384, 16]]
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "default": [
+              [
+                1024,
+                16
+              ],
+              [
+                4096,
+                16
+              ],
+              [
+                16384,
+                16
+              ]
+            ]
           },
-          "utilization": { "type": "number", "minimum": 0.2, "maximum": 0.9, "default": 0.6 },
-          "seed": { "type": "integer", "default": 1 }
+          "utilization": {
+            "type": "number",
+            "minimum": 0.2,
+            "maximum": 0.9,
+            "default": 0.6
+          },
+          "seed": {
+            "type": "integer",
+            "default": 1
+          }
         }
       }
+    },
+    {
+      "name": "constraints",
+      "title": "Timing constraints (SDC) from the chip spec's interface timing (FR-SGN-02a)",
+      "inputs": [
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "constraints",
+          "type": "timing.constraints",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 120000
+    },
+    {
+      "name": "implement",
+      "title": "Physical implementation: pad ring, synthesis, floorplan, placement, clock tree, routing, extraction, GDS (S6)",
+      "inputs": [
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "constraints",
+          "types": [
+            "timing.constraints"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "layout",
+          "type": "layout.bundle",
+          "mediaType": "application/x-tar"
+        },
+        {
+          "name": "gds",
+          "type": "layout.gds",
+          "mediaType": "application/octet-stream"
+        },
+        {
+          "name": "render",
+          "type": "layout.image",
+          "mediaType": "image/png"
+        },
+        {
+          "name": "measurements",
+          "type": "measurement.record",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "pads",
+          "type": "pad.list",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "sdf",
+          "type": "timing.sdf",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "placementDensityPct": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 90,
+            "default": 62
+          },
+          "powerPairs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 2
+          },
+          "synthStrategy": {
+            "type": "string",
+            "default": "AREA 0"
+          }
+        }
+      },
+      "timeoutMs": 14400000
+    },
+    {
+      "name": "drc",
+      "title": "DRC (KLayout and Magic), antenna and density on a GDS (FR-SGN-01)",
+      "inputs": [
+        {
+          "name": "gds",
+          "types": [
+            "layout.gds"
+          ],
+          "required": true
+        },
+        {
+          "name": "layout",
+          "types": [
+            "layout.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "rules",
+          "types": [
+            "signoff.rules"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "drc.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "lvs",
+      "title": "LVS (Magic extraction, Netgen) of a GDS against its netlist (FR-SGN-01)",
+      "inputs": [
+        {
+          "name": "gds",
+          "types": [
+            "layout.gds"
+          ],
+          "required": true
+        },
+        {
+          "name": "layout",
+          "types": [
+            "layout.bundle"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "lvs.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "sta",
+      "title": "Signoff STA at every corner with parasitics, constraint completeness and timing exceptions (FR-SGN-02/02a/02b)",
+      "inputs": [
+        {
+          "name": "layout",
+          "types": [
+            "layout.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "constraints",
+          "types": [
+            "timing.constraints"
+          ],
+          "required": true
+        },
+        {
+          "name": "exceptions",
+          "types": [
+            "timing.exceptions"
+          ],
+          "required": true
+        },
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "sta.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "timeoutMs": 3600000
     }
   ]
 }

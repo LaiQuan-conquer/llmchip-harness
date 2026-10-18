@@ -7,7 +7,7 @@ Storage mapping rule `lanes-interleaved/1` (reversible, FR-RTL-02):
   `sbase + b * ngroups + g`, lane l holding m[b * lanes + l, g];
 - missing rows of the last block are zero (weights) and one (mantissas);
 - the constant ROM holds norm weights and the rsqrt, exp, sigmoid and RoPE
-  tables as 32-bit words.
+  tables as signed words of the width they need.
 `unmap` restores the logical arrays from the ROM images; `generate` checks
 that the round trip reproduces every array of the numeric weights file.
 """
@@ -18,7 +18,7 @@ import hashlib
 
 import numpy as np
 
-from .isa import FLAG_POS, FLAG_SAT32, POINTS, encode
+from .isa import FLAG_DEBUG, FLAG_POS, FLAG_SAT32, POINTS, decode, encode
 
 MAPPING_RULE = "lanes-interleaved/1"
 MATRICES = ("wq", "wk", "wv", "wo", "w1", "w3", "w2")
@@ -278,36 +278,58 @@ class Compiled:
             ("argmax", encode("ARGMAX", [layout["logits"], vocab])),
             ("end", encode("END", [])),
         ]
-        self.program = [w for _, w in program]
-        self.descriptions = [d for d, _ in program]
-        # Debug program: after every computing op, trace its destination (point `op`, layer = op index).
-        dests = self._destinations(program, layout, dim, hidden, vocab, kv_dim)
-        debug: list[int] = []
-        self.debug_map: list[int] = []  # debug trace number -> index of the op in the normal program
-        for index, (_desc, word) in enumerate(program):
-            debug.append(word)
+        # One program: after every computing operation a debug trace (executed in debug mode
+        # only) copies its output; the trace's layer field is the index of that operation.
+        dests = self._destinations(program)
+        final: list[tuple[str, str, list[int]]] = []
+        for index, (desc, word) in enumerate(program):
+            op, fields = decode(word)
+            final.append((desc, op, fields))
             if index in dests:
                 addr, n, stride = dests[index]
-                debug.append(encode("TRACE", [addr, n, POINTS["op"], index, FLAG_POS if stride else 0, stride]))
-                self.debug_map.append(index)
-        self.debug_program = debug
+                flags = FLAG_DEBUG | (FLAG_POS if stride else 0)
+                final.append((f"debug trace of {desc}", "TRACE", [addr, n, POINTS["op"], -1, flags, stride, 0]))
+        # Resolve the layer field of debug traces (index of the traced op) and give every
+        # TRACE its buffer in the data memory, after the working data.
+        self.data_words = top
+        self.trace_map: list[dict] = []
+        for index, (_desc, op, fields) in enumerate(final):
+            if op != "TRACE":
+                continue
+            if fields[4] & FLAG_DEBUG:
+                fields[3] = index - 1
+            fields[6] = top
+            self.trace_map.append(
+                {
+                    "op": index,
+                    "point": fields[2],
+                    "layer": fields[3],
+                    "n": fields[1],
+                    "addr": top,
+                    "debug": bool(fields[4] & FLAG_DEBUG),
+                }
+            )
+            top += fields[1]
+        self.dmem_words = top
+        self.program = [encode(op, fields) for _, op, fields in final]
+        self.descriptions = [desc for desc, _, _ in final]
+        self.debug_map = [t["layer"] for t in self.trace_map if t["debug"]]
+        self.widths = self._widths(final, arrays, group)
 
     @staticmethod
-    def _destinations(program, layout, dim, hidden, vocab, kv_dim) -> dict[int, tuple[int, int, int]]:
+    def _destinations(program) -> dict[int, tuple[int, int, int]]:
+        """Output (address, count, position stride) of every computing operation."""
         out: dict[int, tuple[int, int, int]] = {}
-        from .isa import FLAG_POS as POS
-        from .isa import decode
-
         for index, (_, word) in enumerate(program):
             op, f = decode(word)
             if op == "EMB":
                 out[index] = (f[0], f[1], 0)
             elif op == "MATVEC":
-                out[index] = (f[1], f[3], f[10] if f[9] & POS else 0)
+                out[index] = (f[1], f[3], f[10] if f[9] & FLAG_POS else 0)
             elif op == "RMS":
                 out[index] = (f[1], f[2], 0)
             elif op == "ROPE":
-                out[index] = (f[0], f[1], f[6] if f[5] & POS else 0)
+                out[index] = (f[0], f[1], f[6] if f[5] & FLAG_POS else 0)
             elif op == "ATTN":
                 out[index] = (f[3], f[4] * f[6], 0)
             elif op == "SILU":
@@ -315,6 +337,92 @@ class Compiled:
             elif op == "ADD":
                 out[index] = (f[0], f[2], 0)
         return out
+
+    def _widths(self, program: list[tuple[str, str, list[int]]], arrays: dict[str, np.ndarray], group: int) -> dict:
+        """Register and memory widths of the RTL, from worst-case bounds of every value the
+        operations produce (no value can overflow; FR-RTL-01). Raises if a bound is not met."""
+
+        def sbits(v: int) -> int:
+            return max(int(abs(int(v))).bit_length() + 1, 2)
+
+        x16, _x32 = 2**15, 2**31
+        qmax = int(np.abs(self.wrom).max()) if self.wrom.size else 1
+        mmax = int(self.srom.max()) if self.srom.size else 1
+        cmax = int(np.abs(self.crom).max()) if self.crom.size else 1
+        ctx = self.context
+        acc = tot = 2
+        dw = 2**34  # max - s of two 32-bit scores needs 34 bits
+        b_operands = [x16, mmax, cmax, 2**15]
+        for _, op, f in program:
+            if op == "EMB":
+                dw = max(dw, qmax * mmax * 2 ** max(-f[6], 0))
+                b_operands.append(f[1])
+                b_operands.append(f[5])
+            elif op == "MATVEC":
+                inp, shift = f[2], f[8]
+                acc = max(acc, x16 * qmax * group)
+                tot = max(tot, x16 * qmax * inp * mmax)
+                dw = max(dw, x16 * qmax * group * mmax, x16 * qmax * inp * mmax * 2 ** max(-shift, 0))
+                b_operands.append(f[10])
+            elif op == "RMS":
+                n = f[2]
+                eps = (f[5] << 32) | (f[4] & 0xFFFFFFFF)
+                dw = max(dw, n * x16 * x16 + eps, x16 * cmax * cmax * 2 ** max(-f[6], 0))
+            elif op == "ROPE":
+                dw = max(dw, 2 * x16 * cmax)
+                b_operands += [f[6], f[2] // 2]
+            elif op == "ATTN":
+                hs, scale = f[6], f[7]
+                dw = max(dw, hs * x16 * x16 * scale * 2 ** max(-f[8], 0), ctx * cmax, cmax * 2**15, x16 * x16)
+                b_operands.append(scale)
+                if ctx * cmax >= 2**31:
+                    raise ValueError("the attention exp sum does not fit the 32-bit divisor")
+            elif op == "SILU":
+                dw = max(dw, x16 * cmax, (x16 * cmax // 2**15 + 1) * x16 * 2 ** max(-f[6], 0))
+            elif op == "TRACE":
+                b_operands.append(f[5])
+        # Shifts of the shift-and-saturate unit (RSH_POSITIVE when all are right shifts),
+        # SILU fraction bits (SILU_FRAC_GE4), and the RMS epsilon (added in 32 bits).
+        shifts = [14, 15]
+        silu_frac = []
+        for _, op, f in program:
+            if op in ("EMB", "SILU"):
+                shifts.append(f[6])
+            elif op in ("MATVEC", "ATTN"):
+                shifts.append(f[8])
+            elif op == "RMS":
+                shifts.append(f[6])
+                if f[5] != 0 or not 0 <= f[4] < 2**30:
+                    raise ValueError("the RMS epsilon must be below 2^30")
+            if op == "SILU":
+                silu_frac.append(f[4])
+                if not 0 <= f[4] <= 15:
+                    raise ValueError("SILU fraction bits must be in 0..15")
+            if op in ("EMB", "MATVEC", "RMS", "ATTN", "SILU") and not min(shifts) >= -128 and max(shifts) < 64:
+                raise ValueError("a shift is outside the 8-bit shift field")
+        if max(b_operands) >= 2**17:
+            raise ValueError(f"a multiplier operand needs more than 18 bits: {max(b_operands)}")
+        if sbits(cmax) > 18:
+            raise ValueError("constants need more than 18 bits")
+        widths = {
+            "DW": sbits(dw) + 1,
+            "ACCW": sbits(acc),
+            "TOTW": sbits(tot),
+            "CW": sbits(cmax),
+            "AW": max(self.dmem_words - 1, 1).bit_length(),
+            "PCW": max(len(self.program) - 1, 1).bit_length(),
+            "WAW": max(len(self.wrom) - 1, 1).bit_length(),
+            "SAW": max(len(self.srom) - 1, 1).bit_length(),
+            "CAW": max(len(self.crom) - 1, 1).bit_length(),
+        }
+        widths["RSH_POSITIVE"] = int(min(shifts) >= 1)
+        widths["SILU_FRAC_GE4"] = int(min(silu_frac, default=4) >= 4)
+        dims = [self.cfg[k] for k in ("dim", "hidden_dim", "vocab_size")] + [self.context, 2 * self.lanes]
+        widths["IW"] = max(dims).bit_length() + 1
+        if widths["AW"] > 22:
+            raise ValueError("the data memory exceeds the 24-bit byte address of the SPI memory")
+        widths["SRAM_BYTES"] = max(1024, 1 << (4 * self.dmem_words - 1).bit_length())
+        return widths
 
     def unmap(self) -> dict[str, np.ndarray]:
         """The logical arrays, restored from the ROM images (inverse mapping)."""
@@ -342,10 +450,10 @@ class Compiled:
             "roms": {
                 "weights": {"words": len(self.wrom), "wordBits": self.lanes * self.wbits, "hash": rom_hash(self.wrom)},
                 "scales": {"words": len(self.srom), "wordBits": self.lanes * 15, "hash": rom_hash(self.srom)},
-                "constants": {"words": len(self.crom), "wordBits": 32, "hash": rom_hash(self.crom)},
-                "program": {"words": len(self.program), "wordBits": 8 + 32 * 16},
+                "constants": {"words": len(self.crom), "wordBits": self.widths["CW"], "hash": rom_hash(self.crom)},
+                "program": {"words": len(self.program)},
             },
             "matrices": self.matrices,
             "constants": self.consts,
-            "dataMemory": {"words": self.dmem_words, "layout": self.layout},
+            "dataMemory": {"words": self.dmem_words, "layout": self.layout, "traceBuffers": self.trace_map},
         }

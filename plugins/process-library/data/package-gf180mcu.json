@@ -1,0 +1,76 @@
+{
+  "format": "llmchip-package-template/1",
+  "id": "package-gf180mcu",
+  "process": "gf180mcu",
+  "topCell": "chip_top",
+  "description": "Tapeout package of the GF180MCU prerun (FR-PKG-01). A foundry's own template replaces this one for the target process.",
+  "files": [
+    {
+      "path": "gds/chip_top.gds",
+      "from": "gds",
+      "description": "Final GDSII with seal ring and fill"
+    },
+    {
+      "path": "gds/layers.json",
+      "generated": "layer map",
+      "description": "Top cell name and the PDK layer map"
+    },
+    {
+      "path": "signoff/drc.json",
+      "from": "drc",
+      "bindsGds": true,
+      "description": "KLayout and Magic DRC, antenna, density"
+    },
+    {
+      "path": "signoff/lvs.json",
+      "from": "lvs",
+      "bindsGds": true,
+      "description": "Netgen LVS"
+    },
+    {
+      "path": "signoff/sta.json",
+      "from": "sta",
+      "description": "Multi-corner STA with parasitics and constraint completeness"
+    },
+    {
+      "path": "signoff/constraints.sdc",
+      "from": "constraints",
+      "description": "Timing constraints"
+    },
+    {
+      "path": "signoff/timing-exceptions.json",
+      "from": "exceptions",
+      "description": "Timing exception registry"
+    },
+    {
+      "path": "chip/chip-spec.json",
+      "from": "chip",
+      "description": "Chip spec"
+    },
+    {
+      "path": "chip/pads.json",
+      "from": "pads",
+      "description": "Pad list and placement"
+    },
+    {
+      "path": "chip/bonding-draft.svg",
+      "generated": "bonding diagram",
+      "description": "Bonding diagram draft"
+    },
+    {
+      "path": "chip/measurements.json",
+      "from": "measurements",
+      "description": "Measured area, timing and power"
+    },
+    {
+      "path": "test/test-plan.md",
+      "generated": "test plan",
+      "description": "Test plan with the expected L2 tokens"
+    },
+    {
+      "path": "README.md",
+      "generated": "readme",
+      "description": "Package overview"
+    }
+  ]
+}

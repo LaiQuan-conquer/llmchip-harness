@@ -141,6 +141,14 @@
             ],
             "default": "offchip"
           },
+          "activationLocation": {
+            "enum": [
+              "onchip",
+              "offchip"
+            ],
+            "default": "onchip",
+            "description": "offchip: activations live in the external memory with the KV cache."
+          },
           "weightStorage": {
             "type": "string",
             "description": "Implementation library entry storing the weights."
@@ -189,6 +197,52 @@
         }
       ],
       "outputs": [],
+      "timeoutMs": 60000
+    },
+    {
+      "name": "migrate",
+      "title": "Migration impact assessment from the current to a target process (FR-MIG-01/02)",
+      "inputs": [
+        {
+          "name": "chip",
+          "types": [
+            "chip.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "current",
+          "types": [
+            "process.profile"
+          ],
+          "required": true
+        },
+        {
+          "name": "target",
+          "types": [
+            "process.profile"
+          ],
+          "required": true
+        },
+        {
+          "name": "library",
+          "types": [
+            "implementation.library"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "migration.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "timeoutMs": 60000
     }
   ]

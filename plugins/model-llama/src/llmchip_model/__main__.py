@@ -5,8 +5,9 @@ from pathlib import Path
 
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
-from . import Model, Tokenizer, load_ir, load_llama2c, save_ir, structure_report
+from . import Config, Model, Tokenizer, load_ir, load_llama2c, save_ir, structure_report
 from .evalset import load_evalset
+from .proxy import DEFAULT_CHARS, char_tokenizer, random_checkpoint
 
 
 def intake(ctx: InvokeContext) -> Result:
@@ -66,5 +67,35 @@ def reference(ctx: InvokeContext) -> Result:
     )
 
 
+def synthesize(ctx: InvokeContext) -> Result:
+    """A proxy model: the structure of a planned model with fixed-seed, untrained weights."""
+    p = ctx.params
+    chars = p.get("chars", DEFAULT_CHARS)
+    cfg = Config(
+        dim=p["dim"],
+        hidden_dim=p["hiddenDim"],
+        n_layers=p["layers"],
+        n_heads=p["heads"],
+        n_kv_heads=p["kvHeads"],
+        vocab_size=len(chars) + 3,
+        seq_len=p["seqLen"],
+    )
+    if cfg.dim % cfg.n_heads or cfg.n_heads % cfg.n_kv_heads or cfg.head_size % 2:
+        raise ValueError("dim must split into heads of even size, and heads into kv heads")
+    out = Path(ctx.out_dir)
+    (out / "proxy.bin").write_bytes(random_checkpoint(cfg, p.get("seed", 1)))
+    (out / "tokenizer.bin").write_bytes(char_tokenizer(chars))
+    _, weights = load_llama2c((out / "proxy.bin").read_bytes())
+    parameters = sum(v.size for k, v in weights.items() if k != "wcls")
+    return Result(
+        outputs=[
+            Output("weights", "proxy.bin", "model.weights.llama2c", "application/octet-stream"),
+            Output("tokenizer", "tokenizer.bin", "model.tokenizer.llama2c", "application/octet-stream"),
+        ],
+        metrics={"parameters": int(parameters), "vocab": cfg.vocab_size, "proxy": True, "trained": False},
+        parse={"status": "complete", "parser": "llmchip-model/proxy"},
+    )
+
+
 if __name__ == "__main__":
-    run_plugin("model-llama", "0.1.0", {"intake": intake, "reference": reference})
+    run_plugin("model-llama", "0.1.0", {"synthesize": synthesize, "intake": intake, "reference": reference})
