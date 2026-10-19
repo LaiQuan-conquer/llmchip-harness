@@ -43,6 +43,13 @@ h4 { font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
 .list { list-style: none; margin: 0; padding: 0; }
 .list li { padding: 7px 8px; border-radius: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
 .list li:hover, .list li.selected { background: #eef3fe; }
+.side-project { display: flex; flex-direction: column; gap: 2px; }
+.side-entries { list-style: none; margin: 6px 0 2px; padding: 0 0 0 8px; border-left: 2px solid var(--line); }
+.list .side-entries li { padding: 4px 8px; font-size: 12px; color: var(--accent); }
+.list .side-entries li:hover { background: #dfe8fd; }
+.list .side-entries li.current { color: inherit; font-weight: 600; background: #dfe8fd; }
+.nav-back-bar { position: sticky; top: -16px; z-index: 5; margin: -16px -16px 12px; padding: 8px 16px; background: var(--bg, #f5f7fb); border-bottom: 1px solid var(--line); }
+.nav-back { border: 0; background: none; color: var(--accent); padding: 2px 0; }
 .list.compact li { cursor: default; padding: 4px 2px; font-size: 12px; }
 .list small, .muted { color: var(--muted); }
 .events li div { word-break: break-all; }
@@ -79,7 +86,7 @@ input, select { border: 1px solid var(--line); border-radius: 6px; padding: 6px 
 .mono, code, pre { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 12px; }
 pre { white-space: pre-wrap; word-break: break-all; background: #f3f5f8; padding: 8px; border-radius: 6px; margin: 4px 0 0; max-height: 260px; overflow: auto; }
 pre.content { max-height: 60vh; }
-.facts { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; margin: 0; }
+.facts { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; margin: 0 0 12px; align-items: baseline; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .stages { display: flex; gap: 6px; flex-wrap: wrap; }

@@ -126,6 +126,15 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
         await page.waitForSelector('.flow-what')
         const artifact = await page.innerText('.app')
         expect(CATALOG_KEYS.filter((key) => artifact.includes(key)), `${lang}/artifact`).toEqual([])
+        // The back bar returns from the artifact to the flow page it was opened from.
+        expect(await page.innerText('.nav-back')).toContain(lang === 'zh' ? '演示流程' : 'Flow')
+        await page.click('.nav-back')
+        await page.waitForSelector('#flow-S1 .flow-detail')
+        // The selected project in the sidebar opens the stages' detailed demos.
+        await page.click('.side-entries li:nth-child(3)')
+        await page.waitForSelector('.s1-graph')
+        await page.click('.nav-back')
+        await page.waitForSelector('#flow-S1 .flow-detail')
         await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')

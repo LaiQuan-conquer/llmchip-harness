@@ -11,6 +11,7 @@ import { S1Detail } from './steps/S1.tsx'
 
 /** Stages with a detailed demo view. */
 const DETAILS: Record<string, (props: { project: string; onBack(): void; onProject(project: string): void }) => React.JSX.Element> = { S0: S0Detail, S1: S1Detail }
+export const DETAIL_STAGES = Object.keys(DETAILS)
 
 type StepState = 'pending' | 'active' | 'running' | 'done' | 'attention' | 'notImplemented'
 
@@ -30,7 +31,7 @@ const key = (r: RunRecord) => `${r.plugin}/${r.handler}`
  * The demo flow (S0-S9) of a project as a path: per stage what it does, its
  * state, key results in plain language, checks, gate, deliverables and runs.
  */
-export function FlowView({ selection, select }: { selection: Selection; select: (s: Partial<Selection>, to?: Page) => void }) {
+export function FlowView({ selection, select, onUp }: { selection: Selection; select: (s: Partial<Selection>, to?: Page) => void; onUp(): boolean }) {
   const { t, lang, message } = useI18n()
   const project = selection.project
   const { data: projects } = useQuery((c) => c.call('projects.list'), [])
@@ -43,7 +44,7 @@ export function FlowView({ selection, select }: { selection: Selection; select: 
   const { data: runs } = useQuery((c) => (project ? c.call('runs.list', { project, limit: 1000 }) : Promise.resolve(undefined)), [project])
   const { data: verdicts } = useQuery((c) => c.call('verdicts.list', { limit: 1000 }), [])
   const [open, setOpen] = useState<string | null>(null)
-  const [detail, setDetail] = useState<string | null>(null)
+  const detail = selection.stage
 
   const format: Format = useMemo(() => {
     const locale = lang === 'zh' ? 'zh-CN' : 'en-US'
@@ -76,9 +77,9 @@ export function FlowView({ selection, select }: { selection: Selection; select: 
         project={project}
         onProject={(id) => select({ project: id })}
         onBack={() => {
-          setDetail(null)
+          // Going back restores the scroll position; otherwise show the stage's card.
           setOpen(detail)
-          setTimeout(() => document.getElementById(`flow-${detail}`)?.scrollIntoView({ block: 'start' }))
+          if (!onUp()) setTimeout(() => document.getElementById(`flow-${detail}`)?.scrollIntoView({ block: 'start' }), 50)
         }}
       />
     )
@@ -139,7 +140,7 @@ export function FlowView({ selection, select }: { selection: Selection; select: 
       </Section>
 
       {steps.map((s) => (
-        <StepCard key={s.def.stage} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} gate={s.def.gate ? state.gates.find((g) => g.gate === s.def.gate) : undefined} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => (setDetail(s.def.stage), document.querySelector('main.center')?.scrollTo(0, 0)) : undefined} />
+        <StepCard key={s.def.stage} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} gate={s.def.gate ? state.gates.find((g) => g.gate === s.def.gate) : undefined} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => select({ stage: s.def.stage }) : undefined} />
       ))}
     </>
   )
