@@ -1,7 +1,7 @@
 {
   "id": "model-llama",
-  "version": "0.1.0",
-  "title": "Llama-family model intake and L0 FP32 reference (llama2.c format)",
+  "version": "0.3.0",
+  "title": "Llama-family model import, tensor census, graph recovery and L0 reference",
   "kinds": [
     "model-loader"
   ],
@@ -163,6 +163,222 @@
         "additionalProperties": false
       },
       "timeoutMs": 1800000
+    },
+    {
+      "name": "import",
+      "title": "Import a model from this machine (path) or from a project's llama2.c weights, and take its tensor census (S0)",
+      "outputs": [
+        {
+          "name": "file",
+          "type": "model.file"
+        },
+        {
+          "name": "bundle",
+          "type": "model.bundle",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "census",
+          "type": "model.census",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "enum": [
+              "public",
+              "internal",
+              "nda"
+            ],
+            "default": "internal"
+          },
+          "context": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "timeoutMs": 1800000,
+      "inputs": [
+        {
+          "name": "weights",
+          "types": [
+            "model.weights.llama2c"
+          ],
+          "required": false
+        },
+        {
+          "name": "tokenizer",
+          "types": [
+            "model.tokenizer.llama2c"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "recover",
+      "title": "Recover the computation graph from the census (S1)",
+      "inputs": [
+        {
+          "name": "census",
+          "types": [
+            "model.census"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "graph",
+          "type": "model.graph",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "run_graph",
+      "title": "Run the recovered graph as the L0 reference on prompts (S1)",
+      "inputs": [
+        {
+          "name": "graph",
+          "types": [
+            "model.graph"
+          ],
+          "required": true
+        },
+        {
+          "name": "bundle",
+          "types": [
+            "model.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "files",
+          "types": [
+            "model.file",
+            "model.weights.llama2c",
+            "model.tokenizer.llama2c"
+          ],
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "outputs",
+          "type": "l0g.outputs",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "default": 8
+          }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "compare",
+      "title": "Test the recovered graph against the official implementation, item by item (S1)",
+      "inputs": [
+        {
+          "name": "graph",
+          "types": [
+            "model.graph"
+          ],
+          "required": true
+        },
+        {
+          "name": "bundle",
+          "types": [
+            "model.bundle"
+          ],
+          "required": true
+        },
+        {
+          "name": "files",
+          "types": [
+            "model.file",
+            "model.weights.llama2c",
+            "model.tokenizer.llama2c"
+          ],
+          "required": true,
+          "multiple": true
+        },
+        {
+          "name": "census",
+          "types": [
+            "model.census"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "upstream.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "default": 8
+          }
+        }
+      },
+      "timeoutMs": 3600000
     }
   ],
   "data": [

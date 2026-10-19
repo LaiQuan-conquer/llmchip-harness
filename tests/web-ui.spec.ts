@@ -12,6 +12,7 @@ import { connect, startKernel } from './helpers.ts'
 
 const SRC = resolve(import.meta.dirname, '../apps/web/src')
 const DIST = resolve(import.meta.dirname, '../apps/web/dist/index.html')
+const TINY_QWEN3 = resolve(import.meta.dirname, 'fixtures/models/tiny-qwen3')
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: 'utf8' })
@@ -47,7 +48,10 @@ async function browser() {
   }
 }
 
-const PAGES = ['overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
+/** Every catalog key; none may appear verbatim in a rendered page. */
+const CATALOG_KEYS = Object.keys(CATALOGS.zh)
+
+const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
 
 describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
   it('renders every page in both languages without errors or raw keys', { timeout: 120_000 }, async (ctx) => {
@@ -56,6 +60,25 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     const { kernel } = await startKernel(undefined, { bundled: true })
     const client = await connect(kernel)
     await client.call('projects.create', { id: 'ui', title: 'UI test' })
+    // An estimate in the project, so the S0 detail view has a real report to show.
+    const data = (await client.call('plugins.list')).plugins.flatMap((p) => p.data)
+    const profile = data.find((d) => d.id === 'gf180mcu')!.hash
+    const library = data.find((d) => d.type === 'implementation.library')!.hash
+    const estimate = await client.call('runs.start', {
+      plugin: 'estimator',
+      handler: 'estimate',
+      project: 'ui',
+      params: { model: { preset: 'stories260K' }, weightBits: 2, weightStorage: 'gf180mcu.stdcell-rom', targetAreaMm2: 2.4 },
+      inputs: [
+        { name: 'profile', hash: profile },
+        { name: 'library', hash: library },
+      ],
+    })
+    expect(await client.call('runs.wait', { run: estimate.id, timeoutMs: 60_000 })).toMatchObject({ execution: 'exited_zero' })
+    // A real (tiny) model imported and recovered, for the census and the S1 graph view.
+    const pipeline = await import('../apps/web/src/views/modelPipeline.ts')
+    await pipeline.startFromWeights(client, { path: TINY_QWEN3, project: 'ui', title: 'tiny-qwen3', bits: 4, process: 'gf180mcu' }, () => {})
+    await pipeline.recoverGraph(client, 'ui', () => {})
     const runtime = readRuntimeInfo(kernel.layout.root)!
     try {
       const page = await chromium.newPage()
@@ -77,8 +100,33 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
           await page.waitForTimeout(150)
           const text = await page.innerText('.app')
           // No catalog key leaked into the page, e.g. "nav.overview".
+          expect(CATALOG_KEYS.filter((key) => text.includes(key)), `${lang}/${name}`).toEqual([])
           expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|approvals|incidents|artifacts|settings|status|feasibility|playground)\.[a-z]\w*/)
         }
+        // The S0 detail view, opened from its card on the flow page.
+        await page.click('button[data-page=flow]')
+        await page.click('#flow-S0 .flow-detail')
+        await page.waitForSelector('.s0-answer')
+        const detail = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => detail.includes(key)), `${lang}/S0`).toEqual([])
+        expect(detail).toContain(lang === 'zh' ? '张量普查' : 'Tensor census')
+        await page.click('button.step-back')
+        // The S1 view: the recovered graph, its tensor map, L0 and the comparison.
+        await page.click('#flow-S1 .flow-detail')
+        await page.waitForSelector('.s1-graph')
+        const s1 = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => s1.includes(key)), `${lang}/S1`).toEqual([])
+        expect(s1).toContain(lang === 'zh' ? 'Q 逐头 RMSNorm' : 'Per-head RMSNorm of Q')
+        expect(s1).toContain('transformers')
+        expect(s1).toContain(lang === 'zh' ? '全量测试结果' : 'Full test results')
+        // A test item opens its details; a deliverable opens the readable artifact view.
+        await page.click('.s1-tests tbody tr:nth-child(4)')
+        await page.click('button.step-back')
+        await page.click('#flow-S1 .flow-outputs button')
+        await page.waitForSelector('.flow-what')
+        const artifact = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => artifact.includes(key)), `${lang}/artifact`).toEqual([])
+        await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')
       }

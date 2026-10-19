@@ -7,6 +7,7 @@ from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
 from . import Config, Model, Tokenizer, load_ir, load_llama2c, save_ir, structure_report
 from .evalset import load_evalset
+from .pipeline import compare_upstream, import_model, recover_graph, run_graph
 from .proxy import DEFAULT_CHARS, char_tokenizer, random_checkpoint
 
 
@@ -98,4 +99,16 @@ def synthesize(ctx: InvokeContext) -> Result:
 
 
 if __name__ == "__main__":
-    run_plugin("model-llama", "0.1.0", {"synthesize": synthesize, "intake": intake, "reference": reference})
+    run_plugin(
+        "model-llama",
+        "0.3.0",
+        {
+            "synthesize": synthesize,
+            "intake": intake,
+            "reference": reference,
+            "import": import_model,
+            "recover": recover_graph,
+            "run_graph": run_graph,
+            "compare": compare_upstream,
+        },
+    )

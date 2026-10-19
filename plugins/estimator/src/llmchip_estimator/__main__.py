@@ -5,7 +5,7 @@ from pathlib import Path
 
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
-from .estimate import apply_calibrations, estimate, summary_markdown
+from .estimate import apply_calibrations, estimate, model_from_census, summary_markdown
 from .migration import assess
 
 
@@ -18,6 +18,10 @@ def handle_estimate(ctx: InvokeContext) -> Result:
     request = [i for i in ctx.inputs if i.name == "request"]
     if request:
         params |= json.loads(Path(request[0].path).read_text())
+    census = [i for i in ctx.inputs if i.name == "census"]
+    if census:
+        # The real weight files define the model; the request keeps the other assumptions.
+        params["model"] = model_from_census(json.loads(Path(census[0].path).read_text()))
     for required in ("model", "weightStorage"):
         if required not in params:
             raise ValueError(f"estimate needs `{required}` in its params or request")

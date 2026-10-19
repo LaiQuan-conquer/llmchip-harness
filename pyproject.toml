@@ -23,6 +23,13 @@ llmchip-numeric = { workspace = true }
 llmchip-arch = { workspace = true }
 llmchip-rtl = { workspace = true }
 llmchip-packager = { workspace = true }
+# CPU-only PyTorch, used by model-llama to compare recovered graphs with the official implementation.
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.uv.workspace]
 members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager"]

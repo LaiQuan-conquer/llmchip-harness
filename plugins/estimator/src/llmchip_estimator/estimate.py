@@ -87,6 +87,28 @@ def const(x: float) -> dict[str, float]:
     return dict.fromkeys(POINTS, float(x))
 
 
+def model_from_census(census: dict[str, Any]) -> dict[str, Any]:
+    """The model as the tensor census of its real weight files describes it (S0 from downloaded weights)."""
+    hyper = census.get("hyper", {})
+
+    def v(key: str) -> Any:
+        return hyper.get(key, {}).get("value")
+
+    model = {
+        "title": v("architecture") or v("modelType") or ", ".join(f["name"] for f in census.get("files", [])),
+        "params": census["totals"]["parameters"],
+        "dim": v("hidden"),
+        "layers": v("layers"),
+        "heads": v("heads"),
+        "kvHeads": v("kvHeads"),
+        "vocab": v("vocab"),
+        "hiddenDim": v("intermediate"),
+        "maxContext": v("maxPositions"),
+        "source": "tensor census of " + ", ".join(f["name"] for f in census.get("files", [])),
+    }
+    return {k: val for k, val in model.items() if val is not None}
+
+
 def resolve_model(spec: dict[str, Any]) -> dict[str, Any]:
     if spec.get("preset"):
         if spec["preset"] not in MODEL_PRESETS:

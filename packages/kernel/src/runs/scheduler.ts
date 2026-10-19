@@ -1,4 +1,4 @@
-import { constants, copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync, statSync } from 'node:fs'
+import { constants, copyFileSync, chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -509,7 +509,8 @@ export class Scheduler {
       if (spec?.outputs && (!declared || declared.type !== output.type)) {
         throw new KernelError('RUN_OUTPUT_INVALID', `output ${output.name} of type ${output.type} is not declared by ${plugin.manifest.id}/${run.handler}`)
       }
-      const meta = await this.artifacts.put(readFileSync(path), {
+      // Streamed: outputs can be multi-GB weight files.
+      const meta = await this.artifacts.put(createReadStream(path), {
         type: output.type,
         mediaType: output.mediaType ?? declared?.mediaType ?? 'application/octet-stream',
         // Never below the run's own label (requirements FR-SEC-02).

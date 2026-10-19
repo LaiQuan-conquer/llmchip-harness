@@ -5,14 +5,16 @@ import { ApprovalsView } from './views/Approvals.tsx'
 import { AgentsView } from './views/Agents.tsx'
 import { ArtifactsView } from './views/Artifacts.tsx'
 import { EstimatorView } from './views/Estimator.tsx'
+import { FlowView } from './views/Flow.tsx'
 import { IncidentsView } from './views/Incidents.tsx'
 import { OverviewView } from './views/Overview.tsx'
 import { PlaygroundView } from './views/Playground.tsx'
 import { SettingsView } from './views/Settings.tsx'
 import { TrajectoryView } from './views/Trajectory.tsx'
-import { eventLine, timeOf } from './views/common.tsx'
+import { activityLine, runNamesOf } from './views/activity.ts'
+import { timeOf } from './views/common.tsx'
 
-export type Page = 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
+export type Page = 'flow' | 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
 
 export interface Selection {
   project: string | null
@@ -20,12 +22,12 @@ export interface Selection {
   artifact: string | null
 }
 
-const PAGES: Page[] = ['overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES: Page[] = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
 
 /** Main layout (FR-UI-05): projects and tasks on the left, the work in the middle, context on the right. */
 export function App() {
   const { t } = useI18n()
-  const [page, setPage] = useState<Page>('overview')
+  const [page, setPage] = useState<Page>('flow')
   const [selection, setSelection] = useState<Selection>({ project: null, task: null, artifact: null })
   const select = (change: Partial<Selection>, to?: Page) => {
     setSelection((s) => ({ ...s, ...change }))
@@ -52,6 +54,7 @@ export function App() {
         <Sidebar {...props} onPage={setPage} />
       </aside>
       <main className="center">
+        {page === 'flow' && <FlowView {...props} />}
         {page === 'overview' && <OverviewView {...props} />}
         {page === 'agents' && <AgentsView {...props} />}
         {page === 'trajectory' && <TrajectoryView {...props} />}
@@ -119,6 +122,7 @@ function Sidebar({ selection, select, onPage }: { selection: Selection; select: 
 function ContextPanel({ selection }: { selection: Selection }) {
   const { t, message } = useI18n()
   const { events } = useKernel()
+  const runNames = runNamesOf(events, t)
   const { data: state } = useQuery((c) => (selection.project ? c.call('projects.get', { project: selection.project }) : Promise.resolve(undefined)), [selection.project])
   return (
     <>
@@ -138,14 +142,14 @@ function ContextPanel({ selection }: { selection: Selection }) {
       <h4>{t('context.recent')}</h4>
       <ul className="list compact events">
         {events
+          .map((e) => ({ e, line: activityLine(e, runNames, t, message) }))
+          .filter((a) => a.line !== null)
           .slice(-30)
           .reverse()
-          .map((e) => (
+          .map(({ e, line }) => (
             <li key={e.seq}>
-              <small>
-                #{e.seq} {timeOf(e.ts)}
-              </small>
-              <div>{eventLine(e)}</div>
+              <small>{timeOf(e.ts)}</small>
+              <div className={line!.tone === 'ok' ? 'ok-text' : line!.tone === 'bad' ? 'error' : ''}>{line!.text}</div>
             </li>
           ))}
       </ul>

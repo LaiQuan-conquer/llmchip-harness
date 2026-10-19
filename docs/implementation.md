@@ -6,7 +6,7 @@ English | [中文](implementation.zh.md)
 |---|---|
 | Document version | v0.1 |
 | Date | 2026-10-19 |
-| Describes | the code at commit `9cc76a0` (M4) |
+| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery |
 | Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.6, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.9 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
@@ -52,8 +52,9 @@ So M1 as a whole is **not** accepted: AC-M1-01 (installer) and the desktop shell
 | IF-2 plugin protocol | JSON-RPC 2.0, one message per line, over stdio | [plugins/process.ts](../packages/kernel/src/plugins/process.ts), SDKs |
 | IF-3 tool containers | Podman, no network, read-only inputs and plugin directory | `Scheduler.containerCommand` |
 | CLI and MCP | `llmchip` commands, generic `call`, MCP on stdio | [cli/src/main.ts](../packages/cli/src/main.ts), [cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
-| Web UI | Nine pages, Chinese and English | [apps/web/src](../apps/web/src) |
+| Web UI | Ten pages, Chinese and English. The default page, Flow, shows a project's S0–S9 path with results, checks and gates in plain language | [apps/web/src](../apps/web/src) |
 | Domain flow | S0–S8 and G0–G4 with bundled plugins (table in §2.4) | [plugins/](../plugins) |
+| Real model import and graph recovery | A downloaded model directory (safetensors + config.json + tokenizer.json, or llama2.c) is imported by local path, censused from its headers, estimated, recovered into a computation graph (Llama family: Llama, Mistral, SmolLM, Qwen2, Qwen3, llama2.c), executed as L0 and tested item by item against transformers / the run.c port: weights bit for bit, configuration, parameter count, every layer's hidden state, logits, top-1 and greedy generation per prompt, single-token and long-sequence boundary cases. A project's own llama2.c weights (e.g. the proxy) are imported from its artifacts. The S1 page picks any imported model or a new path, takes custom prompts, and shows every test item | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
 ### 1.3 Interface only (declared, no behavior)
 
@@ -65,7 +66,7 @@ So M1 as a whole is **not** accepted: AC-M1-01 (installer) and the desktop shell
 
 ### 1.4 Not implemented
 
-The Tauri desktop shell, installer, dedicated WSL distro, first-launch onboarding and automatic image pulls. Also: CHARTER.md generation, the sample project, project export and import, the project git working directory (architecture §6.3), S9, model training (FR-QNT-05), model formats other than llama2.c, `images/` and `docs/adr/`. §7.1 lists them with requirement IDs.
+The Tauri desktop shell, installer, dedicated WSL distro, first-launch onboarding and automatic image pulls. Also: CHARTER.md generation, the sample project, project export and import, the project git working directory (architecture §6.3), S9, model training (FR-QNT-05), graph recovery outside the Llama family and of GGUF, `images/` and `docs/adr/`. §7.1 lists them with requirement IDs.
 
 ---
 
@@ -154,7 +155,7 @@ plugins/                   extra plugin search path
 | `flow-default` | data | flow pack: S0–S9, G0–G4, 16 checks, hard-constraint slots | all | via `tests/*-flow.spec.ts` |
 | `process-library` | data | profiles `gf180mcu`, `sephonchitech-180bcd`; `library-180nm`; `package-gf180mcu`; `signoff-gf180mcu` | S0, S3, S6–S8 | via estimator and flow tests |
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0/G0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
-| `model-llama` | process (Python) | `synthesize`, `intake`, `reference` | S1 | `test_model.py` |
+| `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import`, `recover`, `run_graph`, `compare` | S0 (import), S1 | `test_model.py`, `test_graph.py` |
 | `numeric` | process (Python) | `quantize`, `infer`, `evaluate` | S2/G1 | `test_numeric.py` |
 | `arch-taalas` | process (Python) | `design`, `verify_spec` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process (Python) | `generate`, `check_isa` | S4, S5 | `test_rtl.py` |
@@ -173,7 +174,7 @@ What each domain plugin produces:
 - **estimator**: feasibility, area, cost and performance estimates (FR-EST), with low/typical/high values, a source and confidence per item, and the missing parameters. `check_views` reports the integration views a calibrated storage implementation has, per stage. `migrate` assesses migration impact against the design's process-capability dependencies (FR-MIG).
 - **process-library**: process profiles (with technology data for migration), the implementation library, the GF180 package template and signoff rules. Every value records its source and confidence. Empirical values stay empirical until calibrated.
 - **flow-default**: stages S0–S9, gates G0–G4 with their member slots and checks, stage entry checks, and the hard-constraint slots `constraints`, `timing-exceptions` and `signoff-rules`.
-- **model-llama**: llama2.c checkpoint and tokenizer intake into the Model IR. Proxy models (a planned model's structure, fixed seed, untrained, with the bundled `evalset-proxy`). The L0 FP32 reference, a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`.
+- **model-llama**: model import and graph recovery (below), plus llama2.c checkpoint and tokenizer intake into the llama2.c Model IR used by S2–S8. Proxy models (a planned model's structure, fixed seed, untrained, with the bundled `evalset-proxy`). The L0 FP32 reference, a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`.
 - **numeric**: quantization (int8/int4/int3/ternary, group scales), the numeric spec (requirements §3.4.2), and the L2 bit-exact integer model with observation-point traces. Also the L2-vs-L0 accuracy evaluation (G1 evidence), with a bundled evaluation set.
 - **arch-taalas**: the Taalas-style hardwired template. It derives the chip spec and PPA from a frozen numeric spec, and checks their consistency (G2 evidence).
 - **rtl-taalas**: compiles the numeric spec into a microcoded vector engine as one deterministic `rtl.bundle`. The bundle holds:
@@ -391,6 +392,19 @@ A new flow pack is a `data` plugin with a `flow.pack` data file ([test-flow](../
 
 Example: [process-library](../plugins/process-library/llmchip-plugin.json). Add a file under `data/` and a `data[]` entry (`id`, `type`, `path`, `label`). Every value carries its source and confidence (AGENTS.md). Consumers find data by type and id through `plugins.list`, as the CLI `estimate` command does. Tests: [tests/estimator.spec.ts](../tests/estimator.spec.ts), and `plugins/estimator/tests/test_estimate.py` for the numbers.
 
+### 5.3a An architecture family for graph recovery
+
+Example: `qwen3` in [graph.py](../plugins/model-llama/src/llmchip_model/graph.py).
+
+1. Map the model's `model_type` to a family in `HF_TYPES`; tensor names go in a names table (`HF_NAMES`, `LLAMA2C_NAMES`).
+2. Emit the decoder block's nodes with the family's differences, and record each difference as a decision with its evidence (a config field or a tensor).
+3. If the family needs an operation the interpreter lacks, add it to `run_node` in [execute.py](../plugins/model-llama/src/llmchip_model/execute.py).
+4. Teach [census.py](../plugins/model-llama/src/llmchip_model/census.py) the family's tensor names if they are new (`ROLE_PATTERNS`), so the census check still finds every role.
+5. Test with a tiny random model built by transformers, as `test_recovered_graph_matches_transformers` in [plugins/model-llama/tests/test_graph.py](../plugins/model-llama/tests/test_graph.py) does: logits within 1e-4 relative, identical greedy tokens.
+6. Give the new node ids and decisions readable names in [views/steps/S1.tsx](../apps/web/src/views/steps/S1.tsx) and both catalogs.
+
+Anything a family does not support must return `supported: false` with a reason code, never an approximate graph.
+
 ### 5.4 A kernel API method
 
 Example: `kernel.pause` (FR-AGT-23). Follow it through every layer:
@@ -432,7 +446,18 @@ Example: [views/Estimator.tsx](../apps/web/src/views/Estimator.tsx).
 3. Use only `KernelClient` calls.
 4. Add the page to the `PAGES` list in [tests/web-ui.spec.ts](../tests/web-ui.spec.ts), which keeps its own copy.
 
-The test checks catalog parity and unknown keys, and renders every listed page in both languages in headless Chromium. Run `yarn build` first so `apps/web/dist` exists.
+The test checks catalog parity and unknown keys. It renders every listed page in both languages in headless Chromium, and fails if a catalog key appears verbatim on a page. Run `yarn build` first so `apps/web/dist` exists.
+
+What the Flow page ([views/Flow.tsx](../apps/web/src/views/Flow.tsx)) shows for a stage is declared in [views/flowSteps.ts](../apps/web/src/views/flowSteps.ts). To show a handler's results there:
+
+1. Add its `plugin/handler` to the stage's `runs`. A run judged by a stage's check is shown under that stage, whatever its handler.
+2. Add the metrics to show as `facts`: a label key, a formatter, and optionally `good`, which colours the tile.
+3. Add the outputs a person wants to open as `deliverables`.
+4. Give the handler and its checks readable names in `RUN_TITLES` and `CHECK_TITLES`. The activity feed in the right panel ([views/activity.ts](../apps/web/src/views/activity.ts)) uses the same names.
+
+Example: the S6 facts "core area" and "timing after place and route" read `core_area_um2` and `flow_setup_violations` of `eda-gf180/implement`.
+
+A stage can also have a detailed demo view, opened from the "Detailed demo" button on its card. Write it as `views/steps/<stage>.tsx` and register it in `DETAILS` in `Flow.tsx`. Example: [views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) reads the stage's `estimate.report` and lays it out as question and answer, inputs, the area and speed calculations, the reverse fit, the verdict and gate, and a form that reruns the estimator outside the project. Build explanations from structured fields, not from a plugin's free text, so that both languages read naturally. `tests/web-ui.spec.ts` opens the S0 view in both languages.
 
 ### 5.9 An in-kernel system plugin (Cordis)
 
@@ -457,6 +482,8 @@ Measured on the development machine (WSL2, Node 24.22, uv 0.13, Podman 3.4 with 
 | `yarn verify` | all of the above in order; required before every commit | exit 0, about 12 min with the images present |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | full S0–S8 on the proxy, G4, export | see §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | hash chain, stored content against hashes | `ok: N … checked` |
+| `yarn demo [--until G0..G4]` | drives project `demo` through the positive path of the full flow against the running kernel, for the Flow page | S0–G4 passed and exported, 2241 s (about 37 min) with containers at 16 CPUs / 12 GB |
+| `yarn demo --model PATH [--bits N] [--process ID]` | starts a project from a downloaded model: S0 (import, census, estimate) and S1 (graph recovery, L0, comparison) | all census, graph and comparison checks pass: SmolLM2-135M 11 s, Qwen3-0.6B 46 s, DeepSeek-R1-Distill-Qwen-1.5B 89 s, stories260K 1 s; largest relative logit error 6.8e-6, identical greedy tokens; all infeasible on the 2.4 mm² GF180 die |
 
 Without the container images, `calibration`, `m3-flow`, `ui-latency` and `containers` skip visibly. `yarn verify` then finishes much faster but proves less. A skipped test is not a pass (DP-10). Say which ones skipped when you report.
 
@@ -479,6 +506,8 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | `tests/estimator.spec.ts` | three models, full breakdown; missing data gives "insufficient data" and G0 indeterminate | AC-M1-10 | always; **fails** (does not skip) without `.venv` |
 | `tests/m2-flow.spec.ts` | S0 → G2 on stories260K; a new numeric spec invalidates G1/G2 | M2, AC-04 | always; **fails** without `.venv` |
 | `tests/m4-kernel.spec.ts` | export of the released snapshot with lineage, hard-constraint slots, migration invalidation | FR-PKG-04, AC-08/10/13 | always |
+| `tests/model-import.spec.ts` | import of a tiny Qwen3 in the real Hugging Face layout, census, estimate from the census, graph, L0, the full test suite against transformers; llama2.c against the run.c port; a project's own proxy weights; a model without config.json reported, not guessed | FR-MDL-01/03/05/06 | always; needs `.venv` |
+| `plugins/model-llama/tests/test_graph.py` | Llama (tied/untied), Mistral with sliding window, Qwen2, Qwen3 against transformers; llama2.c against the run.c port; duplicated tied output; truncated file; unsupported models | FR-MDL | always |
 | `tests/kernel-footprint.spec.ts` | startup time and idle RSS of harnessd | NFR-01 (kernel part) | Linux |
 | `tests/web-ui.spec.ts` | catalog parity; every page in both languages in a browser | AC-M1-12 | browser part needs `apps/web/dist` and Chromium |
 | `tests/containers.spec.ts` | no network, read-only inputs, container removed on cancel | IF-3 | needs `python:3.12-slim` image |
@@ -504,7 +533,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | Project git working directory; merging a change set records state only | FR-TRC-09, architecture §6.2–6.3 |
 | S9 post-silicon: firmware, host program, L7 in the Playground | FR-SIL-*, M6 |
 | Training the reference model (owner-deferred; the proxy stands in) | FR-QNT-05, requirements §11.1 |
-| Model formats other than llama2.c; Hugging Face download | FR-MDL-01, FR-MDL-02 |
+| Graph recovery outside the Llama family (GPT-2, MoE, …), of GGUF (census only), and with RoPE scaling (e.g. Llama 3.1/3.2); download from Hugging Face inside the workbench | FR-MDL-01, FR-MDL-02, FR-MDL-03 |
 | Project export and import, reproduce command, audit export | FR-PRJ-05, FR-TRC-07, FR-TRC-08 |
 | Artifact purge, GC and retention | architecture §4.2, FR-AGT-20 |
 | Externally launched coding agents managed by the kernel | FR-AGT-03 |
@@ -522,6 +551,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 - **UI**: no conditional approval or condition closing in the UI. No incident filters or jump links. No RTL, waveform or layout viewer beyond PNG. Settings lack LLM, quota and egress configuration (FR-UI-09/10/11/13, FR-AGT-25/26).
 - **CLI**: approvals, waivers, declassification, export and migration have no dedicated commands. Use `llmchip call` (FR-INT-07).
 - **TypeScript plugin SDK** has no tests of its own. It is exercised only through `stub-tool`.
+- **Imported Hugging Face models** stop at S1: S2–S8 consume the llama2.c Model IR (`model.ir`), not the recovered graph (`model.graph`). L0 runs the graph without a KV cache (full sequence per step), so long generations on large models are slow.
 
 ### 7.3 Conflicts between code and upstream documents (open, reported, not resolved)
 

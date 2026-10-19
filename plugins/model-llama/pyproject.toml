@@ -1,9 +1,17 @@
 [project]
 name = "llmchip-model"
 version = "0.1.0"
-description = "Llama-family model intake and the L0 FP32 reference of llmchip-harness (requirements FR-MDL)"
+description = "Llama-family model import, tensor census, graph recovery and the L0 FP32 reference of llmchip-harness (requirements FR-MDL)"
 requires-python = ">=3.12"
-dependencies = ["llmchip-sdk", "numpy>=2.0"]
+dependencies = [
+  "llmchip-sdk",
+  "numpy>=2.0",
+  # tokenizer.json of Hugging Face models
+  "tokenizers>=0.21",
+  # the official implementation that recovered graphs are compared against
+  "torch>=2.6",
+  "transformers>=4.51",
+]
 
 [tool.uv.sources]
 llmchip-sdk = { workspace = true }

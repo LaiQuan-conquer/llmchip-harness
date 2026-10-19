@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "stages": [
     {
       "id": "S0",
@@ -702,6 +702,112 @@
         }
       ],
       "requiredCapability": "sdf-timing-sim"
+    },
+    {
+      "id": "model.census",
+      "version": "1",
+      "title": "Tensor census of the imported weights is self-consistent",
+      "plugin": "model-llama",
+      "handler": "import",
+      "completeness": [
+        {
+          "metric": "tensors",
+          "op": ">",
+          "value": 0
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "all_tensors_classified",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "header_consistent",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "layers_uniform",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "config_agrees",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "output_consistent",
+          "op": "==",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "model.graph",
+      "version": "1",
+      "title": "Computation graph recovered with every tensor bound",
+      "plugin": "model-llama",
+      "handler": "recover",
+      "criteria": [
+        {
+          "metric": "family_supported",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "tensors_unmatched",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "tensors_missing",
+          "op": "==",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "model.upstream",
+      "version": "2",
+      "title": "Recovered graph passes the full test suite against the official implementation",
+      "plugin": "model-llama",
+      "handler": "compare",
+      "completeness": [
+        {
+          "metric": "prompts",
+          "op": ">=",
+          "value": 1
+        },
+        {
+          "metric": "tests_total",
+          "op": ">=",
+          "value": 1
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "tests_failed",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "greedy_match",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "top1_agreement",
+          "op": ">=",
+          "value": 0.99
+        },
+        {
+          "metric": "max_rel_logit_diff",
+          "op": "<=",
+          "value": 0.001
+        }
+      ]
     }
   ],
   "hardConstraintSlots": [

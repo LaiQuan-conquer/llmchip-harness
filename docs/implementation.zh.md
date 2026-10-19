@@ -6,7 +6,7 @@
 |---|---|
 | 文档版本 | v0.1 |
 | 日期 | 2026-10-19 |
-| 对应代码 | 提交 `9cc76a0`（M4） |
+| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原 |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.9 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -56,8 +56,9 @@
 | IF-2 插件协议 | stdio 上的 JSON-RPC 2.0，每行一条消息 | [plugins/process.ts](../packages/kernel/src/plugins/process.ts)、两个 SDK |
 | IF-3 工具容器 | Podman，无网络，输入与插件目录只读 | `Scheduler.containerCommand` |
 | CLI 与 MCP | `llmchip` 命令、通用 `call`、stdio 上的 MCP | [cli/src/main.ts](../packages/cli/src/main.ts)、[cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
-| Web UI | 九个页面，中英文 | [apps/web/src](../apps/web/src) |
+| Web UI | 十个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S9 路径、结果、检查和审批门 | [apps/web/src](../apps/web/src) |
 | 领域流程 | 内置插件跑通 S0–S8 与 G0–G4（见 §2.4 的表） | [plugins/](../plugins) |
+| 真实模型导入与图还原 | 按本机路径导入已下载的模型目录（safetensors + config.json + tokenizer.json，或 llama2.c），从文件头做张量普查并估算，还原计算图（Llama 家族：Llama、Mistral、SmolLM、Qwen2、Qwen3、llama2.c），执行为 L0，并与 transformers / run.c 移植逐项测试：权重逐位、结构参数、参数总量、每层中间结果、每个提示的 logits、top-1 与贪心生成、单 token 与长序列边界用例。项目自带的 llama2.c 权重（如占位模型）直接从产物导入。S1 页面可选择任一已导入模型或新路径，填写自定义提示，并展示每个测试项 | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
 ### 1.3 只有接口（已声明，无行为）
 
@@ -69,7 +70,7 @@
 
 ### 1.4 未实现
 
-Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自动拉取镜像。此外还有：CHARTER.md 生成、示例项目、项目导出与导入、项目 git 工作目录（架构 §6.3）、S9、模型训练（FR-QNT-05）、llama2.c 以外的模型格式、`images/` 和 `docs/adr/`。§7.1 按需求编号列出。
+Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自动拉取镜像。此外还有：CHARTER.md 生成、示例项目、项目导出与导入、项目 git 工作目录（架构 §6.3）、S9、模型训练（FR-QNT-05）、Llama 家族以外和 GGUF 的图还原、`images/` 和 `docs/adr/`。§7.1 按需求编号列出。
 
 ---
 
@@ -158,7 +159,7 @@ plugins/                   额外的插件搜索路径
 | `flow-default` | data | 流程包：S0–S9、G0–G4、16 项检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
 | `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`package-gf180mcu`；`signoff-gf180mcu` | S0、S3、S6–S8 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
-| `model-llama` | process（Python） | `synthesize`、`intake`、`reference` | S1 | `test_model.py` |
+| `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
 | `numeric` | process（Python） | `quantize`、`infer`、`evaluate` | S2/G1 | `test_numeric.py` |
 | `arch-taalas` | process（Python） | `design`、`verify_spec` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py` |
@@ -178,7 +179,8 @@ plugins/                   额外的插件搜索路径
 - **process-library**：工艺档案（含迁移所需的工艺数据）、实现库、GF180 封装模板与签核规则。每个数值都记录来源与置信度，经验值在标定前始终是经验值。
 - **flow-default**：阶段 S0–S9，审批门 G0–G4 及其成员槽位和检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。
 - **model-llama**：
-  - 把 llama2.c 检查点与分词器导入为模型 IR。
+  - 模型导入与图还原（见下文）。
+  - 把 llama2.c 检查点与分词器导入为 S2–S8 使用的 llama2.c 模型 IR。
   - 生成占位模型：采用某个规划模型的结构，固定种子，未训练，附带 `evalset-proxy`。
   - 提供 L0 FP32 参考，即 `run.c` 的 NumPy 移植。它与 `plugins/model-llama/upstream/` 中随仓库提供并编译的 `run.c` 对照检查。
 - **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（G1 证据），并附带评估集。
@@ -427,6 +429,19 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 示例：[process-library](../plugins/process-library/llmchip-plugin.json)。在 `data/` 下加文件，并在 `data[]` 中加一条（`id`、`type`、`path`、`label`）。每个数值都要带来源与置信度（见 AGENTS.md）。使用方通过 `plugins.list` 按类型和 id 找到数据，CLI 的 `estimate` 命令就是这样做的。测试：[tests/estimator.spec.ts](../tests/estimator.spec.ts)；数值本身由 `plugins/estimator/tests/test_estimate.py` 覆盖。
 
+### 5.3a 图还原的架构家族
+
+示例：[graph.py](../plugins/model-llama/src/llmchip_model/graph.py) 中的 `qwen3`。
+
+1. 在 `HF_TYPES` 中把模型的 `model_type` 映射到家族；张量名写进名称表（`HF_NAMES`、`LLAMA2C_NAMES`）。
+2. 生成该家族解码层的节点，并把每一处差异记录为一条判断及其依据（config 字段或张量）。
+3. 如果需要解释器还没有的运算，在 [execute.py](../plugins/model-llama/src/llmchip_model/execute.py) 的 `run_node` 中加上。
+4. 张量名是新的，就在 [census.py](../plugins/model-llama/src/llmchip_model/census.py) 的 `ROLE_PATTERNS` 中加入，确保普查仍能识别每个张量。
+5. 用 transformers 构造一个随机小模型测试，参照 [plugins/model-llama/tests/test_graph.py](../plugins/model-llama/tests/test_graph.py) 的 `test_recovered_graph_matches_transformers`：logits 相对误差在 1e-4 以内，贪心生成的 token 完全一致。
+6. 在 [views/steps/S1.tsx](../apps/web/src/views/steps/S1.tsx) 和两个语言目录中给新节点和判断起可读的名字。
+
+家族不支持的情况必须返回 `supported: false` 和原因码，绝不给出近似的图。
+
 ### 5.4 内核 API 方法
 
 示例：`kernel.pause`（FR-AGT-23）。可以按以下各层追踪：
@@ -474,7 +489,18 @@ yarn llmchip gate release chip G0                                # invalidated�
 3. 只使用 `KernelClient` 调用内核。
 4. 把页面加入 [tests/web-ui.spec.ts](../tests/web-ui.spec.ts) 中的 `PAGES` 列表，测试自己维护着一份。
 
-该测试检查两种语言目录的键一致、没有未知键，并在无头 Chromium 中以两种语言渲染列表中的每个页面。运行前先执行 `yarn build`，确保 `apps/web/dist` 存在。
+该测试检查两种语言目录的键一致、没有未知键。它还在无头 Chromium 中以两种语言渲染列表中的每个页面，页面上原样出现任何目录键都会失败。运行前先执行 `yarn build`，确保 `apps/web/dist` 存在。
+
+“演示流程”页面（[views/Flow.tsx](../apps/web/src/views/Flow.tsx)）每个阶段显示什么，都在 [views/flowSteps.ts](../apps/web/src/views/flowSteps.ts) 中声明。要在那里显示某个处理器的结果：
+
+1. 把它的 `plugin/handler` 加入该阶段的 `runs`。被某阶段的检查判定过的运行，无论处理器是什么，都显示在那个阶段下。
+2. 把要显示的指标加入 `facts`：标签键、格式化函数，以及可选的 `good`（决定结果块的颜色）。
+3. 把用户需要打开的输出加入 `deliverables`。
+4. 在 `RUN_TITLES` 和 `CHECK_TITLES` 中给处理器和检查起可读的名字。右侧面板的动态（[views/activity.ts](../apps/web/src/views/activity.ts)）使用同一套名字。
+
+示例：S6 的“核心区面积”和“布局布线后时序”读取 `eda-gf180/implement` 的 `core_area_um2` 和 `flow_setup_violations`。
+
+阶段还可以有详细演示视图，从卡片上的“详细演示”按钮打开。把它写成 `views/steps/<阶段>.tsx`，并在 `Flow.tsx` 的 `DETAILS` 中注册。示例：[views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) 读取该阶段的 `estimate.report`，依次展示问题与回答、输入、面积与速度的计算、反推能放下的模型、检查与审批门，以及一个在项目之外重新运行估算器的表单。说明文字要由结构化字段生成，不要直接用插件的自由文本，这样两种语言读起来都自然。`tests/web-ui.spec.ts` 会以两种语言打开 S0 视图。
 
 ### 5.9 内核内系统插件（Cordis）
 
@@ -503,6 +529,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0，镜像齐全时约 12 分钟 |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S8、G4 与导出 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
+| `yarn demo [--until G0..G4]` | 在运行中的内核上，把项目 `demo` 按完整流程的正向路径跑一遍，供“演示流程”页面展示 | S0–G4 全部通过并导出，2241 秒（约 37 分钟），容器配置 16 CPU / 12 GB |
+| `yarn demo --model PATH [--bits N] [--process ID]` | 从已下载的模型建立项目：S0（导入、普查、估算）与 S1（图还原、L0、对拍） | 普查、图还原、对拍检查全部通过：SmolLM2-135M 11 秒、Qwen3-0.6B 46 秒、DeepSeek-R1-Distill-Qwen-1.5B 89 秒、stories260K 1 秒；logit 最大相对误差 6.8e-6，贪心 token 完全一致；在 2.4 mm² 的 GF180 芯片上均不可行 |
 
 没有容器镜像时，`calibration`、`m3-flow`、`ui-latency`、`containers` 会可见地跳过。这时 `yarn verify` 快得多，但证明的东西也少得多。跳过不等于通过（DP-10），报告时要说明跳过了哪些测试。
 
@@ -525,6 +553,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/estimator.spec.ts` | 三个模型的完整分项；缺数据时结论为“数据不足”，G0 判 indeterminate | AC-M1-10 | 总是；没有 `.venv` 时**失败**（不会跳过） |
 | `tests/m2-flow.spec.ts` | stories260K 上 S0 → G2；新数值规格使 G1/G2 作废 | M2、AC-04 | 总是；没有 `.venv` 时**失败** |
 | `tests/m4-kernel.spec.ts` | 导出已放行快照及其血缘、硬约束槽位、迁移导致的作废 | FR-PKG-04、AC-08/10/13 | 总是 |
+| `tests/model-import.spec.ts` | 导入真实 Hugging Face 布局的小 Qwen3，普查、按普查估算、图还原、L0、与 transformers 的全量测试；llama2.c 与 run.c 移植对拍；项目自带的占位模型权重；没有 config.json 的模型如实报告而不猜测 | FR-MDL-01/03/05/06 | 总是；需要 `.venv` |
+| `plugins/model-llama/tests/test_graph.py` | Llama（共享/不共享输出层）、带滑动窗口的 Mistral、Qwen2、Qwen3 与 transformers 对拍；llama2.c 与 run.c 移植对拍；重复存储的共享输出层；截断的文件；不支持的模型 | FR-MDL | 总是 |
 | `tests/kernel-footprint.spec.ts` | harnessd 启动时间与空闲 RSS | NFR-01（内核部分） | Linux |
 | `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
 | `tests/containers.spec.ts` | 无网络、输入只读、取消时移除容器 | IF-3 | 需 `python:3.12-slim` 镜像 |
@@ -550,7 +580,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 | 项目 git 工作目录；合并变更集只记录状态 | FR-TRC-09、架构 §6.2–6.3 |
 | S9 回片测试：固件、上位机程序、Playground 中的 L7 | FR-SIL-*、M6 |
 | 训练参考模型（负责人推迟；暂以占位模型替代） | FR-QNT-05、需求 §11.1 |
-| llama2.c 以外的模型格式；Hugging Face 下载 | FR-MDL-01、FR-MDL-02 |
+| Llama 家族以外（GPT-2、MoE 等）、GGUF（只做普查）以及带 RoPE 缩放（如 Llama 3.1/3.2）的图还原；在工作台内从 Hugging Face 下载 | FR-MDL-01、FR-MDL-02、FR-MDL-03 |
 | 项目导出与导入、复现命令、审计导出 | FR-PRJ-05、FR-TRC-07、FR-TRC-08 |
 | 产物清除、GC 与保留策略 | 架构 §4.2、FR-AGT-20 |
 | 由内核管理的外部编码智能体 | FR-AGT-03 |
@@ -568,6 +598,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **UI**：没有条件审批与关闭条件的界面。没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-09/10/11/13、FR-AGT-25/26）。
 - **CLI**：审批、豁免、去密、导出、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
 - **TypeScript 插件 SDK** 没有自己的测试，只通过 `stub-tool` 间接覆盖。
+- **导入的 Hugging Face 模型**目前止于 S1：S2–S8 使用的是 llama2.c 模型 IR（`model.ir`），而不是还原的计算图（`model.graph`）。L0 执行计算图时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
 
 ### 7.3 代码与上游文档的冲突（未解决，已上报）
 

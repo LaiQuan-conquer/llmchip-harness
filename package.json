@@ -25,7 +25,8 @@
     "llmchip": "node --conditions=development packages/cli/src/bin.ts",
     "setup:python": "uv sync --frozen",
     "check:python": "uv run --frozen ruff check && uv run --frozen ruff format --check && uv run --frozen pytest -q",
-    "ui": "node --conditions=development packages/cli/src/bin.ts ui"
+    "ui": "node --conditions=development packages/cli/src/bin.ts ui",
+    "demo": "node --conditions=development scripts/demo.ts"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
