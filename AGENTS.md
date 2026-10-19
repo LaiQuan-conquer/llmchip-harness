@@ -8,6 +8,7 @@ This file is the **single entry point** for every agent working on this reposito
 
 - [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>) ([中文](<Coding Harness MVP Requirement Analysis.zh.md>)) — what the product must do: requirements, priorities, acceptance criteria.
 - [Microkernel Architecture](<Microkernel Architecture.md>) ([中文](<Microkernel Architecture.zh.md>)) — how the system is organized and extended: kernel components, plugins, protocols, ADRs.
+- [Current Implementation and Extension Guide](docs/implementation.md) ([中文](docs/implementation.zh.md)) — what the code does today: implementation scope, modules and dependencies, a traced run path, ownership of data and resources, extension recipes with real examples, verification, limitations and open conflicts. **Read it before changing anything under `packages/`, `plugins/` or `apps/`.**
 
 ## Authoritative documents
 
@@ -24,6 +25,7 @@ Rules:
 
 - Recorded owner decisions (ADRs) override all documents above; the affected documents must then be updated.
 - Files under `drafts/` are local discussion material, are not committed, and carry no authority.
+- The implementation guide (`docs/implementation.md`) is descriptive and carries no authority. If it disagrees with the code, the guide is out of date: fix it. Known conflicts between the code and the requirements or architecture are listed in its §7.3 and stay open until the owner decides. Do not build on either side of them.
 - A lower-domain document must not redefine a higher-domain topic. For example, the architecture must not change acceptance criteria.
 - **If you find a conflict, do not pick a side.** Record it as an open issue, report it to the owner, and pause work within the scope of the conflict.
 
@@ -37,12 +39,12 @@ Every change goes through all six steps. Skipping a step is not allowed.
 2. **Bound the structure.** Declare which modules and files you will touch and which you will not. Stay inside that scope.
 3. **Implement in small steps.** One verifiable change per change set, independently revertible.
 4. **Review.** A different agent reviews the change against the requirements, the architecture, and this file. Never review your own change.
-5. **Verify for real.** Run `yarn verify` and any other relevant tools, and check the results. Claiming completion is not verification. A zero exit code is not a pass (DP-8); "nothing was checked" is not "no violations" (DP-10).
-6. **Update constraints.** Turn what you learned from failures and incidents into proposed constraints in this file or in the relevant playbook. The owner approves changes to hard constraints. Anything that affects an acceptance result is a hard constraint; when in doubt, treat a constraint as hard.
+5. **Verify for real.** Run `yarn verify` and any other relevant tools, and check the results. Claiming completion is not verification. A zero exit code is not a pass (DP-8); "nothing was checked" is not "no violations" (DP-10). Tests that need a container image or `LLMCHIP_FULL_FLOW=1` skip visibly when their condition is not met. Report which tests were skipped, and run the ones your change touches (implementation guide §6).
+6. **Update constraints.** Turn what you learned from failures and incidents into proposed constraints in this file or in the relevant playbook. The owner approves changes to hard constraints. Anything that affects an acceptance result is a hard constraint; when in doubt, treat a constraint as hard. Update the implementation guide in the same change set when the change alters what it describes (see "Implementation guide" below).
 
 ## Architecture
 
-The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plugins (quantization, bit-accurate models) are Python. EDA tools run in containers. Plugins in any language talk to the kernel through one unified protocol.
+The kernel and UI are TypeScript. The desktop shell will be Tauri (ADR-002; not built yet, the Web UI runs in a browser). Compute-heavy plugins (quantization, bit-accurate models) are Python. EDA tools run in containers. Plugins in any language talk to the kernel through one unified protocol.
 
 **Cordis** and its companion libraries are vendored as source under `vendor/` (ADR-001 item 3, owner decision). Cordis may only be used to assemble `harnessd` internals and in-kernel system plugins. `@llmchip/kernel-api` and the plugin protocol must never depend on it (AP-6), and out-of-process plugins must not see it. ADR-001 is accepted with the plugin host guards of architecture §5 item 6: load in-kernel plugins only through `PluginHost`, declare every Cordis service a plugin provides (`provides`) or needs (`inject`), and never put Cordis events on a critical path. Keep Cordis usage behind kernel-owned interfaces so it can be replaced.
 
@@ -62,38 +64,51 @@ The kernel and UI are TypeScript. The desktop shell is Tauri. Compute-heavy plug
 | `python/<name>/` | Python packages of the uv workspace, such as the plugin SDK |
 | `tests/` | Repository-level and end-to-end tests; `tests/fixtures/plugins/` holds test-only plugins, `tests/fixtures/models/` the stories260K comparison model |
 | `scripts/` | Repository tooling scripts |
+| `docs/` | The implementation guide (`implementation.md`, `implementation.zh.md`) |
 
-Current packages:
+Current packages (responsibilities, entry points and allowed dependencies: implementation guide §2):
 
 - `kernel-api` — language-neutral contracts: kernel API, plugin protocol, artifact types. Must not depend on Cordis (AP-6). The source of truth is the JSON Schema in `packages/kernel-api/schemas/`; `src/generated/` is produced from it by `yarn gen:schemas` and must not be edited by hand.
-- `kernel` — `harnessd`, the kernel daemon: event store (K1), artifact store (K2), configuration and secrets (K10), the kernel API server (IF-1) and the in-kernel plugin host.
-- `kernel` also runs out-of-process plugins: plugin registry (K9), scheduler and process supervision (K4), and the workflow engine with verdicts and approvals (K3, K6, K7).
-- `kernel` also releases and exports: the release check, hard-constraint slots only a human binds, package export with the lineage manifest, and confirmed migration assessments that invalidate later gates (K7, FR-PKG, FR-MIG).
-- `kernel` also hosts the security layer and agents: incidents, the egress gateway with labels, NDA fingerprints and declassification rules (K8), API policy for owner and external clients (K5), and the agent runtime with LLM providers, tools, change sets and handoff packs (§6).
+- `kernel` — `harnessd`, the kernel daemon: K1–K10, the API server (IF-1), the in-kernel plugin host, and the agent runtime with its LLM providers.
 - `plugin-sdk` — TypeScript SDK for out-of-process plugins (IF-2).
 - `client` — kernel API client for Node.js and browsers.
-- `cli` — the `llmchip` command-line client.
+- `cli` — the `llmchip` command-line client, including `llmchip mcp`.
 
-Python (uv workspace, root `pyproject.toml`):
+Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2).
 
-- `python/llmchip-sdk` — Python SDK for out-of-process plugins (IF-2).
-
-Bundled plugins:
-
-- `estimator` (Python) — feasibility, area, cost and performance estimate (FR-EST).
-- `process-library` (data) — process profiles (with technology data for migration), the implementation library, the GF180 package template and signoff rules. Every value records its source and confidence; empirical values stay empirical until calibrated.
-- `flow-default` (data) — stages S0–S9, gates G0–G4 and their check definitions. A gate check must consume the gate's slotted artifacts as run inputs, so that its verdict counts as evidence for exactly that snapshot.
-- `model-llama` (Python) — llama2.c checkpoint and tokenizer intake into the Model IR, proxy models (a planned model's structure, fixed seed, untrained; with the bundled `evalset-proxy`), and the L0 FP32 reference (a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`).
-- `numeric` (Python) — quantization (int8/int4/int3/ternary, group scales), the numeric spec (§3.4.2), the L2 bit-exact integer model with observation-point traces, and the L2-vs-L0 accuracy evaluation (G1 evidence). Bundles an evaluation set.
-- `arch-taalas` (Python) — the Taalas-style hardwired architecture template: chip spec and PPA from a frozen numeric spec, and the consistency check (G2 evidence).
-- `rtl-taalas` (Python) — RTL generator (S4): compiles the numeric spec into a microcoded vector engine (Verilog core with data in an external SPI SRAM, SPI host interface, ROMs as generated case tables, microcode, Verilator testbench with an SRAM model, instruction-level simulator `isa.py`) as one deterministic `rtl.bundle`; the weight mapping rule is reversible and round-trip checked; `check_isa` verifies the microcode against L2. Never edit a generated bundle; change the generator.
-- `sim-verilator` (container) — lint, simulator qualification, the verification plan (regression, directed, boundary, exhaustive, random, coverage; bundled default plan) with first-divergence localization (operation, element, cycle, VCD window), gate-level simulation of the routed netlist (L4, Icarus Verilog with the PDK cell models), SDF timing simulation with annotation statistics (a supplementary capability, not qualified yet), and L3 generations for the Chip Playground. Runs Verilator, Icarus Verilog and cocotb in the pinned `iic-osic-tools` image.
-- `eda-gf180` (container) — GF180MCU flow in the pinned `iic-osic-tools` image (gf180mcuD PDK, Yosys, OpenROAD, Magic, KLayout, Netgen, OpenSTA): storage implementation calibration (FR-EST-13), constraints from the chip spec, physical implementation with the pad ring (LibreLane Chip flow), and signoff checks (DRC, LVS, multi-corner STA with constraint completeness), each on exactly the artifacts it judges.
-- `packager` (Python) — tapeout package from the process's template, its integrity check, and import of external signoff reports bound to a GDS (FR-PKG, FR-SGN-06).
+Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `packager` (Python), and `sim-verilator`, `eda-gf180` (containers).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
-Planned directories (`apps/`, `python/`, `plugins/`, `images/`) are listed in architecture §14. Create them only when the corresponding work starts.
+Planned directories still to be created: `apps/desktop/` and `images/` (architecture §14), and `docs/adr/` (architecture §15). Create them only when the corresponding work starts.
+
+### Implementation guide
+
+[docs/implementation.md](docs/implementation.md) holds the detail of what is implemented and how to extend it. This file keeps only the rules.
+
+- Update the guide, both languages, in the same commit when your change does any of these:
+  - changes a module's responsibility or dependency direction (§2);
+  - changes the traced run path or its failure handling (§3);
+  - changes who writes, owns or releases a resource (§4);
+  - adds or changes an extension mechanism (§5);
+  - changes a verification command or the conditions under which a test runs or skips (§6);
+  - opens or closes a limitation or conflict (§7).
+
+  Update "Describes" in its header to the commit it now matches.
+- Every extension recipe in the guide names a real example in the code and the test that proves it. When you add a recipe, add both.
+- Commands written in the guide or the README must have been run. Record the observed result, and the date for timings.
+
+### Kernel and plugin rules
+
+- Dependency direction:
+  - Front ends (CLI, Web UI, MCP bridge) reach the kernel only through `@llmchip/client`.
+  - Plugins never import the kernel; they speak IF-2 only.
+  - Among production sources, only `packages/kernel/src/plugin-host.ts` imports Cordis.
+- Kernel state changes only through `EventStore.append` or `EventStore.transaction`. Every other table belongs to a `Projection` and is written only in its `apply`. Bump a projection's `version` whenever its `setup` or `apply` changes.
+- Every kernel API method and event payload is defined in the kernel schema first, then in `KernelMethods`/`KERNEL_METHOD_DEFS` or `KernelEventPayloads`/`KERNEL_EVENT_PAYLOAD_DEFS`. Owner-only is the default; add a method to `EXTERNAL_METHODS` in `security/policy.ts` only when external clients may call it.
+- A gate check must consume the gate's slotted artifacts as run inputs, so that its verdict counts as evidence for exactly that snapshot. Each signoff check runs on exactly the artifacts it judges.
+- Change a check definition's `version` whenever its standards change; that is how a check that passes only after a standard change is detected (AC-M1-13).
+- Data in `process-library` records its source and confidence for every value; empirical values stay empirical until calibrated.
 
 ### Toolchain
 
@@ -152,10 +167,12 @@ A package that imports a vendored package follows the same rules: declare it as 
 
 - `runtime: container` plugins run under Podman (`podman run -i`, IF-2 over stdio) with no network, read-only inputs and plugin directory, and only the run workspace writable. Pin `entry.image` by digest.
 - The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
-- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about half an hour and is opt-in: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks.
+- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (39 min measured on 2026-10-19) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks.
 - In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 
 ### Adding a plugin
+
+The full recipe, with a worked example and the tests to copy, is in implementation guide §5.1. For checks and flow packs, see §5.2.
 
 1. Create `plugins/<id>/llmchip-plugin.json` (schema `PluginManifest` in `packages/kernel-api/schemas/kernel.schema.json`). Declare every handler with its inputs, outputs and a JSON Schema for its params; the kernel validates them before a run is queued.
 2. Python plugins are uv workspace members: add `plugins/<id>` to `[tool.uv.workspace].members` and to the root dependencies in `pyproject.toml`, then run `uv lock` and `yarn setup:python`.
@@ -164,6 +181,7 @@ A package that imports a vendored package follows the same rules: declare it as 
 
 ### Generated hardware
 
+- Never edit a generated `rtl.bundle`; change the generator. The weight mapping rule must stay reversible; the generator checks the round trip (FR-RTL-02).
 - Every register of generated RTL has a reset value: synthesized logic is X-pessimistic in four-state gate-level simulation, and un-reset control registers turn the whole netlist X.
 - Gate-level simulation of a routed netlist runs on an event-driven simulator (Icarus Verilog) with the PDK's cell models; Verilator races on the PDK's sequential UDPs behind clock-tree buffers.
 - Do not call Verilog functions with local variables inside clocked blocks of generated RTL: synthesis turns the locals into registers.
