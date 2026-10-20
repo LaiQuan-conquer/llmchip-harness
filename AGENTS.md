@@ -169,7 +169,7 @@ A package that imports a vendored package follows the same rules: declare it as 
 
 - `runtime: container` plugins run under Podman (`podman run -i`, IF-2 over stdio) with no network, read-only inputs and plugin directory, and only the run workspace writable. Pin `entry.image` by digest.
 - The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
-- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (39 min measured on 2026-10-19) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks.
+- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (36 min measured on 2026-10-20) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks.
 - In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 
 ### Adding a plugin
@@ -187,6 +187,7 @@ The full recipe, with a worked example and the tests to copy, is in implementati
 - Every register of generated RTL has a reset value: synthesized logic is X-pessimistic in four-state gate-level simulation, and un-reset control registers turn the whole netlist X.
 - Gate-level simulation of a routed netlist runs on an event-driven simulator (Icarus Verilog) with the PDK's cell models; Verilator races on the PDK's sequential UDPs behind clock-tree buffers.
 - Do not call Verilog functions with local variables inside clocked blocks of generated RTL: synthesis turns the locals into registers.
+- A bidirectional pad (`gf180mcu_fd_io__bi_t`) enables its input only while it does not drive (IE = not OE): its A -> PAD timing arcs exist only with IE low, so a tied IE leaves the output untimed. The gate-level pad model must pass the input path for such pins.
 
 ### Vendored code
 

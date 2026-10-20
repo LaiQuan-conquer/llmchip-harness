@@ -448,6 +448,7 @@ function SpeedSection({ report }: { report: Report }) {
           tps: p.tokensPerSecond >= 10 ? f.num(p.tokensPerSecond, 0) : f.sig(p.tokensPerSecond),
         })}
       </p>
+      <p className="muted">{t('s0.speedPreArch')}</p>
       {[
         ['s0.compute', p.computeMsPerToken, p.bottleneck === 'compute'],
         ['s0.offchipIo', offchip, p.bottleneck !== 'compute'],

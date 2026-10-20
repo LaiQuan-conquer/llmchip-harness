@@ -200,11 +200,12 @@ wheels = [
 
 [[package]]
 name = "llmchip-arch"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "plugins/arch-taalas" }
 dependencies = [
     { name = "llmchip-estimator" },
     { name = "llmchip-numeric" },
+    { name = "llmchip-rtl" },
     { name = "llmchip-sdk" },
 ]
 
@@ -212,6 +213,7 @@ dependencies = [
 requires-dist = [
     { name = "llmchip-estimator", editable = "plugins/estimator" },
     { name = "llmchip-numeric", editable = "plugins/numeric" },
+    { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
 ]
 

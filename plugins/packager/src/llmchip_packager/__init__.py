@@ -76,6 +76,22 @@ def bonding_svg(pads: dict) -> str:
     return "\n".join(out)
 
 
+def memory_setup(chip: dict) -> str:
+    """How the external SRAM is wired, from the chip's pins."""
+    names = {p["name"] for p in chip.get("pins", [])}
+    if "kv_sio0" in names:
+        return (
+            "- External memory: a 23LC1024-style serial SRAM in quad-SPI (SQI) mode on kv_sclk / kv_cs_n / "
+            "kv_sio0..3 (the chip puts it into SQI mode after reset; it drives SCK and CS only while busy and "
+            "the data lines only while it sends; pull-up on kv_cs_n and on kv_sio0..3, pull-down on kv_sclk; "
+            "a board reading the SRAM while the chip is idle uses SQI or sends RSTIO first)."
+        )
+    return (
+        "- External memory: a 23LC1024-style SPI SRAM on kv_sclk / kv_cs_n / kv_mosi / kv_miso "
+        "(the chip drives the bus only while busy; pull-up on kv_cs_n, pull-downs on kv_sclk and kv_mosi)."
+    )
+
+
 def test_plan(chip: dict, l2: dict, design: dict | None) -> str:
     """Bring-up and functional test plan (S9 input): supplies, clock, protocol, expected tokens."""
     t = chip["timing"]
@@ -87,8 +103,7 @@ def test_plan(chip: dict, l2: dict, design: dict | None) -> str:
         "## Setup",
         "- Supply: one 5 V domain (all dvdd/dvss pads).",
         f"- Clock: {round(1000 / t['clock']['periodNs'], 3)} MHz on `clk`; `rst_n` low for at least 4 clocks.",
-        "- External memory: a 23LC1024-style SPI SRAM on kv_sclk / kv_cs_n / kv_mosi / kv_miso "
-        "(the chip drives the bus only while busy; pull-up on kv_cs_n, pull-downs on kv_sclk and kv_mosi).",
+        memory_setup(chip),
         f"- Host: {chip['interfaces']['host']['kind']}.",
         "",
         "## Protocol",

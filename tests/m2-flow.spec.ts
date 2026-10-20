@@ -27,7 +27,9 @@ describe('M2: model to chip spec', () => {
     const invalidated = (await client.call('events.list', { kind: 'approval.invalidated' })).events.map((e) => e.payload.approval)
     expect(invalidated).toEqual(expect.arrayContaining([g1.id, g2.id]))
     // The old chip spec does not follow the new numeric spec.
-    const stale = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec: out(q8, 'spec'), ppa: out(design, 'ppa') })
-    expect(await judge('arch.spec', stale)).toMatchObject({ verdict: 'fail', reasons: [{ code: 'CRITERION_FAILED', params: { metric: 'numeric_spec_matches' } }] })
+    const stale = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec: out(q8, 'spec'), ppa: out(design, 'ppa'), weights: out(q8, 'weights') })
+    const verdict = await judge('arch.spec', stale)
+    expect(verdict.verdict).toBe('fail')
+    expect(verdict.reasons).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'CRITERION_FAILED', params: expect.objectContaining({ metric: 'numeric_spec_matches' }) })]))
   })
 })

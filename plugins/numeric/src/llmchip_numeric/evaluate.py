@@ -7,6 +7,7 @@ import math
 import numpy as np
 from llmchip_model import Model, Tokenizer
 
+from .arith import modes_of
 from .l2 import L2Model
 
 
@@ -96,8 +97,8 @@ def scheme(spec: dict) -> dict:
         "groupSize": w["groupSize"],
         "accumulatorBits": spec["accumulator"]["bits"],
         "accumulatorCanOverflow": spec["accumulator"].get("canOverflow", False),
-        "rounding": spec.get("rounding", {}).get("mode", "half-up"),
-        "overflow": spec.get("overflow", {}).get("mode", "saturate"),
+        "rounding": modes_of(spec)[0],
+        "overflow": modes_of(spec)[1],
         "perLayer": spec["activations"].get("granularity") == "layer",
         "residualBits": spec["activations"].get("bits", {}).get("x", 16),
     }

@@ -36,7 +36,7 @@ def test_tokenizer_port_equals_the_model_tokenizer():
 
 
 def log_record(rid, pos, token_in, token_out, nxt, groups):
-    words = [0x53544550, rid, pos, token_in, token_out, nxt, 100, 0, 0, len(groups)]
+    words = [0x53544550, rid, pos, token_in, token_out, nxt, 100, 0, 0, 90, len(groups)]
     for point, layer, start, values in groups:
         words += [point, layer, len(values), start, *values]
     return struct.pack(f"<{len(words)}i", *words)

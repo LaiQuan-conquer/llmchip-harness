@@ -9,9 +9,10 @@ import { PROCESSES, projectIdFor, startFromWeights, type ProcessId, type StepSta
 import { S0Detail } from './steps/S0.tsx'
 import { S1Detail } from './steps/S1.tsx'
 import { S2Detail } from './steps/S2.tsx'
+import { S3Detail } from './steps/S3.tsx'
 
 /** Stages with a detailed demo view. */
-const DETAILS: Record<string, (props: { project: string; onBack(): void; onProject(project: string): void }) => React.JSX.Element> = { S0: S0Detail, S1: S1Detail, S2: S2Detail }
+const DETAILS: Record<string, (props: { project: string; onBack(): void; onProject(project: string): void }) => React.JSX.Element> = { S0: S0Detail, S1: S1Detail, S2: S2Detail, S3: S3Detail }
 export const DETAIL_STAGES = Object.keys(DETAILS)
 
 type StepState = 'pending' | 'active' | 'running' | 'done' | 'attention' | 'notImplemented'

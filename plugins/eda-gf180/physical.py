@@ -126,12 +126,16 @@ def pad_plan(chip: dict, power_pairs: int) -> dict:
 def chip_top(plan: dict) -> str:
     """The padded top: gf180mcu_fd_io__in_c for inputs, bi_t for outputs (enabled by
     the chip's bus enable where the pin has one; strongest drive, fast slew, so the
-    board load meets the pad's transition limit), dvdd/dvss for the supplies."""
+    board load meets the pad's transition limit) and for bidirectional pins (output
+    enable from the chip, input enabled only while the pad does not drive: the pad's
+    A -> PAD timing arcs exist only with IE low, so a tied IE would leave the output
+    untimed), dvdd/dvss for the supplies."""
     pp = "`ifdef USE_POWER_PINS\n    .DVDD(VDD), .DVSS(VSS), .VDD(VDD), .VSS(VSS),\n`endif\n"
     ports = ["`ifdef USE_POWER_PINS", "  inout wire VDD,", "  inout wire VSS,", "`endif"]
     # Directed ports, so STA sees each pad's off-chip side as an input or an output.
+    kinds = {"in": "input", "out": "output", "inout": "inout"}
     ports += [
-        f"  {'input' if p['dir'] == 'in' else 'output'} wire {p['pin']}{',' if k < len(plan['pads']) - 1 else ''}"
+        f"  {kinds[p['dir']]} wire {p['pin']}{',' if k < len(plan['pads']) - 1 else ''}"
         for k, p in enumerate(plan["pads"])
     ]
     lines = [
@@ -141,7 +145,12 @@ def chip_top(plan: dict) -> str:
         "module chip_top (",
         *ports,
         ");",
-        *[f"  wire c_{p['pin']};" for p in plan["pads"]],
+        *[
+            f"  wire c_{p['pin']}_o, c_{p['pin']}_oe, c_{p['pin']}_i;"
+            if p["dir"] == "inout"
+            else f"  wire c_{p['pin']};"
+            for p in plan["pads"]
+        ],
         "  wire c_kv_oe;",
     ]
     for p in plan["pads"]:
@@ -158,6 +167,18 @@ def chip_top(plan: dict) -> str:
                 "    .VDD(VDD), .VSS(VSS), .VNW(VDD), .VPW(VSS),\n`endif\n"
                 f"    .I(y_{p['pin']}), .Z(c_{p['pin']}));"
             )
+        elif p["dir"] == "inout":
+            lines.append(f"  wire y_{p['pin']};")
+            lines.append(
+                f"  (* keep *) {IO}__bi_t {p['inst']} (\n{pp}"
+                f"    .PAD({p['pin']}), .A(c_{p['pin']}_o), .OE(c_{p['pin']}_oe), .IE(~c_{p['pin']}_oe), .CS(1'b0),"
+                f" .SL(1'b0), .PU(1'b0), .PD(1'b0), .PDRV0(1'b1), .PDRV1(1'b1), .Y(y_{p['pin']}));"
+            )
+            lines.append(
+                f"  (* keep *) {SCL}__buf_4 b_{p['pin']} (\n`ifdef USE_POWER_PINS\n"
+                "    .VDD(VDD), .VSS(VSS), .VNW(VDD), .VPW(VSS),\n`endif\n"
+                f"    .I(y_{p['pin']}), .Z(c_{p['pin']}_i));"
+            )
         else:
             oe = "c_kv_oe" if p.get("enable") else "1'b1"
             lines.append(
@@ -169,7 +190,12 @@ def chip_top(plan: dict) -> str:
         cell = "dvdd" if s["dir"] == "power" else "dvss"
         pins = ".DVDD(VDD), .DVSS(VSS), .VSS(VSS)" if cell == "dvdd" else ".DVDD(VDD), .DVSS(VSS), .VDD(VDD), .VSS(VSS)"
         lines.append(f"  (* keep *) {IO}__{cell} {s['inst']} (\n`ifdef USE_POWER_PINS\n    {pins}\n`endif\n  );")
-    conns = ", ".join(f".{p['pin']}(c_{p['pin']})" for p in plan["pads"])
+    conns = ", ".join(
+        f".{p['pin']}_o(c_{p['pin']}_o), .{p['pin']}_oe(c_{p['pin']}_oe), .{p['pin']}_i(c_{p['pin']}_i)"
+        if p["dir"] == "inout"
+        else f".{p['pin']}(c_{p['pin']})"
+        for p in plan["pads"]
+    )
     lines += [f"  llmchip_chip u_chip ({conns}, .kv_oe(c_kv_oe));", "endmodule", ""]
     return "\n".join(lines)
 

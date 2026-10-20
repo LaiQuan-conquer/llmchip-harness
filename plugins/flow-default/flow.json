@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "stages": [
     {
       "id": "S0",
@@ -142,6 +142,7 @@
       "after": "S3",
       "members": [
         "numeric-spec",
+        "l2-weights",
         "chip-spec",
         "ppa-estimate"
       ],
@@ -334,7 +335,7 @@
     },
     {
       "id": "arch.spec",
-      "version": "1",
+      "version": "2",
       "title": "Chip spec follows the frozen numeric spec, covers every observation point and fits the area (G2)",
       "plugin": "arch-taalas",
       "handler": "verify_spec",
@@ -351,6 +352,11 @@
         },
         {
           "metric": "fits_area",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "cycles_match_model",
           "op": "==",
           "value": true
         }

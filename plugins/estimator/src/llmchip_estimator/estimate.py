@@ -268,9 +268,13 @@ def estimate(params: dict[str, Any], profile: dict[str, Any], library: dict[str,
             raise Missing("model structure (dim, hiddenDim, heads)", "provide the model structure")
         if act_location == "offchip":
             # Activations live in the external memory; on chip only the operand and
-            # accumulator registers of the datapath remain (one per MAC lane plus a working set).
-            bits = (2 * parallel + 8) * 2 * act_bits
+            # accumulator registers of the datapath remain (one per MAC lane plus a working set),
+            # and the operand buffers of the microarchitecture when it has them (exact bits).
+            buffers = int(params.get("onchipBufferBits", 0))
+            bits = (2 * parallel + 8) * 2 * act_bits + buffers
             what = f"working registers, activations off chip ({bits:,} bit in flip-flops)"
+            if buffers:
+                what = f"working registers and operand buffers ({bits:,} bit in flip-flops, {buffers:,} of buffers)"
         else:
             bits = (
                 6 * model["dim"] + 2 * model.get("hiddenDim", 4 * model["dim"]) + model["heads"] * context

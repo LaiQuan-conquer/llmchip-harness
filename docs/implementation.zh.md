@@ -6,7 +6,7 @@
 |---|---|
 | 文档版本 | v0.1 |
 | 日期 | 2026-10-19 |
-| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案 |
+| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项 |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.9 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -161,7 +161,7 @@ plugins/                   额外的插件搜索路径
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
 | `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2/G1 | `test_numeric.py`、`test_graph_l2.py` |
-| `arch-taalas` | process（Python） | `design`、`verify_spec` | S3/G2 | `test_arch.py` |
+| `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py` |
 | `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5/G3、S7、Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`、`constraints`、`implement`、`drc`、`lvs`、`sta` | M1.5、S6、S7 | `test_calibrate.py`、`test_physical.py` |
@@ -184,9 +184,9 @@ plugins/                   额外的插件搜索路径
   - 生成占位模型：采用某个规划模型的结构，固定种子，未训练，附带 `evalset-proxy`。
   - 提供 L0 FP32 参考，即 `run.c` 的 NumPy 移植。它与 `plugins/model-llama/upstream/` 中随仓库提供并编译的 `run.c` 对照检查。
 - **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（G1 证据），并附带评估集。舍入（`half-up`、`half-even`、`truncate`）、溢出处理（`saturate`、`wrap`）和累加器位宽（已证明不溢出的位宽，或更窄的位宽）是规格中的结构化字段，统一定义在 [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)；默认值得到的 L2 与引入这些选项之前逐位相同。`quantize_graph` / `evaluate_graph` 对任何已还原的计算图做同样的事（[graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py)，规格格式 `llmchip-numeric-graph-spec/1`）：这是对向量引擎无法实现的模型的分析，默认逐层确定小数位、残差流 24 位，由 `numeric.accuracy` 判定。在 llama2.c 计算图上，它与芯片 L2 逐位相同。
-- **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（G2 证据）。
+- **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（G2 证据）。它的速度不是公式：它编译出引擎的微码（`Compiled`），再用 [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py) 数周期。这是核心状态机和存储端口的逐状态模型，其忙碌周期与 RTL 仿真逐步相等（[performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py)；`verify_spec` 会重新计算，所以芯片规格不能声称另一个速度）。芯片规格的微架构选项有：通道数、`memoryInterface`（`spi`，或 `sqi`：四根双向线的四线 SPI）、`operandBuffers`（`none`；`attention`：注意力头的 q 和输出累加器，用循环移位寄存器实现；`all`：再加一个供矩阵乘和 RMSNorm 用的向量缓冲）。`explore` 计算所有组合（精确周期、估算面积、能否放下、帕累托前沿），也能按形状分析导入模型的计算图数值规格。
 - **rtl-taalas**：把数值规格编译成微码化向量引擎，产出一个确定性的 `rtl.bundle`。其中包含：
-  - Verilog 核心（数据放在片外 SPI SRAM），以及 SPI 主机接口；
+  - Verilog 核心（数据放在片外 SPI 或四线 SPI SRAM，可选片上操作数缓冲），以及 SPI 主机接口；
   - 生成为 case 表的 ROM，以及微码；
   - 带 SRAM 模型的 Verilator 测试平台，以及用于门级仿真的 `gl_tb.v`；
   - 指令级模拟器 `isa.py`。
@@ -453,6 +453,16 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 测试：`test_rounding_modes_match_exact_arithmetic`（与精确有理数比较），`plugins/rtl-taalas/tests/test_rtl.py` 中的 `test_isa_rules_are_the_numeric_spec_rules` 和 `test_every_numeric_scheme_compiles_to_the_same_bits_as_l2`，以及 `tests/numeric-schemes.spec.ts` 的 RTL 部分（Verilator 与 L2 对比，ALU 按该模式测试）。注意 Verilog 的有无符号：一个无符号操作数会让整个表达式变成无符号，`>>>` 变成逻辑移位（偶数舍入的第一版就因此在 9920 个随机 ALU 向量上出错）。
 
+### 5.3c 引擎的微架构选项
+
+示例：`memoryInterface: sqi`（[llmchip_sqimem.v](../plugins/rtl-taalas/src/llmchip_rtl/rtl/llmchip_sqimem.v)）。选项只改变周期和面积，不改变结果：
+
+1. 在 `Compiled(options)` 中接受它，并由 `_widths` 输出一个宏（列在 `bundle.py` 的 `flags` 中）；`arch-taalas` 把它作为 `design` / `explore` 的参数，写进芯片规格的 `dataflow`，`rtl-taalas generate` 从那里读取。
+2. 在 RTL 中用这个宏实现它，每个寄存器都有复位值；指令集和 L2 不变。
+3. 在 [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py) 中为它建周期模型：逐状态遍历（`fast=False`）逐个状态对应 RTL；长循环的闭式计算必须与之相等（`test_cycle_model_closed_form_equals_the_state_walk`）。
+4. 把它加入 [tests/arch-perf.spec.ts](../tests/arch-perf.spec.ts) 的 `OPTIONS`：RTL 每一步的忙碌周期必须等于芯片规格的预测，RTL 必须与 L2 一致。
+5. 实测它的面积：综合并在晶粒上做物理实现（`eda-gf180 implement`）。工艺库的面积估算不够（§7.2）。
+
 ### 5.4 内核 API 方法
 
 示例：`kernel.pause`（FR-AGT-23）。可以按以下各层追踪：
@@ -567,6 +577,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/model-import.spec.ts` | 导入真实 Hugging Face 布局的小 Qwen3，普查、按普查估算、图还原、L0、与 transformers 的全量测试；llama2.c 与 run.c 移植对拍；项目自带的占位模型权重；没有 config.json 的模型如实报告而不猜测 | FR-MDL-01/03/05/06 | 总是；需要 `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama（共享/不共享输出层）、带滑动窗口的 Mistral、Qwen2、Qwen3 与 transformers 对拍；llama2.c 与 run.c 移植对拍；重复存储的共享输出层；截断的文件；不支持的模型 | FR-MDL | 总是 |
 | `tests/kernel-footprint.spec.ts` | harnessd 启动时间与空闲 RSS | NFR-01（内核部分） | Linux |
+| `tests/arch-perf.spec.ts` | S3 的速度是精确的：占位模型在四种微架构选项下（SPI / SQI，缓冲 none / attention / all），RTL 每一步的忙碌周期逐位置等于芯片规格的预测，且 RTL 与 L2 一致 | FR-ARC-04/05、FR-EST-07 | 需 EDA 镜像（2026-10-20 用时 790 秒） |
 | `tests/numeric-schemes.spec.ts` | 任何已还原的计算图（小 Qwen3、从自身产物导入的占位模型）量化并评估 L2 对 L0，窄累加器确实溢出，判定 `numeric.accuracy`，向量引擎拒绝计算图规格；有 EDA 镜像时，把偶数舍入 / 回绕 / 24 位累加器方案从数值规格带到芯片规格，RTL 在指令级模拟器和 Verilator 中与 L2 一致，ALU 按这些模式测试 | FR-QNT、FR-RTL-01、FR-VER | 计算图部分总是运行；RTL 部分需 EDA 镜像（约 4 分钟） |
 | `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2 详细视图 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
 | `tests/containers.spec.ts` | 无网络、输入只读、取消时移除容器 | IF-3 | 需 `python:3.12-slim` 镜像 |
@@ -577,7 +588,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 ### 6.3 须显式开启的完整流程
 
-`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` 会运行物理工具。修改 `rtl-taalas`、`eda-gf180`、`packager` 或签核检查后都要运行它。2026-10-19 的结果：通过（1 个测试，2361 秒，约 39 分钟；WSL2 上的 Podman 3.4）。
+`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` 会运行物理工具。修改 `rtl-taalas`、`eda-gf180`、`packager` 或签核检查后都要运行它。2026-10-20 在四线 SPI 设计上的结果：通过（1 个测试，2132 秒，约 36 分钟；WSL2 上的 Podman 3.4）。
 
 ---
 
@@ -611,6 +622,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **CLI**：审批、豁免、去密、导出、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
 - **TypeScript 插件 SDK** 没有自己的测试，只通过 `stub-tool` 间接覆盖。
 - **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S8 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
+- **S3 的速度和面积**（参考模型的占位模型，三值，2 条通道，8 MHz，2026-10-20 实测）：旧公式给出 10.1 tok/s；旧设计（SPI、无缓冲）的精确周期是每 token 1,024,601，即 7.8 tok/s。四线 SPI 为 352,505 个周期、22.7 tok/s（2.9 倍）；加注意力缓冲 34.6 tok/s；全部缓冲 43.8 tok/s。即便用四线 SPI，仍有 77.7% 的周期在等片外存储。在 1.2 × 2 mm 晶粒上只有“四线 SPI、无缓冲”能放下：综合出的单元面积 287k µm²，核心区 497k µm²。布局已到极限，而且对密度设置不单调：同一网表在 70% 和 85% 时放下并满足时序（建立时间余量 +22 ns，约 9.7 MHz 也能满足），在 75% 和 80% 时详细布局失败；预流片取 70%（`PRERUN.placementDensityPct`）。旧的 SPI 设计在原来的 62% 时也已无法布线。加注意力缓冲（332k µm²）或全部缓冲（398k µm²）在试过的每个密度（62–85%）下详细布局都失败；把两条通道改成一条也无法布线。四线 SPI 的焊盘是双向 `bi_t` 单元，只在不驱动时打开输入（IE = ¬OE）：焊盘库只在 IE 为低时定义 A → PAD 的时序弧，IE 固定为高时输出方向不受时序约束，STA 报告这四个引脚未约束。门级仿真用的焊盘功能模型（`plugins/eda-gf180/sim/pads.v`）原先把 `bi_t` 的输入通路固定为 0，这只在没有双向引脚时成立；现在 IE 为高时它输出焊盘上的值。SDF 时序仿真的测试平台和流片包的测试计划按设计的实际引脚（SPI 或四线 SPI）描述片外存储。工艺库的面积估算看不出这一点：它的控制逻辑是 0.05 mm²（经验值），综合结果约 0.19 mm²；利用率取 0.7（经验值），实测 0.58 能放下、0.67 放不下。在用这些实现结果校准工艺库之前，`explore` 给出的“放得下”偏乐观；设计能否放下只能由 `eda-gf180 implement` 证明。
 - **数值分析结果**（int8、分组 32、四舍五入、饱和、逐层小数位、残差流 24 位；4 个提示 × 8 个 token、3 段文本；开发机，2026-10-19）：stories260K 困惑度 3.16 → 3.17，下一 token 一致率 98.6%，1 秒；SmolLM2-135M 12.64 → 12.76，94.3%，30 秒；Qwen3-0.6B 23.00 → 22.39，88.8%，136 秒；DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92，88.8%，584 秒。int4 时 SmolLM2 升到 22.6，Qwen3 升到 28.6。每类张量只用一个 16 位格式时 SmolLM2 会崩溃（困惑度约 290 万）：少数层的残差流值接近 20000。`numeric.accuracy` 要求下一 token 一致率 ≥ 0.9，Qwen3 和 DeepSeek 在 int8 时略差一点没有达到。
 - **分析检查不通过也会开事故单**，与所有不通过的检查一样（FR-VER-06），所以在 S2 试验台上尝试较差的方案会让事故列表变长。
 

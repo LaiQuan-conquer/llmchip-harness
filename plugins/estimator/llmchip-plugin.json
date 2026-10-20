@@ -156,6 +156,11 @@
             "default": "onchip",
             "description": "offchip: activations live in the external memory with the KV cache."
           },
+          "onchipBufferBits": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Operand buffers of the microarchitecture kept on chip in flip-flops (arch-taalas gives the exact count)."
+          },
           "weightStorage": {
             "type": "string",
             "description": "Implementation library entry storing the weights."

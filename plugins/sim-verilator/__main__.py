@@ -194,12 +194,20 @@ class Verification:
         lengths = [len(self.trace[f"{k}.tokens"]) for k in keys]
         cycles = [r["cycles"] for r in records]
         self.step_cycles = int(np.median(cycles)) if cycles else None
+        # Cycles the core is busy per step (without the host's SPI frames): they depend on the
+        # position only, which S3's cycle-exact model predicts (llmchip_rtl.perf).
+        busy: dict[int, set] = {}
+        for r in records:
+            busy.setdefault(int(r["pos"]), set()).add(int(r.get("busyCycles", 0)))
         metrics |= {
             "regression_prompts": len(keys),
             "tokens_per_prompt": min(lengths) if lengths else 0,
             "regression_cycles": int(sum(cycles)),
             "cycles_per_token": self.step_cycles or 0,
+            "busy_cycles_per_token": int(np.median([r.get("busyCycles", 0) for r in records])) if records else 0,
+            "busy_cycles_data_dependent": any(len(v) > 1 for v in busy.values()),
         }
+        details = (details or {}) | {"busyCyclesByPosition": {p: min(v) for p, v in sorted(busy.items())}}
         return status, metrics, details
 
     def directed_reset_mid_inference(self, item: dict) -> tuple:
@@ -610,6 +618,8 @@ def sdfsim(ctx: InvokeContext) -> Result:
         "sdf.vvp",
         f"-DPERIOD={period}",
         f'-DSDF_FILE="{sdf}"',
+        # The memory pins of the padded top: quad SPI when it has kv_sio0.
+        *(["-DMEM_SQI"] if re.search(r"\bkv_sio0\b", text.split(";", 1)[0]) else []),
         str(HERE / "sdf_tb.v"),
         str(netlist),
         str(layout / models["pads"]),

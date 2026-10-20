@@ -20,6 +20,28 @@ import numpy as np
 
 from .isa import FLAG_DEBUG, FLAG_POS, FLAG_SAT32, POINTS, decode, encode
 
+FLAG_VB = 4  # MATVEC: the input is already in the vector buffer (operand buffers only; see perf.py)
+BUFFER_PARTS = ("vector", "q", "acc")
+# The choices of the chip spec: none, the attention buffers (q and the output accumulators), all.
+BUFFER_CHOICES = {"none": (), "attention": ("q", "acc"), "all": BUFFER_PARTS}
+
+
+def buffer_parts(value) -> tuple[str, ...]:
+    """The operand buffer parts of an option value: a choice name, true (all), false (none) or a list."""
+    if isinstance(value, str):
+        if value not in BUFFER_CHOICES:
+            raise ValueError(f"unknown operand buffers {value}")
+        return BUFFER_CHOICES[value]
+    if value is True:
+        return BUFFER_PARTS
+    if not value:
+        return ()
+    unknown = set(value) - set(BUFFER_PARTS)
+    if unknown:
+        raise ValueError(f"unknown operand buffer parts {sorted(unknown)}")
+    return tuple(p for p in BUFFER_PARTS if p in value)
+
+
 MAPPING_RULE = "lanes-interleaved/1"
 MATRICES = ("wq", "wk", "wv", "wo", "w1", "w3", "w2")
 
@@ -57,14 +79,26 @@ def rom_hash(a: np.ndarray) -> str:
 class Compiled:
     """ROM images, programs and layout of one design."""
 
-    def __init__(self, spec: dict, arrays: dict[str, np.ndarray], lanes: int) -> None:
+    def __init__(self, spec: dict, arrays: dict[str, np.ndarray], lanes: int, options: dict | None = None) -> None:
+        """`options` are the microarchitecture choices of the chip spec (`dataflow`):
+        `operandBuffers` (the on-chip buffer parts: "vector", "q", "acc"; true means all) and
+        `memoryInterface` (`spi` or `sqi`); they change the cycles, never the results."""
+        options = options or {}
+        self.buffer_parts = buffer_parts(options.get("operandBuffers", False))
+        self.operand_buffers = bool(self.buffer_parts)
+        self.memory_interface = options.get("memoryInterface", "spi")
+        if self.memory_interface not in ("spi", "sqi"):
+            raise ValueError(f"unknown memory interface {self.memory_interface}")
         if lanes < 1 or lanes & (lanes - 1):
             raise ValueError("lanes must be a power of two")
         self.spec, self.lanes = spec, lanes
         c = spec["model"]["config"]
         self.cfg = c
         dim, hidden, layers, vocab = c["dim"], c["hidden_dim"], c["n_layers"], c["vocab_size"]
-        hs = dim // c["n_heads"]
+        # Head dim: dim / heads in the llama2.c structure; a model of other proportions (an
+        # analysis of an imported model, `shape`) gives it, and q / att are heads x hs long.
+        hs = c.get("head_size") or dim // c["n_heads"]
+        qdim = c["n_heads"] * hs
         kv_dim = c["n_kv_heads"] * hs
         ctx = spec["context"]["maxTokens"]
         group = spec["weights"]["groupSize"]
@@ -74,7 +108,7 @@ class Compiled:
         self.wbits = spec["weights"]["storageBits"]
         self.context = ctx
         # Rounding, overflow and accumulator width of the numeric spec (defaults: today's behavior).
-        self.rounding = spec.get("rounding", {}).get("mode", "half-up")
+        self.rounding = str(spec.get("rounding", {}).get("mode", "half-up")).removeprefix("round-")
         self.overflow = spec.get("overflow", {}).get("mode", "saturate")
         acc_spec = spec["accumulator"]
         self.acc_bits = acc_spec["bits"] if acc_spec.get("canOverflow") else None
@@ -89,23 +123,40 @@ class Compiled:
             + ([] if c["shared_classifier"] else ["cls"])
             + [f"{layer}.{m}" for layer in range(layers) for m in MATRICES]
         )
+        shapes = {"emb": (vocab, dim), "cls": (vocab, dim), "wq": (qdim, dim), "wk": (kv_dim, dim)}
+        shapes |= {
+            "wv": (kv_dim, dim),
+            "wo": (dim, qdim),
+            "w1": (hidden, dim),
+            "w3": (hidden, dim),
+            "w2": (dim, hidden),
+        }
+        self.shape_only = arrays is None
+        self.limits: list[str] = []  # bounds a shape analysis exceeds (`_limit`)
         for name in names:
-            q, m = arrays[f"{name}.q"], arrays[f"{name}.m"]
-            words, scales = map_matrix(q, m, lanes)
+            if self.shape_only:
+                # Only the program is wanted (cycles do not depend on the ROM contents).
+                out, inp = shapes[name.split(".")[-1]]
+                ngroups = -(-inp // group)
+                nwords, nscales = -(-out // lanes) * inp, -(-out // lanes) * ngroups
+            else:
+                q, m = arrays[f"{name}.q"], arrays[f"{name}.m"]
+                words, scales = map_matrix(q, m, lanes)
+                out, inp, ngroups, nwords, nscales = q.shape[0], q.shape[1], m.shape[1], len(words), len(scales)
+                wrom.append(words)
+                srom.append(scales)
             self.matrices[name] = {
                 "wbase": wptr,
                 "sbase": sptr,
-                "out": q.shape[0],
-                "in": q.shape[1],
-                "ngroups": m.shape[1],
-                "words": len(words),
+                "out": out,
+                "in": inp,
+                "ngroups": ngroups,
+                "words": nwords,
             }
-            wrom.append(words)
-            srom.append(scales)
-            wptr += len(words)
-            sptr += len(scales)
-        self.wrom = np.concatenate(wrom)
-        self.srom = np.concatenate(srom)
+            wptr += nwords
+            sptr += nscales
+        self.wrom = np.concatenate(wrom) if wrom else np.zeros((0, lanes), np.int64)
+        self.srom = np.concatenate(srom) if srom else np.zeros((0, lanes), np.int64)
 
         # Constant ROM.
         crom: list[int] = []
@@ -116,12 +167,20 @@ class Compiled:
             crom.extend(int(v) for v in values.ravel())
             return self.consts[name]
 
+        sizes = {"rms_att": dim, "rms_ffn": dim, "rms_final": dim, "lut.rsqrt": 192, "lut.exp": 512}
+        sizes |= {"lut.sigmoid": 256, "lut.rope_cos": ctx * (hs // 2), "lut.rope_sin": ctx * (hs // 2)}
+
+        def array(name: str) -> np.ndarray:
+            if self.shape_only:
+                return np.zeros(sizes[name.split(".", 1)[1] if name[0].isdigit() else name], np.int64)
+            return arrays[name]
+
         for layer in range(layers):
-            put(f"{layer}.rms_att", arrays[f"{layer}.rms_att"])
-            put(f"{layer}.rms_ffn", arrays[f"{layer}.rms_ffn"])
-        put("rms_final", arrays["rms_final"])
+            put(f"{layer}.rms_att", array(f"{layer}.rms_att"))
+            put(f"{layer}.rms_ffn", array(f"{layer}.rms_ffn"))
+        put("rms_final", array("rms_final"))
         for lut in ("rsqrt", "exp", "sigmoid", "rope_cos", "rope_sin"):
-            put(f"lut.{lut}", arrays[f"lut.{lut}"])
+            put(f"lut.{lut}", array(f"lut.{lut}"))
         self.crom = np.array(crom, np.int64)
 
         # Data memory layout (words of 32 bits).
@@ -130,8 +189,8 @@ class Compiled:
         for name, size in (
             ("x", dim),
             ("xn", dim),
-            ("q", dim),
-            ("att", dim),
+            ("q", qdim),
+            ("att", qdim),
             ("y", dim),
             ("h1", hidden),
             ("h3", hidden),
@@ -164,7 +223,7 @@ class Compiled:
                     mtx["sbase"],
                     group,
                     mtx["ngroups"],
-                    f_in + exps[name] - f_out,
+                    f_in + exps.get(name, 0) - f_out,
                     flags,
                     stride,
                 ],
@@ -199,7 +258,8 @@ class Compiled:
             (
                 "embedding",
                 encode(
-                    "EMB", [layout["x"], dim, emb["wbase"], emb["sbase"], group, emb["ngroups"], exps["emb"] - f["x"]]
+                    "EMB",
+                    [layout["x"], dim, emb["wbase"], emb["sbase"], group, emb["ngroups"], exps.get("emb", 0) - f["x"]],
                 ),
             )
         )
@@ -214,7 +274,7 @@ class Compiled:
                 (
                     f"layer {layer} rope q",
                     encode(
-                        "ROPE", [layout["q"], dim, hs, self.consts["lut.rope_cos"], self.consts["lut.rope_sin"], 0, 0]
+                        "ROPE", [layout["q"], qdim, hs, self.consts["lut.rope_cos"], self.consts["lut.rope_sin"], 0, 0]
                     ),
                 ),
                 (
@@ -316,10 +376,84 @@ class Compiled:
             )
             top += fields[1]
         self.dmem_words = top
+        if "vector" in self.buffer_parts:
+            self._mark_buffered_inputs(final)
         self.program = [encode(op, fields) for _, op, fields in final]
         self.descriptions = [desc for desc, _, _ in final]
         self.debug_map = [t["layer"] for t in self.trace_map if t["debug"]]
         self.widths = self._widths(final, arrays, group)
+
+    def _limit(self, message: str) -> None:
+        """A bound the engine does not meet: an error for a design, a finding for a shape analysis."""
+        if not self.shape_only:
+            raise ValueError(message)
+        self.limits.append(message)
+
+    @classmethod
+    def for_shape(cls, shape: dict, numeric: dict, lanes: int, options: dict | None = None) -> Compiled:
+        """The program of the engine for a model of the given shape (dim, hidden_dim, n_layers,
+        n_heads, n_kv_heads, head_size, vocab_size, shared_classifier) and numeric choices
+        (weight levels, group size, context), without ROM contents: the cycles of a model the
+        engine does not implement as such (an analysis of an imported model)."""
+        spec = {
+            "model": {"config": shape},
+            "context": {"maxTokens": numeric["context"]},
+            "weights": {
+                "groupSize": numeric["groupSize"],
+                "storageBits": numeric["storageBits"],
+                "levels": numeric["levels"],
+                "exponents": {},
+            },
+            "activations": {"frac": dict.fromkeys(("x", "xn", "q", "k", "v", "h1", "h3", "g"), 8)},
+            "normWeights": {"frac": 8},
+            "logits": {"frac": 16},
+            "scores": {"frac": 10},
+            "accumulator": {"bits": 48, "canOverflow": False},
+        }
+        spec["model"]["config"] = {"norm_eps": 1e-5, "shared_classifier": True} | shape
+        return cls(spec, None, lanes, options)
+
+    @property
+    def params(self) -> dict:
+        """The design parameters (llmchip_params.vh): sizes, widths and options."""
+        return {
+            "LANES": self.lanes,
+            "LANES_LOG2": self.lanes.bit_length() - 1,
+            "WBITS": self.wbits,
+            "CTX": self.context,
+            "VOCAB": self.cfg["vocab_size"],
+            **self.widths,
+            "NPROG": len(self.program),
+            "NDMEM": self.dmem_words,
+        }
+
+    @staticmethod
+    def _mark_buffered_inputs(program: list[tuple[str, str, list[int]]]) -> None:
+        """Sets FLAG_VB on every MATVEC whose input is already in the vector buffer: after an
+        RMS (its output stays there) or a MATVEC with the same input, unless something wrote
+        that vector in between. ATTN uses the buffer for q, so it leaves nothing usable."""
+        held: tuple[int, int] | None = None  # (address, words) of the vector in the buffer
+
+        def overlaps(span: tuple[int, int, int] | None, vec: tuple[int, int] | None) -> bool:
+            if not span or not vec:
+                return False
+            addr, n, stride = span
+            end = addr + n if not stride else 1 << 62  # a strided output may land anywhere above
+            return addr < vec[0] + vec[1] and vec[0] < end
+
+        for _desc, op, f in program:
+            hit = op == "MATVEC" and held is not None and f[0] == held[0] and f[2] <= held[1]
+            if hit:
+                f[9] |= FLAG_VB
+            written = Compiled._destinations([("", encode(op, f))]).get(0)
+            if overlaps(written, held):
+                held = None
+            if op == "MATVEC" and not hit:
+                held = None if overlaps(written, (f[0], f[2])) else (f[0], f[2])  # loaded by the first block
+            elif op == "RMS":
+                held = (f[1], f[2])
+            elif op == "ATTN":
+                held = None
 
     @staticmethod
     def _destinations(program) -> dict[int, tuple[int, int, int]]:
@@ -351,9 +485,12 @@ class Compiled:
             return max(int(abs(int(v))).bit_length() + 1, 2)
 
         x16, _x32 = 2**15, 2**31
-        qmax = int(np.abs(self.wrom).max()) if self.wrom.size else 1
-        mmax = int(self.srom.max()) if self.srom.size else 1
-        cmax = int(np.abs(self.crom).max()) if self.crom.size else 1
+        if self.shape_only:  # worst cases of the formats instead of the contents
+            qmax, mmax, cmax = int(self.spec["weights"]["levels"][1]), 32767, 2**15
+        else:
+            qmax = int(np.abs(self.wrom).max()) if self.wrom.size else 1
+            mmax = int(self.srom.max()) if self.srom.size else 1
+            cmax = int(np.abs(self.crom).max()) if self.crom.size else 1
         ctx = self.context
         acc = tot = 2
         dw = 2**34  # max - s of two 32-bit scores needs 34 bits
@@ -381,7 +518,7 @@ class Compiled:
                 dw = max(dw, hs * x16 * x16 * scale * 2 ** max(-f[8], 0), ctx * cmax, cmax * 2**15, x16 * x16)
                 b_operands.append(scale)
                 if ctx * cmax >= 2**31:
-                    raise ValueError("the attention exp sum does not fit the 32-bit divisor")
+                    self._limit("the attention exp sum does not fit the 32-bit divisor")
             elif op == "SILU":
                 dw = max(dw, x16 * cmax, (x16 * cmax // 2**15 + 1) * x16 * 2 ** max(-f[6], 0))
             elif op == "TRACE":
@@ -406,9 +543,9 @@ class Compiled:
             if op in ("EMB", "MATVEC", "RMS", "ATTN", "SILU") and not min(shifts) >= -128 and max(shifts) < 64:
                 raise ValueError("a shift is outside the 8-bit shift field")
         if max(b_operands) >= 2**17:
-            raise ValueError(f"a multiplier operand needs more than 18 bits: {max(b_operands)}")
+            self._limit(f"a multiplier operand needs more than 18 bits: {max(b_operands)}")
         if sbits(cmax) > 18:
-            raise ValueError("constants need more than 18 bits")
+            self._limit("constants need more than 18 bits")
         widths = {
             "DW": sbits(dw) + 1,
             "ACCW": sbits(acc),
@@ -436,8 +573,26 @@ class Compiled:
         dims = [self.cfg[k] for k in ("dim", "hidden_dim", "vocab_size")] + [self.context, 2 * self.lanes]
         widths["IW"] = max(dims).bit_length() + 1
         if widths["AW"] > 22:
-            raise ValueError("the data memory exceeds the 24-bit byte address of the SPI memory")
+            self._limit("the data memory exceeds the 24-bit byte address of the external SRAM")
         widths["SRAM_BYTES"] = max(1024, 1 << (4 * self.dmem_words - 1).bit_length())
+        # Microarchitecture options: the vector buffer holds the longest vector an operation
+        # reads through it (MATVEC inputs, RMS vectors, a head of q); one accumulator per head dim.
+        parts = self.buffer_parts
+        widths["OPBUF_VEC"] = int("vector" in parts)
+        widths["OPBUF_Q"] = int("q" in parts)
+        widths["OPBUF_ACC"] = int("acc" in parts)
+        widths["MEM_SQI"] = int(self.memory_interface == "sqi")
+        heads = [f[6] for _, op, f in program if op == "ATTN"]
+        if "vector" in parts:
+            widths["VBN"] = max(f[2] for _, op, f in program if op in ("MATVEC", "RMS"))
+        if "q" in parts or "acc" in parts:
+            # The rotating registers return to their start after exactly hs uses.
+            if len(set(heads)) != 1:
+                raise ValueError("the attention buffers need one head size")
+            widths["HSN"] = heads[0]
+        if "acc" in parts:
+            # Attention output accumulators: sum over the context of p (at most 2^15) times v (int16).
+            widths["OACCW"] = sbits(self.context * 2**15 * 2**15)
         return widths
 
     def unmap(self) -> dict[str, np.ndarray]:

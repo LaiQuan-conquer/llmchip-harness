@@ -22,7 +22,7 @@ import { projectIdFor, recoverGraph, runScheme, startFromWeights, type ProcessId
 
 const GATES = ['G0', 'G1', 'G2', 'G3', 'G4']
 const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 }
-const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2 }
+const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2, memoryInterface: 'sqi', operandBuffers: 'none', placementDensityPct: 70 }
 
 const { values } = parseArgs({
   options: {
@@ -131,11 +131,11 @@ try {
   // S3 / G2: chip spec on the 1.2 x 2 mm prerun die.
   await enter('S3')
   const l2 = await run('numeric', 'infer', { spec, weights, tokenizer, evalset })
-  const design = await run('arch-taalas', 'design', { spec, weights, profile, library }, { weightStorage: 'gf180mcu.stdcell-rom', parallelMacs: PRERUN.parallelMacs, clockMHz: PRERUN.clockMHz, die: PRERUN.die, targetAreaMm2: 2.4 })
+  const design = await run('arch-taalas', 'design', { spec, weights, profile, library }, { weightStorage: 'gf180mcu.stdcell-rom', parallelMacs: PRERUN.parallelMacs, clockMHz: PRERUN.clockMHz, die: PRERUN.die, targetAreaMm2: 2.4, memoryInterface: PRERUN.memoryInterface, operandBuffers: PRERUN.operandBuffers })
   const chip = out(design, 'chip')
   await bind('chip-spec', chip)
   await bind('ppa-estimate', out(design, 'ppa'))
-  await judge('arch.spec', await run('arch-taalas', 'verify_spec', { chip, spec, ppa: out(design, 'ppa') }))
+  await judge('arch.spec', await run('arch-taalas', 'verify_spec', { chip, spec, ppa: out(design, 'ppa'), weights }))
   if (!(await approve('G2'))) process.exit(0)
 
   // S4: storage calibration admits the stage; RTL, its ISA check and lint.
@@ -163,7 +163,7 @@ try {
   await enter('S6')
   const sdc = out(await run('eda-gf180', 'constraints', { chip }), 'constraints')
   const registry = await upload(JSON.stringify({ format: 'llmchip-timing-exceptions/1', exceptions: [] }), 'timing.exceptions', 'application/json')
-  const impl = await run('eda-gf180', 'implement', { rtl, chip, constraints: sdc })
+  const impl = await run('eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: PRERUN.placementDensityPct })
   const layout = out(impl, 'layout')
   const gds = out(impl, 'gds')
 

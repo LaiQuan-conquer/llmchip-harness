@@ -10,7 +10,7 @@ import pytest
 from llmchip_model import Tokenizer, load_llama2c
 from llmchip_model.evalset import load_evalset
 from llmchip_numeric import L2Model, arith, build
-from llmchip_rtl import isa
+from llmchip_rtl import isa, perf
 from llmchip_rtl.bundle import bundle_files, write_tar
 from llmchip_rtl.compiler import Compiled, map_matrix, unmap_matrix
 
@@ -190,6 +190,7 @@ def test_bundle_is_deterministic_and_self_contained(setup, tmp_path):
         params = tar.extractfile("bundle/rtl/llmchip_params.vh").read().decode()
     for name in (
         "isa.py",
+        "perf.py",
         "isa-image.npz",
         "rtl/llmchip_core.v",
         "rtl/llmchip_chip.v",
@@ -201,3 +202,51 @@ def test_bundle_is_deterministic_and_self_contained(setup, tmp_path):
         assert f"bundle/{name}" in names
     assert design["source"] == source
     assert f"`define VOCAB {design['model']['vocab_size']}" in params
+
+
+@pytest.mark.parametrize("buffers", ["none", "attention", "all"])
+@pytest.mark.parametrize("memory", ["spi", "sqi"])
+def test_cycle_model_closed_form_equals_the_state_walk(setup, buffers, memory):
+    """perf.py counts long loops in closed form; it must equal walking every state of the core.
+    (tests/arch-perf.spec.ts checks the state walk against the RTL simulation.)"""
+    l2, *_ = setup
+    c = Compiled(l2.spec, l2.a, 4, {"operandBuffers": buffers, "memoryInterface": memory})
+    for pos in (0, 1, 13, c.context - 1):
+        for mode in (0, perf.MODE_POINTS, perf.MODE_POINTS | perf.MODE_DEBUG):
+            fast = perf.step_cycles(c.program, c.params, pos, mode, fast=True)
+            slow = perf.step_cycles(c.program, c.params, pos, mode, fast=False)
+            assert [o.total for o in fast.ops] == [o.total for o in slow.ops], (pos, mode)
+
+
+def test_options_change_the_cycles_not_the_results(setup):
+    l2, tok, evalset, _ = setup
+    base = Compiled(l2.spec, l2.a, 2)
+    cycles = {}
+    for buffers in ("none", "attention", "all"):
+        for memory in ("spi", "sqi"):
+            c = Compiled(l2.spec, l2.a, 2, {"operandBuffers": buffers, "memoryInterface": memory})
+            assert c.wrom.tolist() == base.wrom.tolist()  # same ROMs
+            p = c.params
+            assert (p["OPBUF_Q"], p["OPBUF_ACC"], p["OPBUF_VEC"]) == (
+                int(buffers != "none"),
+                int(buffers != "none"),
+                int(buffers == "all"),
+            )
+            assert p["MEM_SQI"] == int(memory == "sqi")
+            if buffers != "none":
+                assert p["HSN"] == l2.spec["model"]["config"]["dim"] // l2.spec["model"]["config"]["n_heads"]
+                assert p["OACCW"] < p["DW"]  # proven narrower than the datapath
+            assert_isa_equals_l2(l2, tok, evalset["prompts"][:1], c, 8)
+            cycles[buffers, memory] = perf.step_cycles(c.program, p, 31, 0).total
+    assert cycles["none", "sqi"] < cycles["none", "spi"]
+    assert cycles["attention", "sqi"] < cycles["none", "sqi"]
+    assert cycles["all", "sqi"] < cycles["attention", "sqi"]
+
+
+def test_a_model_shape_compiles_without_weights():
+    shape = dict(dim=1024, hidden_dim=3072, n_layers=28, n_heads=16, n_kv_heads=8, head_size=128, vocab_size=151936)
+    numeric = {"context": 256, "groupSize": 32, "storageBits": 8, "levels": [-127, 127]}
+    c = Compiled.for_shape(shape | {"shared_classifier": True}, numeric, 8, {"memoryInterface": "sqi"})
+    assert c.layout["att"] - c.layout["q"] == 16 * 128  # q is heads x head size, not dim
+    assert any("24-bit" in limit for limit in c.limits)  # its working data does not fit a serial SRAM
+    assert perf.step_cycles(c.program, c.params, 1, 0).total > perf.step_cycles(c.program, c.params, 0, 0).total

@@ -17,7 +17,14 @@
 //
 // Area: one sequential multiplier/divider, one shift-and-saturate unit, one
 // address adder and one accumulator adder are shared by all operations; only
-// the L weight lanes of MATVEC run in parallel. Instruction fields are used
+// the L weight lanes of MATVEC run in parallel.
+//
+// Operand buffers, in three parts: a vector buffer `vb` keeps one int16 vector on
+// chip, the MATVEC input after its first block of rows and the RMS input and output
+// (OPBUF_VEC) and the q of the attention head (OPBUF_Q); `oacc` holds the head-dim
+// accumulators of the attention output (OPBUF_ACC). The external memory is then read
+// once per vector instead of once per use.
+// They change only when data is read, never a result (perf.py counts the cycles). Instruction fields are used
 // at the widths the generator proves sufficient (llmchip_params.vh), and no
 // value needs more than DW bits.
 `timescale 1ns/1ps
@@ -92,7 +99,8 @@ module llmchip_core (
     S_AT_EL0 = 44, S_AT_EL = 45, S_AT_EN = 46, S_AT_PL = 47, S_AT_PD = 48, S_AT_PW = 49, S_AT_PN = 50,
     S_AT_OP = 51, S_AT_OV = 52, S_AT_OM = 53, S_AT_OA = 54, S_AT_ON = 55,
     S_SI_A = 56, S_SI_B = 57, S_SI_C = 58, S_SI_D = 59, S_SI_W = 60,
-    S_ADD_A = 61, S_ADD_B = 62, S_ADD_W = 63, S_TR_0 = 64, S_TR_L = 65, S_TR_W = 66, S_AM_L = 67, S_AM_C = 68;
+    S_ADD_A = 61, S_ADD_B = 62, S_ADD_W = 63, S_TR_0 = 64, S_TR_L = 65, S_TR_W = 66, S_AM_L = 67, S_AM_C = 68,
+    S_AT_QL = 69, S_AT_QW = 70, S_AT_OS = 71;
 
   reg [6:0] state, ret;
   reg ldsel;    // destination of a load: 0 = ra, 1 = rb
@@ -119,6 +127,19 @@ module llmchip_core (
   // MATVEC lanes.
   reg signed [`ACCW-1:0] acc [0:L-1];
   reg signed [`TOTW-1:0] tot [0:L-1];
+  // Operand buffers: the MATVEC / RMS vector (OPBUF_VEC, indexed), and two rotating
+  // registers of head-dim entries that attention walks strictly in order, so they need
+  // no index multiplexers: the head's q (OPBUF_Q) and the output accumulators (OPBUF_ACC).
+  // Entry 0 is the current one; each use rotates the ring by one, hs uses return it.
+`ifdef OPBUF_VEC
+  reg signed [15:0] vb [0:`VBN-1];
+`endif
+`ifdef OPBUF_Q
+  reg signed [15:0] qr [0:`HSN-1];
+`endif
+`ifdef OPBUF_ACC
+  reg signed [`OACCW-1:0] oacc [0:`HSN-1];  // width proven by the generator
+`endif
 
   // Shared sequential multiplier (mp = ma * mb, mb signed BW bits) and divider (mp = ma / den).
   reg signed [DW-1:0] ma, mp;
@@ -157,6 +178,9 @@ module llmchip_core (
       S_RO_W1, S_RO_W2: begin post_in = s0_mp; post_sh = 8'sd14; end
       S_AT_SC: post_sh = S8;
       S_AT_OA: begin post_in = s0_mp; post_sh = 8'sd15; end
+`ifdef OPBUF_ACC
+      S_AT_OS: begin post_in = {{(DW - `OACCW){oacc[0][`OACCW-1]}}, oacc[0]}; post_sh = 8'sd15; end
+`endif
       S_SI_D:  post_sh = 8'sd15;
       S_SI_W:  post_sh = S6;
       S_ADD_W: begin post_in = (ra + rb) <<< 1; post_sh = 8'sd1; end  // rsh(2v, 1) = v
@@ -204,12 +228,16 @@ module llmchip_core (
       S_RMS_W, S_SI_B, S_ADD_B: begin ab = A1; ao = i; end
       S_RO_A, S_RO_W1, S_TR_L: begin ab = base; ao = i; end
       S_RO_B, S_RO_W2: begin ab = base; ao = i1; end
-      S_AT_Q:    begin ab = A0; ao = hoff + j; end
+      S_AT_Q, S_AT_QL: begin ab = A0; ao = hoff + j; end
       S_AT_K:    begin ab = kaddr; ao = j; end
       S_AT_SC, S_AT_EL0: begin ab = A10; ao = t; end
       S_AT_EL, S_AT_PL, S_AT_PW, S_AT_OP: begin ab = A10; ao = CTX + t; end
+`ifdef OPBUF_ACC
+      S_AT_OV:   begin ab = kaddr; ao = j; end
+`else
       S_AT_OV:   begin ab = kaddr; ao = 0; end
-      S_AT_OA:   begin ab = A3; ao = hoff + j; end
+`endif
+      S_AT_OA, S_AT_OS: begin ab = A3; ao = hoff + j; end
       S_SI_W:    begin ab = A2; ao = i; end
       S_TR_W:    begin ab = A6; ao = i; end
       default: ;
@@ -243,7 +271,12 @@ module llmchip_core (
       S_RMS_M2: begin mul_a = mp; mul_b = rr; end
       S_RO_0: begin mul_a = pos; mul_b = F2 >>> 1; end
       S_RO_S, S_RO_M4: mul_a = rb;
+`ifdef OPBUF_Q
+      S_AT_QK: begin mul_a = qr[0]; mul_b = rb; end
+      S_AT_OM: mul_b = rb;
+`else
       S_AT_QK, S_AT_OM: mul_b = rb;
+`endif
       S_AT_DOT: begin mul_a = s0_mp; mul_b = F7; end
       S_AT_SC: st_data = post32;
       S_AT_EL: st_data = cword;
@@ -296,6 +329,15 @@ module llmchip_core (
         acc[m] <= 0;
         tot[m] <= 0;
       end
+`ifdef OPBUF_VEC
+      for (m = 0; m < `VBN; m = m + 1) vb[m] <= 0;
+`endif
+`ifdef OPBUF_Q
+      for (m = 0; m < `HSN; m = m + 1) qr[m] <= 0;
+`endif
+`ifdef OPBUF_ACC
+      for (m = 0; m < `HSN; m = m + 1) oacc[m] <= 0;
+`endif
     end else begin
       done <= 1'b0;
       trace_start <= 1'b0;
@@ -422,9 +464,21 @@ module llmchip_core (
           lane <= 0;
           state <= S_MV_X;
         end
+`ifdef OPBUF_VEC
+        // After the first block of rows (or when the compiler knows it is there already,
+        // F9[2]), the input comes from the vector buffer; the first block fills it.
+        S_MV_X: if (obase != 0 || F9[2]) begin
+          ra <= {{16{vb[i][15]}}, vb[i]};
+          state <= S_MV_ACC;
+        end else `LOAD(1'b0, S_MV_ACC)
+`else
         S_MV_X: `LOAD(1'b0, S_MV_ACC)
+`endif
         S_MV_ACC: begin
           for (m = 0; m < L; m = m + 1) acc[m] <= acc_next[m];
+`ifdef OPBUF_VEC
+          if (obase == 0 && !F9[2]) vb[i] <= ra[15:0];
+`endif
           if (gi1 == N6 || i1 == N2) begin
             lane <= 0;
             state <= S_MV_SC;
@@ -469,7 +523,12 @@ module llmchip_core (
 
         // ---- RMS: v = sum(x^2) / n + eps; out = sat16(rsh(x * w * rsqrt[t], shift + e2 / 2)) ----
         S_RMS_SUM: `LOAD(1'b0, S_RMS_SQ)
-        S_RMS_SQ: `MUL(S_RMS_ACC)
+        S_RMS_SQ: begin
+`ifdef OPBUF_VEC
+          vb[i] <= ra[15:0];
+`endif
+          `MUL(S_RMS_ACC)
+        end
         S_RMS_ACC: begin
           s0 <= s0_mp;
           if (i1 == N2) `DIV(1'b1, S_RMS_NORM)
@@ -484,11 +543,21 @@ module llmchip_core (
           i <= 0;
           state <= S_RMS_X;
         end
+`ifdef OPBUF_VEC
+        S_RMS_X: begin
+          ra <= {{16{vb[i][15]}}, vb[i]};
+          state <= S_RMS_M1;
+        end
+`else
         S_RMS_X: `LOAD(1'b0, S_RMS_M1)
+`endif
         S_RMS_M1: `MUL(S_RMS_M2)
         S_RMS_M2: `MUL(S_RMS_W)
         S_RMS_W: begin
           `STORE((i1 == N2) ? S_NEXT : S_RMS_X)
+`ifdef OPBUF_VEC
+          vb[i] <= post16[15:0];  // the output (xn) stays in the buffer for the next MATVECs
+`endif
           i <= i1;
         end
 
@@ -532,12 +601,40 @@ module llmchip_core (
             j <= 0;
             s0 <= 0;
             kaddr <= A1 + kvh;
+`ifdef OPBUF_Q
+            state <= S_AT_QL;
+`else
             state <= S_AT_Q;
+`endif
           end
         end
+`ifdef OPBUF_Q
+        // q of the head into the vector buffer, once per head.
+        S_AT_QL: `LOAD(1'b0, S_AT_QW)
+        S_AT_QW: begin
+          // Shift in: after hs loads entry 0 holds q[0].
+          for (m = 0; m < `HSN - 1; m = m + 1) qr[m] <= qr[m + 1];
+          qr[`HSN-1] <= ra[15:0];
+          if (j1 == N6) begin
+            j <= 0;
+            state <= S_AT_K;
+          end else begin
+            j <= j1;
+            state <= S_AT_QL;
+          end
+        end
+`endif
         S_AT_Q: `LOAD(1'b0, S_AT_K)
         S_AT_K: `LOAD(1'b1, S_AT_QK)
+`ifdef OPBUF_Q
+        S_AT_QK: begin
+          `MUL(S_AT_DOT)
+          for (m = 0; m < `HSN - 1; m = m + 1) qr[m] <= qr[m + 1];
+          qr[`HSN-1] <= qr[0];
+        end
+`else
         S_AT_QK: `MUL(S_AT_DOT)
+`endif
         S_AT_DOT: begin
           s0 <= s0_mp;
           if (j1 == N6) begin
@@ -545,7 +642,11 @@ module llmchip_core (
             `MUL(S_AT_SC)
           end else begin
             j <= j1;
+`ifdef OPBUF_Q
+            state <= S_AT_K;
+`else
             state <= S_AT_Q;
+`endif
           end
         end
         S_AT_SC: begin
@@ -561,7 +662,11 @@ module llmchip_core (
           end else begin
             t <= t1;
             kaddr <= kaddr + A11;
+`ifdef OPBUF_Q
+            state <= S_AT_K;
+`else
             state <= S_AT_Q;
+`endif
           end
         end
         S_AT_EL0: `LOAD(1'b0, S_AT_EL)
@@ -588,6 +693,9 @@ module llmchip_core (
             s0 <= 0;
             vrow <= A2 + kvh;
             kaddr <= A2 + kvh;
+`ifdef OPBUF_ACC
+            for (m = 0; m < `HSN; m = m + 1) oacc[m] <= 0;
+`endif
             state <= S_AT_OP;
           end else begin
             t <= t1;
@@ -597,6 +705,26 @@ module llmchip_core (
         S_AT_OP: `LOAD(1'b0, S_AT_OV)
         S_AT_OV: `LOAD(1'b1, S_AT_OM)
         S_AT_OM: `MUL(S_AT_OA)
+`ifdef OPBUF_ACC
+        // Position outer, column inner: p[t] stays in ra while the V row is read in sequence.
+        S_AT_OA: begin
+          for (m = 0; m < `HSN - 1; m = m + 1) oacc[m] <= oacc[m + 1];
+          oacc[`HSN-1] <= oacc[0] + mp[`OACCW-1:0];
+          if (j1 == N6) begin
+            j <= 0;
+            if (t == pos) state <= S_AT_OS;
+            else begin
+              t <= t1;
+              kaddr <= kaddr + A11;
+              state <= S_AT_OP;
+            end
+          end else begin
+            j <= j1;
+            state <= S_AT_OV;
+          end
+        end
+        S_AT_OS: `STORE(S_AT_ON)
+`else
         S_AT_OA: begin
           if (t == pos) `STORE(S_AT_ON)
           else begin
@@ -606,6 +734,7 @@ module llmchip_core (
             state <= S_AT_OP;
           end
         end
+`endif
         S_AT_ON: begin
           s0 <= 0;
           t <= 0;
@@ -619,9 +748,15 @@ module llmchip_core (
             state <= S_AT_HEAD;
           end else begin
             j <= j1;
+`ifdef OPBUF_ACC
+            for (m = 0; m < `HSN - 1; m = m + 1) oacc[m] <= oacc[m + 1];
+            oacc[`HSN-1] <= oacc[0];
+            state <= S_AT_OS;
+`else
             vrow <= vrow + 1'b1;
             kaddr <= vrow + 1'b1;
             state <= S_AT_OP;
+`endif
           end
         end
 

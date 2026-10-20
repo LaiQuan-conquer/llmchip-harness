@@ -244,3 +244,20 @@ pre.content { max-height: 60vh; }
 .s2-bar { display: grid; grid-template-columns: 64px 1fr 64px; align-items: center; gap: 8px; }
 .s2-bar span { height: 10px; border-radius: 3px; background: var(--accent); min-width: 2px; }
 .s2-bar small:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* S3 detail: design space, cycle breakdown */
+.s3-scatter { width: 100%; max-width: 760px; height: auto; display: block; margin: 6px 0; }
+.s3-axis { font-size: 11px; fill: var(--muted); }
+.s3-dot { stroke: #fff; stroke-width: 1.5; }
+.s3-dot.pareto { fill: var(--ok); }
+.s3-dot.fits { fill: #8d99ae; }
+.s3-dot.nofit { fill: var(--bad); opacity: .6; }
+.s3-dot.chosen { stroke: #141a26; stroke-width: 2.5; }
+.s3-stack { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: #eef0f4; margin: 6px 0; }
+.s3-stack.small { height: 10px; min-width: 120px; margin: 0; }
+.s3-stack span { display: block; height: 100%; }
+.s3-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin: 2px 0 10px; }
+.s3-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.s3-barcell { width: 40%; }
+.s3-barcell span { display: block; height: 10px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+.s3-points td { vertical-align: middle; }

@@ -38,11 +38,13 @@ static bool vcd_on = false;
 
 static Vtb_top* top;
 static uint64_t cycle = 0;
+static uint64_t busy_cycles = 0;  // cycles with the core busy (what perf.py predicts)
 static FILE* out;
 static int mode = 1;
 static const int H = 4;  // host SPI half period in clock cycles (SCK = clk / 8)
 
 static void tick() {
+  if (top->busy) busy_cycles++;
   top->clk = 0;
   top->eval();
 #if VM_TRACE
@@ -109,7 +111,7 @@ struct Group {
 
 struct StepResult {
   int32_t token_out = 0, error = 0, timeout = 0;
-  uint64_t cycles = 0;
+  uint64_t cycles = 0, busy = 0;
   std::vector<Group> groups;
 };
 
@@ -123,7 +125,7 @@ static void reset_chip() {
 // Runs one step. reset_after > 0 resets the chip after that many cycles and returns early.
 static StepResult step(uint32_t token, uint32_t pos, uint64_t reset_after) {
   StepResult r;
-  uint64_t begin = cycle;
+  uint64_t begin = cycle, busy_begin = busy_cycles;
   std::map<int32_t, uint64_t> starts;  // TRACE op -> cycle its copy started
   host_start(token, pos, mode);
   for (int k = 0; k < 32 && !top->busy; k++) tick();
@@ -159,6 +161,7 @@ static StepResult step(uint32_t token, uint32_t pos, uint64_t reset_after) {
   r.token_out = (int32_t)(status & 0xffff);
   r.error = (status >> 30) & 1;
   r.cycles = cycle - begin;
+  r.busy = busy_cycles - busy_begin;
   if (!r.error && !r.timeout) {
     for (const auto& e : traces) {
       if (!(e.debug ? (mode & 2) : (mode & 1))) continue;
@@ -180,6 +183,7 @@ static void record(int32_t id, int32_t pos, int32_t token_in, int32_t next, cons
   put((int32_t)r.cycles);
   put(r.error);
   put(r.timeout);
+  put((int32_t)r.busy);
   put((int32_t)r.groups.size());
   for (const auto& g : r.groups) {
     put(g.point);

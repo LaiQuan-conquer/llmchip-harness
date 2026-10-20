@@ -80,8 +80,7 @@ class L2Model:
         self.eps_q = round(c["norm_eps"] * 2.0 ** (2 * self.f["x"]))
         self.att_scale = round(2**15 / np.sqrt(self.hs))
         # Rounding, overflow and accumulator width (defaults: half-up, saturate, no overflow).
-        self.rounding = spec.get("rounding", {}).get("mode", "half-up")
-        self.overflow = spec.get("overflow", {}).get("mode", "saturate")
+        self.rounding, self.overflow = arith.modes_of(spec)
         acc = spec["accumulator"]
         self.acc_bits = acc["bits"] if acc.get("canOverflow") else None
         # Overflow events by kind: values that did not fit and were saturated or wrapped.

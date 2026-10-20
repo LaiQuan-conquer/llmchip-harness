@@ -23,7 +23,12 @@ def generate(ctx: InvokeContext) -> Result:
     ):
         raise ValueError("the chip spec was designed from a different numeric spec or weights file")
     l2 = L2Model.load(spec_in.path, weights_in.path)
-    compiled = Compiled(l2.spec, l2.a, chip["dataflow"]["lanes"])
+    flow = chip["dataflow"]
+    options = {
+        "operandBuffers": flow.get("operandBuffers", "none"),
+        "memoryInterface": flow.get("memoryInterface", "spi"),
+    }
+    compiled = Compiled(l2.spec, l2.a, flow["lanes"], options)
     restored = compiled.unmap()
     mismatched = sorted(k for k in l2.a if k not in restored or not np.array_equal(restored[k], l2.a[k]))
     if mismatched:
@@ -46,6 +51,8 @@ def generate(ctx: InvokeContext) -> Result:
             "weight_rom_words": len(compiled.wrom),
             "data_memory_words": compiled.dmem_words,
             "mapping_round_trip": True,
+            "operand_buffers": options["operandBuffers"],
+            "memory_interface": options["memoryInterface"],
         },
         parse={"status": "complete", "parser": "llmchip-rtl/generate"},
     )

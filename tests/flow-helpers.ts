@@ -94,12 +94,12 @@ export async function throughG2(client: KernelClient) {
   // S3 / G2: chip spec from the frozen numeric spec.
   const archInputs = { spec, weights: l2weights, profile, library }
   const small = await run(client, 'arch-taalas', 'design', archInputs, { weightStorage: 'gf180mcu.stdcell-rom' })
-  const smallCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(small, 'chip'), spec, ppa: out(small, 'ppa') })
+  const smallCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(small, 'chip'), spec, ppa: out(small, 'ppa'), weights: l2weights })
   expect((await judge('arch.spec', smallCheck)).verdict).toBe('fail') // stories260K does not fit 2 mm2
   const design = await run(client, 'arch-taalas', 'design', archInputs, { weightStorage: 'gf180mcu.stdcell-rom', targetAreaMm2: 8 })
   await bind('chip-spec', out(design, 'chip'))
   await bind('ppa-estimate', out(design, 'ppa'))
-  const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa') })
+  const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa'), weights: l2weights })
   expect((await judge('arch.spec', archCheck)).verdict).toBe('pass')
   const g2 = await approve('G2')
   return { ir, tokenizer, evalset, spec, l2weights, l2, design, quantize, g1, g2, profile, library }
@@ -107,8 +107,9 @@ export async function throughG2(client: KernelClient) {
 
 /** The reference model's structure, untrained (owner decision 2026-10-18): the M3/M4 design subject. */
 export const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 }
-/** The prerun die (owner decision 2026-10-18) and the clock that closes timing at every corner. */
-export const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2 }
+/** The prerun die (owner decision 2026-10-18), the clock that closes timing at every corner, and the
+ * microarchitecture chosen in S3 (owner decision 2026-10-20: operand buffers and a quad-SPI memory). */
+export const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2, memoryInterface: 'sqi', operandBuffers: 'none', placementDensityPct: 70 }
 
 /**
  * Creates project `chip` and takes the proxy model through G2: S0 estimate, S1 synthesis and
@@ -162,11 +163,13 @@ export async function throughG2Proxy(client: KernelClient) {
     parallelMacs: PRERUN.parallelMacs,
     clockMHz: PRERUN.clockMHz,
     die: PRERUN.die,
+    memoryInterface: PRERUN.memoryInterface,
+    operandBuffers: PRERUN.operandBuffers,
     targetAreaMm2: 2.4,
   })
   await bind('chip-spec', out(design, 'chip'))
   await bind('ppa-estimate', out(design, 'ppa'))
-  const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa') })
+  const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa'), weights: l2weights })
   expect((await judge('arch.spec', archCheck)).verdict).toBe('pass')
   await approve('G2')
   return { ir, tokenizer, evalset, spec, l2weights, l2, design, profile, library }

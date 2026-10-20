@@ -22,6 +22,13 @@ ROUNDING = ("half-up", "half-even", "truncate")
 OVERFLOW = ("saturate", "wrap")
 
 
+def modes_of(spec: dict) -> tuple[str, str]:
+    """(rounding, overflow) of a numeric spec. Specs written before the modes existed say
+    "round-half-up" (as text) and have no overflow field: half-up and saturate."""
+    rounding = str(spec.get("rounding", {}).get("mode", "half-up")).removeprefix("round-")
+    return rounding, spec.get("overflow", {}).get("mode", "saturate")
+
+
 def rshift(v, s, mode: str = "half-up"):
     """v / 2^s rounded per `mode` (arithmetic shifts); a negative s shifts left exactly.
     `s` may be an array broadcast against `v` (one shift per row)."""

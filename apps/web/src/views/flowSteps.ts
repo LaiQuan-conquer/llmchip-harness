@@ -160,7 +160,7 @@ export const STEPS: StepDef[] = [
     what: 'flow.s3.what',
     gate: 'G2',
     checks: ['arch.spec'],
-    runs: ['arch-taalas/design', 'arch-taalas/verify_spec'],
+    runs: ['arch-taalas/design', 'arch-taalas/verify_spec', 'arch-taalas/explore'],
     facts: [
       {
         label: 'flow.fact.areaVsLimit',
@@ -168,13 +168,23 @@ export const STEPS: StepDef[] = [
         show: (m, f) => (has(m, 'die_area_mm2.typ') ? `${f.num(m['die_area_mm2.typ'], 2)} / ${f.num(m.area_limit_mm2, 2)} mm²` : undefined),
         good: (m) => m.fits_area as boolean | undefined,
       },
-      { label: 'flow.fact.speed', run: 'arch-taalas/design', show: (m, f) => (has(m, 'tokens_per_second') ? `${f.num(m.tokens_per_second, 1)} tok/s` : undefined) },
+      { label: 'flow.fact.speed', run: 'arch-taalas/design', show: (m, f) => (has(m, 'tokens_per_second') ? `${f.num(m.tokens_per_second, 1)} tok/s${has(m, 'clock_mhz') ? ` @ ${f.num(m.clock_mhz, 1)} MHz` : ''}` : undefined) },
+      { label: 'flow.fact.cyclesPerToken', run: 'arch-taalas/design', show: (m, f) => (has(m, 'cycles_per_token') ? f.int(m.cycles_per_token) : undefined) },
+      {
+        label: 'flow.fact.microarch',
+        run: 'arch-taalas/design',
+        show: (m, f) =>
+          has(m, 'memory_interface')
+            ? f.t('flow.fact.microarchText', { lanes: m.lanes, mem: f.t(m.memory_interface === 'sqi' ? 's3.pt.sqi' : 's3.pt.spi'), buf: f.t(`s3.pt.buf.${m.operand_buffers === true ? 'all' : m.operand_buffers === false ? 'none' : m.operand_buffers}` as Key) })
+            : undefined,
+      },
       { label: 'flow.fact.storedBits', run: 'arch-taalas/design', show: (m, f) => (has(m, 'stored_bits') ? `${f.int(m.stored_bits)} bit` : undefined) },
       { label: 'flow.fact.specMatches', run: 'arch-taalas/verify_spec', show: (m, f) => (has(m, 'numeric_spec_matches') ? f.yes(m.numeric_spec_matches) : undefined), good: (m) => m.numeric_spec_matches as boolean | undefined },
     ],
     deliverables: [
       { label: 'flow.out.chipSpec', run: 'arch-taalas/design', output: 'chip' },
       { label: 'flow.out.ppa', run: 'arch-taalas/design', output: 'ppa' },
+      { label: 'flow.out.exploration', run: 'arch-taalas/explore', output: 'exploration' },
     ],
     implemented: true,
   },
@@ -368,6 +378,7 @@ export const RUN_TITLES: Record<string, Key> = {
   'numeric/evaluate_graph': 'flow.run.evaluateGraph',
   'arch-taalas/design': 'flow.run.design',
   'arch-taalas/verify_spec': 'flow.run.verifySpec',
+  'arch-taalas/explore': 'flow.run.explore',
   'eda-gf180/calibrate': 'flow.run.calibrate',
   'estimator/check_views': 'flow.run.checkViews',
   'rtl-taalas/generate': 'flow.run.generate',

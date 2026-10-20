@@ -4,10 +4,11 @@
 module gf180mcu_fd_io__in_c (input PAD, output Y, input PU, input PD);
   assign Y = PAD;
 endmodule
-module gf180mcu_fd_io__bi_t (output PAD, input A, input OE, input IE, input CS, input SL, input PU, input PD, input PDRV0, input PDRV1, output Y);
+module gf180mcu_fd_io__bi_t (inout PAD, input A, input OE, input IE, input CS, input SL, input PU, input PD, input PDRV0, input PDRV1, output Y);
   // Off-chip side: driven while enabled, released (high impedance) otherwise.
   assign PAD = OE ? A : 1'bz;
-  assign Y = 1'b0;  // input path unused by the chip
+  // On-chip side: the pad's value while its input is enabled (bidirectional pins), else low.
+  assign Y = IE ? PAD : 1'b0;
 endmodule
 module gf180mcu_fd_io__dvdd (); endmodule
 module gf180mcu_fd_io__dvss (); endmodule

@@ -1,6 +1,6 @@
 {
   "id": "arch-taalas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Taalas-style hardwired architecture template (S3)",
   "kinds": [
     "architecture"
@@ -91,6 +91,23 @@
             "maximum": 4096,
             "default": 8
           },
+          "memoryInterface": {
+            "enum": [
+              "spi",
+              "sqi"
+            ],
+            "default": "spi",
+            "description": "External SRAM interface of the engine: SPI (1 data line in, 1 out) or quad SPI (4 bidirectional lines)."
+          },
+          "operandBuffers": {
+            "enum": [
+              "none",
+              "attention",
+              "all"
+            ],
+            "default": "none",
+            "description": "On-chip operand buffers: none; attention (the head's q and the output accumulators); all (also the MATVEC / RMS vector)."
+          },
           "clockMHz": {
             "type": "number",
             "exclusiveMinimum": 0,
@@ -160,6 +177,13 @@
             "ppa.estimate"
           ],
           "required": true
+        },
+        {
+          "name": "weights",
+          "types": [
+            "numeric.weights"
+          ],
+          "required": false
         }
       ],
       "outputs": [],
@@ -168,6 +192,176 @@
         "additionalProperties": false
       },
       "timeoutMs": 60000
+    },
+    {
+      "name": "explore",
+      "title": "Design-space exploration: exact cycles and area of every point, Pareto front (also the analysis of an imported model)",
+      "inputs": [
+        {
+          "name": "spec",
+          "types": [
+            "numeric.spec"
+          ],
+          "required": true
+        },
+        {
+          "name": "weights",
+          "types": [
+            "numeric.weights"
+          ],
+          "required": true
+        },
+        {
+          "name": "profile",
+          "types": [
+            "process.profile"
+          ],
+          "required": true
+        },
+        {
+          "name": "library",
+          "types": [
+            "implementation.library"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "exploration",
+          "type": "arch.exploration",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "weightStorage"
+        ],
+        "properties": {
+          "weightStorage": {
+            "type": "string"
+          },
+          "kvStorage": {
+            "type": "string"
+          },
+          "kvLocation": {
+            "enum": [
+              "offchip",
+              "onchip"
+            ],
+            "default": "offchip"
+          },
+          "parallelMacs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096,
+            "default": 8
+          },
+          "memoryInterface": {
+            "enum": [
+              "spi",
+              "sqi"
+            ],
+            "default": "spi",
+            "description": "External SRAM interface of the engine: SPI (1 data line in, 1 out) or quad SPI (4 bidirectional lines)."
+          },
+          "operandBuffers": {
+            "enum": [
+              "none",
+              "attention",
+              "all"
+            ],
+            "default": "none",
+            "description": "On-chip operand buffers: none; attention (the head's q and the output accumulators); all (also the MATVEC / RMS vector)."
+          },
+          "clockMHz": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 50
+          },
+          "offchipBandwidthMBps": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 25
+          },
+          "targetAreaMm2": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "activationLocation": {
+            "enum": [
+              "offchip",
+              "onchip"
+            ],
+            "default": "offchip",
+            "description": "Where the engine keeps its working data; the rtl-taalas generator implements offchip."
+          },
+          "die": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "xMm",
+              "yMm"
+            ],
+            "properties": {
+              "xMm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "yMm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "description": "Die size chosen within the foundry's size rules (S6 uses it)."
+          },
+          "lanesOptions": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "memoryInterfaces": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "spi",
+                "sqi"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "operandBuffersOptions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "none",
+                "attention",
+                "all"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3
+          },
+          "clocksMHz": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "minItems": 1,
+            "maxItems": 6
+          }
+        }
+      },
+      "timeoutMs": 3600000
     }
   ]
 }

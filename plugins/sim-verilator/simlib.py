@@ -98,6 +98,7 @@ class Bundle:
             "tb_top",
             "tb_top.v",
             "spi_sram_model.v",
+            "sqi_sram_model.v",
             *self.sources,
             "tb.cpp",
             "-CFLAGS",
@@ -179,6 +180,7 @@ class Bundle:
             *([f'-DSDF_FILE="{sdf}"', "-gspecify"] if sdf else []),
             "gl_tb.v",
             "spi_sram_model.v",
+            "sqi_sram_model.v",
             str(netlist),
             str(layout / models["pads"]),
             *models["cells"],
@@ -235,8 +237,8 @@ def parse(data: bytes) -> list[dict]:
     while i < len(a):
         if a[i] != 0x53544550:
             raise ValueError(f"corrupt log at word {i}")
-        rid, pos, token_in, token_out, nxt, cycles, error, timeout, ngroups = (int(v) for v in a[i + 1 : i + 10])
-        i += 10
+        rid, pos, token_in, token_out, nxt, cycles, error, timeout, busy, ngroups = (int(v) for v in a[i + 1 : i + 11])
+        i += 11
         groups = []
         for _ in range(ngroups):
             point, layer, count, start = (int(v) for v in a[i : i + 4])
@@ -251,6 +253,7 @@ def parse(data: bytes) -> list[dict]:
                 "token_out": token_out,
                 "next": nxt,
                 "cycles": cycles,
+                "busyCycles": busy,
                 "error": error,
                 "timeout": timeout,
                 "groups": groups,

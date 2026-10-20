@@ -6,7 +6,7 @@ English | [中文](implementation.zh.md)
 |---|---|
 | Document version | v0.1 |
 | Date | 2026-10-19 |
-| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery, and the numeric schemes of S2 |
+| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, and the exact speed and microarchitecture options of S3 |
 | Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.6, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.9 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
@@ -157,7 +157,7 @@ plugins/                   extra plugin search path
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0/G0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
 | `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import`, `recover`, `run_graph`, `compare` | S0 (import), S1 | `test_model.py`, `test_graph.py` |
 | `numeric` | process (Python) | `quantize`, `infer`, `evaluate`, `quantize_graph`, `evaluate_graph` | S2/G1 | `test_numeric.py`, `test_graph_l2.py` |
-| `arch-taalas` | process (Python) | `design`, `verify_spec` | S3/G2 | `test_arch.py` |
+| `arch-taalas` | process (Python) | `design`, `verify_spec`, `explore` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process (Python) | `generate`, `check_isa` | S4, S5 | `test_rtl.py` |
 | `sim-verilator` | container | `lint`, `qualify`, `verify`, `gatesim`, `sdfsim`, `generate` | S5/G3, S7, Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`, `constraints`, `implement`, `drc`, `lvs`, `sta` | M1.5, S6, S7 | `test_calibrate.py`, `test_physical.py` |
@@ -176,9 +176,9 @@ What each domain plugin produces:
 - **flow-default**: stages S0–S9, gates G0–G4 with their member slots and checks, stage entry checks, and the hard-constraint slots `constraints`, `timing-exceptions` and `signoff-rules`.
 - **model-llama**: model import and graph recovery (below), plus llama2.c checkpoint and tokenizer intake into the llama2.c Model IR used by S2–S8. Proxy models (a planned model's structure, fixed seed, untrained, with the bundled `evalset-proxy`). The L0 FP32 reference, a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`.
 - **numeric**: quantization (int8/int4/int3/ternary, group scales), the numeric spec (requirements §3.4.2), and the L2 bit-exact integer model with observation-point traces. Also the L2-vs-L0 accuracy evaluation (G1 evidence), with bundled evaluation sets. The rounding (`half-up`, `half-even`, `truncate`), the overflow handling (`saturate`, `wrap`) and the accumulator width (the proven no-overflow width, or a narrower one) are structured fields of the spec, defined once in [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py); the defaults give the L2 of before they existed, bit for bit. `quantize_graph` / `evaluate_graph` do the same for any recovered graph ([graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py), spec format `llmchip-numeric-graph-spec/1`): an analysis of models the vector engine cannot implement, with fraction bits per layer and a 24-bit residual stream by default, judged by `numeric.accuracy`. On a llama2.c graph it equals the chip L2 bit for bit.
-- **arch-taalas**: the Taalas-style hardwired template. It derives the chip spec and PPA from a frozen numeric spec, and checks their consistency (G2 evidence).
+- **arch-taalas**: the Taalas-style hardwired template. It derives the chip spec and PPA from a frozen numeric spec, and checks their consistency (G2 evidence). Its speed is not a formula: it compiles the engine's microcode (`Compiled`) and counts its cycles with [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py), a state-by-state model of the core and the memory port whose busy cycles equal the RTL simulation's, step by step ([performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py); `verify_spec` recomputes them, so a chip spec cannot claim another speed). The microarchitecture options of the chip spec are the lanes, `memoryInterface` (`spi`, or `sqi`: quad SPI on four bidirectional lines) and `operandBuffers` (`none`; `attention`: the head's q and the output accumulators as rotating registers; `all`: also a vector buffer for MATVEC and RMS). `explore` evaluates every combination (exact cycles, estimated area, fit, Pareto front), also for a graph numeric spec of an imported model (analysis, from its shape).
 - **rtl-taalas**: compiles the numeric spec into a microcoded vector engine as one deterministic `rtl.bundle`. The bundle holds:
-  - the Verilog core, with data in an external SPI SRAM, and an SPI host interface;
+  - the Verilog core, with data in an external SPI or quad-SPI SRAM and optional operand buffers, and an SPI host interface;
   - ROMs as generated case tables, and the microcode;
   - a Verilator testbench with an SRAM model, and `gl_tb.v` for gate level;
   - the instruction-level simulator `isa.py`.
@@ -416,6 +416,16 @@ Example: `half-even` rounding. A mode is chip behavior, so it has four implement
 
 Tests: `test_rounding_modes_match_exact_arithmetic` (exact rationals), `test_isa_rules_are_the_numeric_spec_rules` and `test_every_numeric_scheme_compiles_to_the_same_bits_as_l2` in `plugins/rtl-taalas/tests/test_rtl.py`, and the RTL part of `tests/numeric-schemes.spec.ts` (Verilator against L2, the ALU in the mode). Mind signedness in Verilog: an unsigned operand makes a whole expression unsigned and `>>>` logical (the first half-even attempt failed 9920 random ALU vectors that way).
 
+### 5.3c A microarchitecture option of the engine
+
+Example: `memoryInterface: sqi` ([llmchip_sqimem.v](../plugins/rtl-taalas/src/llmchip_rtl/rtl/llmchip_sqimem.v)). An option changes cycles and area, never results:
+
+1. Accept it in `Compiled(options)` and emit a define from `_widths` (listed in `flags` of `bundle.py`); `arch-taalas` takes it as a `design` / `explore` parameter and writes it into the chip spec's `dataflow`, from which `rtl-taalas generate` reads it.
+2. Implement it in the RTL under the define, with a reset value for every register; keep the instruction set and L2 unchanged.
+3. Model its cycles in [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py): the state walk (`fast=False`) mirrors the RTL state by state; a closed form for long loops must equal it (`test_cycle_model_closed_form_equals_the_state_walk`).
+4. Add it to `OPTIONS` in [tests/arch-perf.spec.ts](../tests/arch-perf.spec.ts): the busy cycles of every RTL step must equal the chip spec's prediction, and the RTL must equal L2.
+5. Measure its area: synthesize it and implement it on the die (`eda-gf180 implement`). The area estimate of the process library is not enough (§7.2).
+
 ### 5.4 A kernel API method
 
 Example: `kernel.pause` (FR-AGT-23). Follow it through every layer:
@@ -520,6 +530,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | `tests/model-import.spec.ts` | import of a tiny Qwen3 in the real Hugging Face layout, census, estimate from the census, graph, L0, the full test suite against transformers; llama2.c against the run.c port; a project's own proxy weights; a model without config.json reported, not guessed | FR-MDL-01/03/05/06 | always; needs `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama (tied/untied), Mistral with sliding window, Qwen2, Qwen3 against transformers; llama2.c against the run.c port; duplicated tied output; truncated file; unsupported models | FR-MDL | always |
 | `tests/kernel-footprint.spec.ts` | startup time and idle RSS of harnessd | NFR-01 (kernel part) | Linux |
+| `tests/arch-perf.spec.ts` | the S3 speed is exact: for the proxy in four microarchitecture options (SPI / SQI, buffers none / attention / all), the busy cycles of every RTL step equal the chip spec's prediction position by position, and the RTL equals L2 | FR-ARC-04/05, FR-EST-07 | needs the EDA image (790 s on 2026-10-20) |
 | `tests/numeric-schemes.spec.ts` | any recovered graph (tiny Qwen3, the proxy from its own artifacts) quantized and its L2 evaluated against L0, a narrow accumulator overflowing, `numeric.accuracy` judged, a graph spec refused by the vector engine; with the EDA image, a half-even / wrap / 24-bit-accumulator scheme from the numeric spec to the chip spec, RTL equal to L2 on the ISA simulator and in Verilator, the ALU tested in those modes | FR-QNT, FR-RTL-01, FR-VER | graph part always; RTL part needs the EDA image (about 4 min) |
 | `tests/web-ui.spec.ts` | catalog parity; every page in both languages in a browser; the S0, S1 and S2 detail views | AC-M1-12 | browser part needs `apps/web/dist` and Chromium |
 | `tests/containers.spec.ts` | no network, read-only inputs, container removed on cancel | IF-3 | needs `python:3.12-slim` image |
@@ -530,7 +541,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 
 ### 6.3 Opt-in full flow
 
-`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` runs the physical tools. Run it after any change to `rtl-taalas`, `eda-gf180`, `packager` or the signoff checks. Result on 2026-10-19: passed (1 test, 2361 s, about 39 min, with Podman 3.4 on WSL2).
+`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` runs the physical tools. Run it after any change to `rtl-taalas`, `eda-gf180`, `packager` or the signoff checks. Result on 2026-10-20, on the quad-SPI design: passed (1 test, 2132 s, about 36 min, with Podman 3.4 on WSL2).
 
 ---
 
@@ -564,6 +575,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 - **CLI**: approvals, waivers, declassification, export and migration have no dedicated commands. Use `llmchip call` (FR-INT-07).
 - **TypeScript plugin SDK** has no tests of its own. It is exercised only through `stub-tool`.
 - **Imported Hugging Face models** reach S2 as analysis only: S3–S8 consume the llama2.c Model IR (`model.ir`), and arch-taalas refuses a graph numeric spec with a reason. L0 and the graph L2 run the graph without a KV cache (full sequence per step), so long generations on large models are slow.
+- **S3 speed and area** (proxy of the reference model, ternary, 2 lanes, 8 MHz, measured 2026-10-20): the old formula said 10.1 tok/s; the exact count of the old design (SPI, no buffers) is 1,024,601 cycles per token, 7.8 tok/s. Quad SPI gives 352,505 cycles, 22.7 tok/s (2.9×); attention buffers 34.6 tok/s; all buffers 43.8 tok/s. 77.7% of the cycles are external memory waits even with quad SPI. Only quad SPI without buffers places on the 1.2 × 2 mm die: synthesized cells of 287k µm² in the 497k µm² core. Placement is at its limit and not monotonic in the density setting: 70% and 85% placed and closed timing (setup slack +22 ns, so about 9.7 MHz would close), 75% and 80% failed detailed placement in the same netlist; the prerun uses 70% (`PRERUN.placementDensityPct`). The old SPI design no longer routes at the former 62% either. With attention buffers (332k µm²) or all buffers (398k µm²) detailed placement fails at every density tried (62–85%), and one lane instead of two did not route. The quad-SPI pads are bidirectional `bi_t` cells whose input is enabled only while they do not drive (IE = ¬OE): the pad library defines its A → PAD timing arcs only for IE low, so with IE tied high the output direction went untimed and STA reported the four pins as unconstrained. The functional pad model for gate-level simulation (`plugins/eda-gf180/sim/pads.v`) had the `bi_t` input path tied to 0, which held only while no pin was bidirectional; it now passes the pad's value while IE is high. The SDF testbench and the tapeout package's test plan take the memory pins from the design (SPI or quad SPI). The process library's area estimate does not see this: its control logic is 0.05 mm² (empirical) where synthesis gives about 0.19 mm², and its utilization is 0.7 (empirical) where 0.58 placed and 0.67 did not. Until the library is calibrated against these implementations, `explore`'s fit is optimistic; a design is proven to fit only by `eda-gf180 implement`.
 - **Numeric analysis results** (int8, groups of 32, half-up, saturate, fraction bits per layer, 24-bit residual stream; 4 prompts × 8 tokens, 3 passages; on the development machine, 2026-10-19): stories260K perplexity 3.16 → 3.17, next-token agreement 98.6%, 1 s; SmolLM2-135M 12.64 → 12.76, 94.3%, 30 s; Qwen3-0.6B 23.00 → 22.39, 88.8%, 136 s; DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92, 88.8%, 584 s. At int4 SmolLM2 rises to 22.6 and Qwen3 to 28.6. With one 16-bit format per tensor kind SmolLM2 collapses (perplexity about 2.9 million): a few layers carry residual values near 20 000. `numeric.accuracy` asks for next-token agreement ≥ 0.9, which Qwen3 and DeepSeek at int8 miss narrowly.
 - **A failed analysis check opens an incident**, as every failed check does (FR-VER-06), so trying poor schemes on the S2 bench fills the incident list.
 

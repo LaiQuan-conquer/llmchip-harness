@@ -4,13 +4,26 @@
 `timescale 1ns/1ps
 module sdf_tb;
   reg clk = 1'b0, rst_n = 1'b0, sclk = 1'b0, cs_n = 1'b1, mosi = 1'b0;
-  wire miso, busy, kv_sclk, kv_cs_n, kv_mosi;
-  wire kv_miso = 1'b0;
+  wire miso, busy, kv_sclk, kv_cs_n;
   integer errors = 0, k;
   reg [39:0] status;
   always #(`PERIOD / 2.0) clk = ~clk;
+  // The memory pins of the chip (the test does not use the memory): SPI, or quad SPI (MEM_SQI).
+`ifdef MEM_SQI
+  wire [3:0] kv_sio;
+  pullup (kv_sio[0]);
+  pullup (kv_sio[1]);
+  pullup (kv_sio[2]);
+  pullup (kv_sio[3]);
+  chip_top u_chip (.clk(clk), .rst_n(rst_n), .host_sclk(sclk), .host_cs_n(cs_n), .host_mosi(mosi), .host_miso(miso),
+                   .busy(busy), .kv_sclk(kv_sclk), .kv_cs_n(kv_cs_n), .kv_sio0(kv_sio[0]), .kv_sio1(kv_sio[1]),
+                   .kv_sio2(kv_sio[2]), .kv_sio3(kv_sio[3]));
+`else
+  wire kv_mosi;
+  wire kv_miso = 1'b0;
   chip_top u_chip (.clk(clk), .rst_n(rst_n), .host_sclk(sclk), .host_cs_n(cs_n), .host_mosi(mosi), .host_miso(miso),
                    .busy(busy), .kv_sclk(kv_sclk), .kv_cs_n(kv_cs_n), .kv_mosi(kv_mosi), .kv_miso(kv_miso));
+`endif
   initial $sdf_annotate(`SDF_FILE, u_chip);
   task frame(input integer n, input [47:0] bits);
     begin

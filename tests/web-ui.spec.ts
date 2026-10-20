@@ -81,6 +81,8 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     await pipeline.recoverGraph(client, 'ui', () => {})
     // A numeric scheme of the recovered graph, for the S2 view (L2 against L0).
     await pipeline.runScheme(client, 'ui', 'graph', { weightFormat: 'int8', groupSize: 16, rounding: 'half-even', overflow: 'saturate' }, { maxPrompts: 1, steps: 2, passageTokens: 64 }, () => {})
+    // The S3 analysis of the recovered graph (design space of the engine at the model's dimensions).
+    await pipeline.exploreArch(client, 'ui', { parallelMacs: 2, clockMHz: 8, memoryInterface: 'sqi', operandBuffers: 'none' }, () => {})
     const runtime = readRuntimeInfo(kernel.layout.root)!
     try {
       const page = await chromium.newPage()
@@ -148,6 +150,15 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
         expect(s2).toContain(lang === 'zh' ? '累加器' : 'accumulator')
         await page.click('.nav-back')
         await page.waitForSelector('#flow-S2 .flow-detail')
+        // The S3 view: the analysis, the design space and its table.
+        await page.click('#flow-S3 .flow-detail')
+        await page.waitForSelector('.s3-scatter')
+        const s3 = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => s3.includes(key)), `${lang}/S3`).toEqual([])
+        expect(s3).not.toMatch(/\bs3\.[a-z]/)
+        expect(s3).toContain(lang === 'zh' ? '设计空间' : 'Design space')
+        await page.click('.nav-back')
+        await page.waitForSelector('#flow-S3 .flow-detail')
         await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')

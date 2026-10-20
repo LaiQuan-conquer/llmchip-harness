@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { KernelClient } from '@llmchip/client'
-import { flow, out, run, throughG3Proxy } from './flow-helpers.ts'
+import { flow, out, PRERUN, run, throughG3Proxy } from './flow-helpers.ts'
 import { connect, REPO_PLUGINS, startKernel } from './helpers.ts'
 
 const IMAGE = JSON.parse(readFileSync(join(REPO_PLUGINS, 'eda-gf180/llmchip-plugin.json'), 'utf8')).entry.image as string
@@ -48,7 +48,7 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
     await client.call('stages.enter', { project: 'chip', stage: 'S6' })
     const sdc = out(await run(client, 'eda-gf180', 'constraints', { chip }), 'constraints')
     const registry = await client.upload(JSON.stringify({ format: 'llmchip-timing-exceptions/1', exceptions: [] }), { type: 'timing.exceptions', mediaType: 'application/json' })
-    const impl = await run(client, 'eda-gf180', 'implement', { rtl, chip, constraints: sdc })
+    const impl = await run(client, 'eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: PRERUN.placementDensityPct })
     expect(impl.metrics).toMatchObject({ die_area_mm2: 2.4, routing_drc_errors: 0 })
     const layout = out(impl, 'layout')
     const gds = out(impl, 'gds')
@@ -75,7 +75,9 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
 
     // AC-06: a removed input delay makes the timing check undecidable; an unregistered false path fails it.
     const sdcText = await (await client.download(sdc)).text()
-    const removed = await client.upload(sdcText.split('\n').filter((l) => !l.includes('set_input_delay -clock clk -max') || !l.includes('kv_miso')).join('\n'), { type: 'timing.constraints' })
+    // The memory data input of the chip: kv_miso (SPI) or kv_sio0 (quad SPI).
+    const dataPin = sdcText.includes('kv_sio0') ? 'kv_sio0' : 'kv_miso'
+    const removed = await client.upload(sdcText.split('\n').filter((l) => !l.includes('set_input_delay -clock clk -max') || !l.includes(dataPin)).join('\n'), { type: 'timing.constraints' })
     const noDelay = await run(client, 'eda-gf180', 'sta', { layout, constraints: removed.hash, exceptions: registry.hash, chip })
     expect(await judge('phy.sta', noDelay)).toMatchObject({ verdict: 'indeterminate', reasons: [{ code: 'COVERAGE_INCOMPLETE' }] })
     const falsePath = await client.upload(`${sdcText}set_false_path -from [get_ports host_mosi]\n`, { type: 'timing.constraints' })

@@ -238,6 +238,66 @@ export async function adoptScheme(client: KernelClient, project: string, quantiz
   await step('infer', () => run(client, project, 'numeric', 'infer', [['spec', spec], ['weights', weights], ['tokenizer', tokenizer], ['evalset', evalset]]))
 }
 
+/** S3: the microarchitecture choices of the template (arch-taalas design / explore). */
+export interface ArchPoint {
+  parallelMacs: number
+  clockMHz: number
+  memoryInterface: 'spi' | 'sqi'
+  operandBuffers: 'none' | 'attention' | 'all'
+}
+
+/** The prerun die of the gf180 project (owner decision 2026-10-18) and its storage. */
+export const ARCH_BASE = { weightStorage: 'gf180mcu.stdcell-rom', die: { xMm: 1.2, yMm: 2 }, targetAreaMm2: 2.4 }
+
+async function processData(client: KernelClient) {
+  const data = (await client.call('plugins.list')).plugins.flatMap((p) => p.data)
+  return { profile: data.find((d) => d.id === 'gf180mcu')!.hash, library: data.find((d) => d.type === 'implementation.library')!.hash }
+}
+
+/** The numeric spec S3 designs from: the formal one (G1 slot), else the latest chip-path or analysis spec. */
+export async function archSource(client: KernelClient, project: string): Promise<{ spec: string; weights: string; analysis: boolean } | undefined> {
+  const state = await client.call('projects.get', { project })
+  if (state.slots['numeric-spec'] && state.slots['l2-weights']) return { spec: state.slots['numeric-spec'], weights: state.slots['l2-weights'], analysis: false }
+  const { runs } = await client.call('runs.list', { project, limit: 1000 })
+  const q = runs.filter((r) => r.plugin === 'numeric' && (r.handler === 'quantize' || r.handler === 'quantize_graph') && r.execution === 'exited_zero').at(-1)
+  return q ? { spec: outputs(q, 'spec')[0]!, weights: outputs(q, 'weights')[0]!, analysis: q.handler === 'quantize_graph' } : undefined
+}
+
+/** S3 design-space exploration around a point (also the analysis of an imported model). */
+export async function exploreArch(client: KernelClient, project: string, point: ArchPoint, report: Report): Promise<RunRecord> {
+  const step = stepper(report)
+  const src = await step('source', async () => {
+    const s = await archSource(client, project)
+    if (!s) throw new Error('this project has no numeric spec yet (S2)')
+    return s
+  })
+  const { profile, library } = await processData(client)
+  return step('explore', () => run(client, project, 'arch-taalas', 'explore', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], { ...ARCH_BASE, ...point }), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
+}
+
+/**
+ * S3 chip spec and PPA at a point (chip path only), its consistency check, and, with `bind`,
+ * the G2 slots (this invalidates earlier G2 approvals). G2 itself stays a human decision.
+ */
+export async function designArch(client: KernelClient, project: string, point: ArchPoint, bind: boolean, report: Report): Promise<RunRecord> {
+  const step = stepper(report)
+  const src = await archSource(client, project)
+  if (!src || src.analysis) throw new Error('only a chip-path numeric spec (S2, formal) can become a chip spec')
+  const { profile, library } = await processData(client)
+  const design = await step('design', () => run(client, project, 'arch-taalas', 'design', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], { ...ARCH_BASE, ...point }), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
+  const chip = outputs(design, 'chip')[0]!
+  const ppa = outputs(design, 'ppa')[0]!
+  if (bind) {
+    await step('bind', async () => {
+      await client.call('projects.bind', { project, slot: 'chip-spec', hash: chip })
+      await client.call('projects.bind', { project, slot: 'ppa-estimate', hash: ppa })
+    })
+  }
+  const check = await step('verify', () => run(client, project, 'arch-taalas', 'verify_spec', [['chip', chip], ['spec', src.spec], ['ppa', ppa], ['weights', src.weights]]))
+  await step('archCheck', () => judge(client, project, 'arch.spec', check), (v) => v)
+  return design
+}
+
 /** A project id from a model directory, e.g. ~/models/Qwen3-0.6B -> qwen3-0-6b. */
 export function projectIdFor(path: string): string {
   const base = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'model'

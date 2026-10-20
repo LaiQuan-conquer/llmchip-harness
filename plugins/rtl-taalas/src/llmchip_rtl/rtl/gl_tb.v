@@ -15,15 +15,31 @@
 `endif
 module gl_tb;
   reg clk = 1'b0, rst_n = 1'b0, sclk = 1'b0, cs_n = 1'b1, mosi = 1'b0;
-  wire miso, busy, kv_sclk, kv_cs_n, kv_mosi, kv_miso;
+  wire miso, busy, kv_sclk, kv_cs_n;
   always #(`PERIOD / 2.0) clk = ~clk;
+`ifdef MEM_SQI
+  // Quad SPI: four bidirectional lines with board pull-ups, driven by the chip's pads or the SRAM.
+  wire [3:0] kv_sio, s_o;
+  wire s_oe;
+  `GATE_TOP u_chip (.clk(clk), .rst_n(rst_n), .host_sclk(sclk), .host_cs_n(cs_n), .host_mosi(mosi), .host_miso(miso),
+                    .busy(busy), .kv_sclk(kv_sclk), .kv_cs_n(kv_cs_n), .kv_sio0(kv_sio[0]), .kv_sio1(kv_sio[1]),
+                    .kv_sio2(kv_sio[2]), .kv_sio3(kv_sio[3]));
+  pullup (kv_sio[0]);
+  pullup (kv_sio[1]);
+  pullup (kv_sio[2]);
+  pullup (kv_sio[3]);
+  assign kv_sio = s_oe ? s_o : 4'bzzzz;
+  sqi_sram_model #(.BYTES(`SRAM_BYTES)) u_sram (.sclk(kv_sclk), .cs_n(kv_cs_n), .sio_i(kv_sio), .sio_o(s_o), .sio_oe(s_oe), .bd_addr(32'd0), .bd_data());
+`else
+  wire kv_mosi, kv_miso;
   `GATE_TOP u_chip (.clk(clk), .rst_n(rst_n), .host_sclk(sclk), .host_cs_n(cs_n), .host_mosi(mosi), .host_miso(miso),
                     .busy(busy), .kv_sclk(kv_sclk), .kv_cs_n(kv_cs_n), .kv_mosi(kv_mosi), .kv_miso(kv_miso));
+  pulldown (kv_mosi);
+  spi_sram_model #(.BYTES(`SRAM_BYTES)) u_sram (.sclk(kv_sclk), .cs_n(kv_cs_n), .mosi(kv_mosi), .miso(kv_miso), .bd_addr(32'd0), .bd_data());
+`endif
   // Board pull-up: the chip releases the memory bus while idle.
   pullup (kv_cs_n);
   pulldown (kv_sclk);
-  pulldown (kv_mosi);
-  spi_sram_model #(.BYTES(`SRAM_BYTES)) u_sram (.sclk(kv_sclk), .cs_n(kv_cs_n), .mosi(kv_mosi), .miso(kv_miso), .bd_addr(32'd0), .bd_data());
 `ifdef SDF_FILE
   initial $sdf_annotate(`SDF_FILE, u_chip);
 `endif
