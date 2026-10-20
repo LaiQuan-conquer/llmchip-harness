@@ -9,41 +9,6 @@
 `define FW `DW
 `endif
 
-// Round-half-up shift: (v + 2^(s-1)) >>> s, computed as ((v >>> (s-1)) + 1) >>> 1
-// (the same floor); a negative s shifts left. Designs whose program only shifts
-// right (RSH_POSITIVE, proven by the generator) omit the other cases.
-function automatic signed [`FW-1:0] f_rsh(input signed [`FW-1:0] v, input signed [7:0] s);
-  reg signed [`FW-1:0] t;
-  begin
-`ifdef RSH_POSITIVE
-    t = v >>> (s - 8'sd1);
-    f_rsh = (t + 1) >>> 1;
-`else
-    if (s > 0) begin
-      t = v >>> (s - 8'sd1);
-      f_rsh = (t + 1) >>> 1;
-    end else if (s < 0) f_rsh = v <<< (-s);
-    else f_rsh = v;
-`endif
-  end
-endfunction
-
-function automatic signed [`FW-1:0] f_sat16(input signed [`FW-1:0] v);
-  begin
-    if (v > 32767) f_sat16 = 32767;
-    else if (v < -32768) f_sat16 = -32768;
-    else f_sat16 = v;
-  end
-endfunction
-
-function automatic signed [`FW-1:0] f_sat32(input signed [`FW-1:0] v);
-  begin
-    if (v > 64'sd2147483647) f_sat32 = 64'sd2147483647;
-    else if (v < -64'sd2147483648) f_sat32 = -64'sd2147483648;
-    else f_sat32 = v;
-  end
-endfunction
-
 // Sign-extends the low `bits` bits of v.
 function automatic signed [`FW-1:0] f_sx(input [`FW-1:0] v, input integer bits);
   reg [`FW-1:0] t;
@@ -52,6 +17,98 @@ function automatic signed [`FW-1:0] f_sx(input [`FW-1:0] v, input integer bits);
     f_sx = $signed(t) >>> (`FW - bits);
   end
 endfunction
+
+// Result shift with the numeric spec's rounding mode; a negative s shifts left.
+// t = v >>> (s-1) keeps the half bit in t[0], so every mode needs one small adder:
+//   half-up (ROUND_MODE 0):    (t + 1) >>> 1
+//   half-even (ROUND_HALF_EVEN): (t >>> 1) + (t[0] & (sticky | t[1])), sticky = any bit below the half
+//   truncate (ROUND_TRUNCATE): v >>> s
+// Designs whose program only shifts right (RSH_POSITIVE, proven by the generator)
+// omit the other cases.
+`ifdef ROUND_TRUNCATE
+function automatic signed [`FW-1:0] f_rsh_pos(input signed [`FW-1:0] v, input signed [7:0] s);
+  f_rsh_pos = v >>> s;
+endfunction
+`elsif ROUND_HALF_EVEN
+function automatic signed [`FW-1:0] f_rsh_pos(input signed [`FW-1:0] v, input signed [7:0] s);
+  reg signed [`FW-1:0] t;
+  reg sticky;
+  begin
+    t = v >>> (s - 8'sd1);
+    sticky = |(v & ((({{(`FW-1){1'b0}}, 1'b1}) << (s - 8'sd1)) - 1));
+    // $signed: an unsigned operand would make the whole sum unsigned and t >>> 1 a logical shift.
+    f_rsh_pos = (t >>> 1) + $signed({1'b0, t[0] & (sticky | t[1])});
+  end
+endfunction
+`else
+function automatic signed [`FW-1:0] f_rsh_pos(input signed [`FW-1:0] v, input signed [7:0] s);
+  reg signed [`FW-1:0] t;
+  begin
+    t = v >>> (s - 8'sd1);
+    f_rsh_pos = (t + 1) >>> 1;
+  end
+endfunction
+`endif
+
+function automatic signed [`FW-1:0] f_rsh(input signed [`FW-1:0] v, input signed [7:0] s);
+  begin
+`ifdef RSH_POSITIVE
+    f_rsh = f_rsh_pos(v, s);
+`else
+    if (s > 0) f_rsh = f_rsh_pos(v, s);
+    else if (s < 0) f_rsh = v <<< (-s);
+    else f_rsh = v;
+`endif
+  end
+endfunction
+
+// Narrowing of a result with the numeric spec's overflow mode: clamped (saturate)
+// or its low bits sign-extended (OVERFLOW_WRAP, two's complement).
+function automatic signed [`FW-1:0] f_sat16(input signed [`FW-1:0] v);
+  begin
+`ifdef OVERFLOW_WRAP
+    f_sat16 = f_sx(v, 16);
+`else
+    if (v > 32767) f_sat16 = 32767;
+    else if (v < -32768) f_sat16 = -32768;
+    else f_sat16 = v;
+`endif
+  end
+endfunction
+
+function automatic signed [`FW-1:0] f_sat32(input signed [`FW-1:0] v);
+  begin
+`ifdef OVERFLOW_WRAP
+    f_sat32 = f_sx(v, 32);
+`else
+    if (v > 64'sd2147483647) f_sat32 = 64'sd2147483647;
+    else if (v < -64'sd2147483648) f_sat32 = -64'sd2147483648;
+    else f_sat32 = v;
+`endif
+  end
+endfunction
+
+// The MATVEC total after a group addition: narrowed to ACCB bits when the numeric
+// spec's accumulator is narrower than the proven bound (ACC_NARROW), else unchanged.
+`ifndef ACC_NARROW
+function automatic signed [`FW-1:0] f_acc(input signed [`FW-1:0] v);
+  f_acc = v;
+endfunction
+`elsif OVERFLOW_WRAP
+function automatic signed [`FW-1:0] f_acc(input signed [`FW-1:0] v);
+  f_acc = f_sx(v, `ACCB);
+endfunction
+`else
+function automatic signed [`FW-1:0] f_acc(input signed [`FW-1:0] v);
+  reg signed [`FW-1:0] hi;
+  begin
+    hi = ({{(`FW-1){1'b0}}, 1'b1} <<< (`ACCB - 1)) - 1;
+    if (v > hi) f_acc = hi;
+    else if (v < -hi - 1) f_acc = -hi - 1;
+    else f_acc = v;
+  end
+endfunction
+`endif
 
 // Index of the most significant set bit (0 for v = 0).
 function automatic [6:0] f_msb(input [`FW-1:0] v);

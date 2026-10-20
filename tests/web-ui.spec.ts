@@ -54,7 +54,7 @@ const CATALOG_KEYS = Object.keys(CATALOGS.zh)
 const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
 
 describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
-  it('renders every page in both languages without errors or raw keys', { timeout: 120_000 }, async (ctx) => {
+  it('renders every page in both languages without errors or raw keys', { timeout: 240_000 }, async (ctx) => {
     const chromium = await browser()
     if (!chromium) return ctx.skip()
     const { kernel } = await startKernel(undefined, { bundled: true })
@@ -79,6 +79,8 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     const pipeline = await import('../apps/web/src/views/modelPipeline.ts')
     await pipeline.startFromWeights(client, { path: TINY_QWEN3, project: 'ui', title: 'tiny-qwen3', bits: 4, process: 'gf180mcu' }, () => {})
     await pipeline.recoverGraph(client, 'ui', () => {})
+    // A numeric scheme of the recovered graph, for the S2 view (L2 against L0).
+    await pipeline.runScheme(client, 'ui', 'graph', { weightFormat: 'int8', groupSize: 16, rounding: 'half-even', overflow: 'saturate' }, { maxPrompts: 1, steps: 2, passageTokens: 64 }, () => {})
     const runtime = readRuntimeInfo(kernel.layout.root)!
     try {
       const page = await chromium.newPage()
@@ -135,6 +137,17 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
         await page.waitForSelector('.s1-graph')
         await page.click('.nav-back')
         await page.waitForSelector('#flow-S1 .flow-detail')
+        // The S2 view: the scheme explained, the bench, the comparison and the accuracy against L0.
+        await page.click('#flow-S2 .flow-detail')
+        await page.waitForSelector('.s2-compare')
+        await page.waitForSelector('.s2-bars')
+        const s2 = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => s2.includes(key)), `${lang}/S2`).toEqual([])
+        expect(s2).not.toMatch(/\bs2\.[a-z]/)
+        expect(s2).toContain(lang === 'zh' ? '偶数舍入' : 'round half to even')
+        expect(s2).toContain(lang === 'zh' ? '累加器' : 'accumulator')
+        await page.click('.nav-back')
+        await page.waitForSelector('#flow-S2 .flow-detail')
         await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')

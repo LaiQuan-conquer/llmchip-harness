@@ -48,7 +48,7 @@ interface ModelChoice {
 }
 
 /** Every model this workbench has imported, across projects, for the model picker. */
-function useModelChoices(): ModelChoice[] {
+export function useModelChoices(): ModelChoice[] {
   const { t } = useI18n()
   const { data } = useQuery((c) => c.call('runs.list', { limit: 1000 }), [])
   const seen = new Map<string, ModelChoice>()

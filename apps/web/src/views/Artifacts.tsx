@@ -7,6 +7,7 @@ import { typeDescription, typeName } from './artifactTypes.ts'
 import { ErrorLine, Section, short } from './common.tsx'
 import { RUN_TITLES } from './flowSteps.ts'
 import { L0Outputs, TestSuite, TextIr } from './steps/S1.tsx'
+import { NumericAccumulator, NumericAccuracy, NumericActivations, NumericRounding, NumericTables, NumericWeights } from './steps/S2.tsx'
 
 const TEXT = /^(text\/|application\/json)/
 
@@ -153,7 +154,7 @@ function Inputs({ hashes, select }: { hashes: string[]; select: (s: Partial<Sele
 
 /** A readable view of the content when there is one; the raw text otherwise, folded away. */
 function Content({ type, text }: { type: string; text: string }) {
-  const { t } = useI18n()
+  const { t, message } = useI18n()
   let doc: Json
   try {
     doc = type.endsWith('.summary') || type === 'run.log' ? undefined : JSON.parse(text)
@@ -175,6 +176,16 @@ function Content({ type, text }: { type: string; text: string }) {
       <CensusView doc={doc} />
     ) : doc && type === 'model.bundle' ? (
       <BundleView doc={doc} />
+    ) : doc && type === 'numeric.spec' && doc.weights ? (
+      <>
+        <NumericWeights spec={doc} quantize={undefined} />
+        <NumericActivations spec={doc} />
+        <NumericAccumulator spec={doc} />
+        <NumericRounding spec={doc} />
+        <NumericTables spec={doc} />
+      </>
+    ) : doc && type === 'accuracy.report' && doc.metrics ? (
+      <NumericAccuracy report={doc} path={doc.model ? 'graph' : 'chip'} verdict={undefined} message={message} />
     ) : undefined
   if (!doc) {
     return <pre className="content">{text.slice(0, 50_000)}</pre>

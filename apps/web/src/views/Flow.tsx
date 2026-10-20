@@ -8,9 +8,10 @@ import { CHECK_TITLES, RUN_TITLES, STEPS, type Format, type StepDef } from './fl
 import { PROCESSES, projectIdFor, startFromWeights, type ProcessId, type StepState as RunStepState } from './modelPipeline.ts'
 import { S0Detail } from './steps/S0.tsx'
 import { S1Detail } from './steps/S1.tsx'
+import { S2Detail } from './steps/S2.tsx'
 
 /** Stages with a detailed demo view. */
-const DETAILS: Record<string, (props: { project: string; onBack(): void; onProject(project: string): void }) => React.JSX.Element> = { S0: S0Detail, S1: S1Detail }
+const DETAILS: Record<string, (props: { project: string; onBack(): void; onProject(project: string): void }) => React.JSX.Element> = { S0: S0Detail, S1: S1Detail, S2: S2Detail }
 export const DETAIL_STAGES = Object.keys(DETAILS)
 
 type StepState = 'pending' | 'active' | 'running' | 'done' | 'attention' | 'notImplemented'

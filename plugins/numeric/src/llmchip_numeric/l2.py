@@ -13,17 +13,25 @@ from pathlib import Path
 
 import numpy as np
 
-from .spec import EXP_RANGE, SCORE_FRAC, SIG_RANGE, SIG_STEPS, SPEC_FORMAT, WEIGHTS_FORMAT, array_hash
+from . import arith
+from .spec import (
+    EXP_RANGE,
+    GRAPH_SPEC_FORMAT,
+    SCORE_FRAC,
+    SIG_RANGE,
+    SIG_STEPS,
+    SPEC_FORMAT,
+    WEIGHTS_FORMAT,
+    array_hash,
+)
 
 I16 = (-32768, 32767)
 I32 = (-(2**31), 2**31 - 1)
 
 
 def rshift(v, s: int):
-    """Round-half-up shift: (v + 2^(s-1)) >> s; a negative s shifts left."""
-    if s > 0:
-        return (v + (1 << (s - 1))) >> s
-    return v << (-s) if s < 0 else v
+    """Round-half-up shift: (v + 2^(s-1)) >> s; a negative s shifts left (the default rounding)."""
+    return arith.rshift(v, s, "half-up")
 
 
 def sat16(v):
@@ -34,14 +42,23 @@ def sat32(v):
     return np.clip(v, *I32)
 
 
+def check_format(spec: dict) -> None:
+    if spec.get("format") == GRAPH_SPEC_FORMAT:
+        raise ValueError(
+            "this numeric spec is an analysis of a recovered graph; the vector engine "
+            "implements the llama2.c structure only (numeric/quantize on a Model IR)"
+        )
+    if spec.get("format") != SPEC_FORMAT:
+        raise ValueError("not a numeric spec")
+
+
 class SpecMismatch(ValueError):
     """The weights file does not belong to the numeric spec."""
 
 
 class L2Model:
     def __init__(self, spec: dict, arrays: dict[str, np.ndarray]) -> None:
-        if spec.get("format") != SPEC_FORMAT:
-            raise ValueError("not a numeric spec")
+        check_format(spec)
         for name, digest in spec["arrays"].items():
             if name not in arrays or array_hash(arrays[name]) != digest:
                 raise SpecMismatch(f"array {name} does not match the numeric spec")
@@ -62,12 +79,19 @@ class L2Model:
         # Norm inputs are always the residual stream x.
         self.eps_q = round(c["norm_eps"] * 2.0 ** (2 * self.f["x"]))
         self.att_scale = round(2**15 / np.sqrt(self.hs))
+        # Rounding, overflow and accumulator width (defaults: half-up, saturate, no overflow).
+        self.rounding = spec.get("rounding", {}).get("mode", "half-up")
+        self.overflow = spec.get("overflow", {}).get("mode", "saturate")
+        acc = spec["accumulator"]
+        self.acc_bits = acc["bits"] if acc.get("canOverflow") else None
+        # Overflow events by kind: values that did not fit and were saturated or wrapped.
         self.saturations: dict[str, int] = {}
         self.reset()
 
     @classmethod
     def load(cls, spec_path: str | Path, weights_path: str | Path) -> L2Model:
         spec = json.loads(Path(spec_path).read_text())
+        check_format(spec)
         with np.load(weights_path, allow_pickle=False) as z:
             if json.loads(str(z["meta"])).get("format") != WEIGHTS_FORMAT:
                 raise ValueError("not a numeric weights file")
@@ -80,11 +104,20 @@ class L2Model:
 
     # -- operators -------------------------------------------------------------
 
-    def _sat16(self, v: np.ndarray, kind: str) -> np.ndarray:
-        n = int(np.count_nonzero((v < I16[0]) | (v > I16[1])))
+    def _count(self, kind: str, n: int) -> None:
         if n:
             self.saturations[kind] = self.saturations.get(kind, 0) + n
-        return sat16(v)
+
+    def _sat16(self, v: np.ndarray, kind: str) -> np.ndarray:
+        self._count(kind, arith.out_of_range(v, 16))
+        return arith.overflow(v, 16, self.overflow)
+
+    def _sat32(self, v: np.ndarray, kind: str) -> np.ndarray:
+        self._count(kind, arith.out_of_range(v, 32))
+        return arith.overflow(v, 32, self.overflow)
+
+    def _rsh(self, v, s: int):
+        return arith.rshift(v, s, self.rounding)
 
     def matmul(self, x: np.ndarray, name: str, f_in: int, f_out: int, kind: str, bits32: bool = False) -> np.ndarray:
         q, m = self.a[f"{name}.q"], self.a[f"{name}.m"]
@@ -95,8 +128,10 @@ class L2Model:
         qp = np.zeros((out, ngroups * self.group), np.int64)
         qp[:, :inp] = q
         acc = np.einsum("ogk,gk->og", qp.reshape(out, ngroups, self.group), xp.reshape(ngroups, self.group))
-        y = rshift((acc * m).sum(axis=1), f_in + self.exp[name] - f_out)
-        return sat32(y) if bits32 else self._sat16(y, kind)
+        total, events = arith.accumulate(acc * m, self.acc_bits, self.overflow)
+        self._count("accumulator", events)
+        y = self._rsh(total, f_in + self.exp[name] - f_out)
+        return self._sat32(y, kind) if bits32 else self._sat16(y, kind)
 
     def rmsnorm(self, x: np.ndarray, weight: np.ndarray, f_out: int) -> np.ndarray:
         v = int((x * x).sum()) // x.size + self.eps_q
@@ -105,15 +140,15 @@ class L2Model:
         e2 = k - (k % 2)
         t = v >> (e2 - 6) if e2 >= 6 else v << (6 - e2)
         r = int(self.a["lut.rsqrt"][t - 64])
-        return self._sat16(rshift(x * weight * r, self.fn + 15 + e2 // 2 - f_out), "norm")
+        return self._sat16(self._rsh(x * weight * r, self.fn + 15 + e2 // 2 - f_out), "norm")
 
     def rope(self, v: np.ndarray, pos: int, kind: str) -> np.ndarray:
         cos, sin = self.a["lut.rope_cos"][pos], self.a["lut.rope_sin"][pos]
         j = (np.arange(0, v.size, 2) % self.hs) // 2
         a, b = v[0::2], v[1::2]
         out = np.empty_like(v)
-        out[0::2] = self._sat16(rshift(a * cos[j] - b * sin[j], 14), kind)
-        out[1::2] = self._sat16(rshift(a * sin[j] + b * cos[j], 14), kind)
+        out[0::2] = self._sat16(self._rsh(a * cos[j] - b * sin[j], 14), kind)
+        out[1::2] = self._sat16(self._rsh(a * sin[j] + b * cos[j], 14), kind)
         return out
 
     def attention(self, q: np.ndarray, layer: int, pos: int) -> np.ndarray:
@@ -126,12 +161,12 @@ class L2Model:
             kvh = (h // kv_mul) * self.hs
             qh = q[h * self.hs : (h + 1) * self.hs]
             keys = self.kcache[layer, : pos + 1, kvh : kvh + self.hs]
-            s = sat32(rshift((keys @ qh) * self.att_scale, f["q"] + f["k"] + 15 - SCORE_FRAC))
+            s = self._sat32(self._rsh((keys @ qh) * self.att_scale, f["q"] + f["k"] + 15 - SCORE_FRAC), "score")
             d = np.minimum(s.max() - s, cap)
             e = exp_lut[d >> (SCORE_FRAC - 5)]
             p = (e << 15) // e.sum()
             vals = self.vcache[layer, : pos + 1, kvh : kvh + self.hs]
-            out[h * self.hs : (h + 1) * self.hs] = self._sat16(rshift(p @ vals, 15), "att")
+            out[h * self.hs : (h + 1) * self.hs] = self._sat16(self._rsh(p @ vals, 15), "att")
         return out
 
     def silu_gate(self, h1: np.ndarray, h3: np.ndarray) -> np.ndarray:
@@ -139,8 +174,8 @@ class L2Model:
         fh = f["h1"]
         z = np.clip(h1, -SIG_RANGE * 2**fh, SIG_RANGE * 2**fh - 1)
         idx = (z >> (fh - 4) if fh >= 4 else z << (4 - fh)) + SIG_RANGE * SIG_STEPS
-        s = rshift(h1 * self.a["lut.sigmoid"][idx], 15)
-        return self._sat16(rshift(s * h3, fh + f["h3"] - f["g"]), "g")
+        s = self._rsh(h1 * self.a["lut.sigmoid"][idx], 15)
+        return self._sat16(self._rsh(s * h3, fh + f["h3"] - f["g"]), "g")
 
     # -- forward ---------------------------------------------------------------
 
@@ -151,7 +186,7 @@ class L2Model:
         f = self.f
         g = self.group
         q, m = self.a["emb.q"][token], self.a["emb.m"][token]
-        x = self._sat16(rshift(q * m[np.arange(self.dim) // g], self.exp["emb"] - f["x"]), "x")
+        x = self._sat16(self._rsh(q * m[np.arange(self.dim) // g], self.exp["emb"] - f["x"]), "x")
         for layer in range(self.layers):
             xn = self.rmsnorm(x, self.a[f"{layer}.rms_att"], f["xn"])
             qv = self.rope(self.matmul(xn, f"{layer}.wq", f["xn"], f["q"], "q"), pos, "q")

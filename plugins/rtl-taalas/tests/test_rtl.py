@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from llmchip_model import Tokenizer, load_llama2c
 from llmchip_model.evalset import load_evalset
-from llmchip_numeric import L2Model, build
+from llmchip_numeric import L2Model, arith, build
 from llmchip_rtl import isa
 from llmchip_rtl.bundle import bundle_files, write_tar
 from llmchip_rtl.compiler import Compiled, map_matrix, unmap_matrix
@@ -72,13 +72,24 @@ def test_scalar_functions_follow_the_numeric_spec():
         assert e2 % 2 == 0 and 64 <= t < 256
 
 
-def test_isa_program_equals_l2_bit_for_bit(setup):
-    l2, tok, evalset, c = setup
-    machine = isa.Machine(c.program, c.wrom, c.srom, c.crom, c.lanes, c.dmem_words, c.context)
-    for prompt in evalset["prompts"][:3]:
+def test_isa_rules_are_the_numeric_spec_rules():
+    """isa.py ships alone in the bundle with its own copy of the rules; it must equal arith.py."""
+    v = np.arange(-70000, 70001, 7)
+    for mode in arith.ROUNDING:
+        for s in (-3, 0, 1, 2, 5, 14, 15):
+            assert np.array_equal(isa.rsh(v, s, mode), arith.rshift(v, s, mode)), (mode, s)
+    for mode in arith.OVERFLOW:
+        for bits in (16, 17, 24, 32):
+            assert np.array_equal(isa.sat(v, bits, mode), arith.overflow(v, bits, mode)), (mode, bits)
+    assert isa.ROUND_MODES == arith.ROUNDING
+
+
+def assert_isa_equals_l2(l2, tok, prompts, c, steps_per_prompt=16):
+    machine = isa.Machine(c.program, c.wrom, c.srom, c.crom, c.lanes, c.dmem_words, c.context, **isa.modes(c.widths))
+    for prompt in prompts:
         ids = tok.encode(prompt)
         steps: list = []
-        l2.generate(ids, 16, steps)
+        l2.generate(ids, steps_per_prompt, steps)
         token = ids[0]
         for pos, expected in enumerate(steps):
             traces: list = []
@@ -92,6 +103,40 @@ def test_isa_program_equals_l2_bit_for_bit(setup):
             if pos >= len(ids) - 1:
                 assert out == expected["token"]
             token = expected["token"]
+
+
+def test_isa_program_equals_l2_bit_for_bit(setup):
+    l2, tok, evalset, c = setup
+    assert_isa_equals_l2(l2, tok, evalset["prompts"][:3], c)
+
+
+@pytest.mark.parametrize(
+    ("rounding", "overflow", "acc_bits"),
+    [
+        ("half-even", "saturate", None),
+        ("truncate", "wrap", None),
+        ("half-up", "saturate", 22),
+        ("half-even", "wrap", 22),
+    ],
+)
+def test_every_numeric_scheme_compiles_to_the_same_bits_as_l2(tmp_path, rounding, overflow, acc_bits):
+    cfg, w = load_llama2c((FIXTURE / "stories260K.bin").read_bytes())
+    tok = Tokenizer((FIXTURE / "tok512.bin").read_bytes(), cfg.vocab_size)
+    evalset = load_evalset(EVALSET)
+    spec, npz = build(
+        cfg, w, tok, evalset["calibration"], rounding=rounding, overflow=overflow, accumulator_bits=acc_bits
+    )
+    (tmp_path / "s.json").write_text(json.dumps(spec))
+    (tmp_path / "w.npz").write_bytes(npz)
+    l2 = L2Model.load(tmp_path / "s.json", tmp_path / "w.npz")
+    c = Compiled(l2.spec, l2.a, 8)
+    params = c.widths
+    assert isa.ROUND_MODES[params["ROUND_MODE"]] == rounding and bool(params["OVERFLOW_WRAP"]) == (overflow == "wrap")
+    if acc_bits is not None:
+        assert params["ACC_NARROW"] == 1 and params["ACCB"] == params["TOTW"] == acc_bits
+    assert_isa_equals_l2(l2, tok, evalset["prompts"][:2], c, 12)
+    if acc_bits is not None:
+        assert l2.saturations.get("accumulator", 0) > 0  # the narrow accumulator really overflowed
 
 
 def test_debug_traces_follow_every_operation_and_have_their_own_buffers(setup):

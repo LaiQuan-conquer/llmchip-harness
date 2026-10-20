@@ -6,7 +6,7 @@ English | [中文](implementation.zh.md)
 |---|---|
 | Document version | v0.1 |
 | Date | 2026-10-19 |
-| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery |
+| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery, and the numeric schemes of S2 |
 | Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.6, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.9 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
@@ -156,7 +156,7 @@ plugins/                   extra plugin search path
 | `process-library` | data | profiles `gf180mcu`, `sephonchitech-180bcd`; `library-180nm`; `package-gf180mcu`; `signoff-gf180mcu` | S0, S3, S6–S8 | via estimator and flow tests |
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0/G0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
 | `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import`, `recover`, `run_graph`, `compare` | S0 (import), S1 | `test_model.py`, `test_graph.py` |
-| `numeric` | process (Python) | `quantize`, `infer`, `evaluate` | S2/G1 | `test_numeric.py` |
+| `numeric` | process (Python) | `quantize`, `infer`, `evaluate`, `quantize_graph`, `evaluate_graph` | S2/G1 | `test_numeric.py`, `test_graph_l2.py` |
 | `arch-taalas` | process (Python) | `design`, `verify_spec` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process (Python) | `generate`, `check_isa` | S4, S5 | `test_rtl.py` |
 | `sim-verilator` | container | `lint`, `qualify`, `verify`, `gatesim`, `sdfsim`, `generate` | S5/G3, S7, Playground | `test_simlib.py` |
@@ -175,7 +175,7 @@ What each domain plugin produces:
 - **process-library**: process profiles (with technology data for migration), the implementation library, the GF180 package template and signoff rules. Every value records its source and confidence. Empirical values stay empirical until calibrated.
 - **flow-default**: stages S0–S9, gates G0–G4 with their member slots and checks, stage entry checks, and the hard-constraint slots `constraints`, `timing-exceptions` and `signoff-rules`.
 - **model-llama**: model import and graph recovery (below), plus llama2.c checkpoint and tokenizer intake into the llama2.c Model IR used by S2–S8. Proxy models (a planned model's structure, fixed seed, untrained, with the bundled `evalset-proxy`). The L0 FP32 reference, a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`.
-- **numeric**: quantization (int8/int4/int3/ternary, group scales), the numeric spec (requirements §3.4.2), and the L2 bit-exact integer model with observation-point traces. Also the L2-vs-L0 accuracy evaluation (G1 evidence), with a bundled evaluation set.
+- **numeric**: quantization (int8/int4/int3/ternary, group scales), the numeric spec (requirements §3.4.2), and the L2 bit-exact integer model with observation-point traces. Also the L2-vs-L0 accuracy evaluation (G1 evidence), with bundled evaluation sets. The rounding (`half-up`, `half-even`, `truncate`), the overflow handling (`saturate`, `wrap`) and the accumulator width (the proven no-overflow width, or a narrower one) are structured fields of the spec, defined once in [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py); the defaults give the L2 of before they existed, bit for bit. `quantize_graph` / `evaluate_graph` do the same for any recovered graph ([graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py), spec format `llmchip-numeric-graph-spec/1`): an analysis of models the vector engine cannot implement, with fraction bits per layer and a 24-bit residual stream by default, judged by `numeric.accuracy`. On a llama2.c graph it equals the chip L2 bit for bit.
 - **arch-taalas**: the Taalas-style hardwired template. It derives the chip spec and PPA from a frozen numeric spec, and checks their consistency (G2 evidence).
 - **rtl-taalas**: compiles the numeric spec into a microcoded vector engine as one deterministic `rtl.bundle`. The bundle holds:
   - the Verilog core, with data in an external SPI SRAM, and an SPI host interface;
@@ -405,6 +405,17 @@ Example: `qwen3` in [graph.py](../plugins/model-llama/src/llmchip_model/graph.py
 
 Anything a family does not support must return `supported: false` with a reason code, never an approximate graph.
 
+### 5.3b A numeric mode (rounding, overflow, accumulator)
+
+Example: `half-even` rounding. A mode is chip behavior, so it has four implementations that must agree bit for bit:
+
+1. [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py) (used by `l2.py` and `graph_l2.py`) and the parameter enum of `quantize` / `quantize_graph` in `plugins/numeric/llmchip-plugin.json`; `spec.py` writes it into the spec with its definition.
+2. The self-contained copy in [isa.py](../plugins/rtl-taalas/src/llmchip_rtl/isa.py) (it ships in the RTL bundle), selected by `modes(params)`.
+3. A define emitted by `Compiled._widths` in [compiler.py](../plugins/rtl-taalas/src/llmchip_rtl/compiler.py) (listed in `flags` of `bundle.py`) and an `ifdef` variant in [llmchip_functions.vh](../plugins/rtl-taalas/src/llmchip_rtl/rtl/llmchip_functions.vh).
+4. The ALU unit tests in `plugins/sim-verilator/cocotb_alu.py`, which read the mode from the bundle parameters.
+
+Tests: `test_rounding_modes_match_exact_arithmetic` (exact rationals), `test_isa_rules_are_the_numeric_spec_rules` and `test_every_numeric_scheme_compiles_to_the_same_bits_as_l2` in `plugins/rtl-taalas/tests/test_rtl.py`, and the RTL part of `tests/numeric-schemes.spec.ts` (Verilator against L2, the ALU in the mode). Mind signedness in Verilog: an unsigned operand makes a whole expression unsigned and `>>>` logical (the first half-even attempt failed 9920 random ALU vectors that way).
+
 ### 5.4 A kernel API method
 
 Example: `kernel.pause` (FR-AGT-23). Follow it through every layer:
@@ -457,7 +468,7 @@ What the Flow page ([views/Flow.tsx](../apps/web/src/views/Flow.tsx)) shows for 
 
 Example: the S6 facts "core area" and "timing after place and route" read `core_area_um2` and `flow_setup_violations` of `eda-gf180/implement`.
 
-A stage can also have a detailed demo view, opened from the "Detailed demo" button on its card. Write it as `views/steps/<stage>.tsx` and register it in `DETAILS` in `Flow.tsx`; the open detail is `selection.stage`, so the sidebar lists it under the selected project and the back bar (and the browser's back button) returns to it, as to every page and artifact visited before. Example: [views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) reads the stage's `estimate.report` and lays it out as question and answer, inputs, the area and speed calculations, the reverse fit, the verdict and gate, and a form that reruns the estimator outside the project. Build explanations from structured fields, not from a plugin's free text, so that both languages read naturally. `tests/web-ui.spec.ts` opens the S0 and S1 views in both languages, from the flow page and from the sidebar, and returns with the back bar.
+A stage can also have a detailed demo view, opened from the "Detailed demo" button on its card. Write it as `views/steps/<stage>.tsx` and register it in `DETAILS` in `Flow.tsx`; the open detail is `selection.stage`, so the sidebar lists it under the selected project and the back bar (and the browser's back button) returns to it, as to every page and artifact visited before. Example: [views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) reads the stage's `estimate.report` and lays it out as question and answer, inputs, the area and speed calculations, the reverse fit, the verdict and gate, and a form that reruns the estimator outside the project. Build explanations from structured fields, not from a plugin's free text, so that both languages read naturally. `tests/web-ui.spec.ts` opens the S0, S1 and S2 views in both languages, from the flow page and from the sidebar, and returns with the back bar. [views/steps/S2.tsx](../apps/web/src/views/steps/S2.tsx) explains the numeric spec section by section, runs schemes through `runScheme` in `modelPipeline.ts`, compares every evaluated scheme, and makes a chip-path scheme the formal spec with `adoptScheme` (binds the G1 slots, judges `accuracy.budget`, runs `infer`).
 
 ### 5.9 An in-kernel system plugin (Cordis)
 
@@ -509,7 +520,8 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | `tests/model-import.spec.ts` | import of a tiny Qwen3 in the real Hugging Face layout, census, estimate from the census, graph, L0, the full test suite against transformers; llama2.c against the run.c port; a project's own proxy weights; a model without config.json reported, not guessed | FR-MDL-01/03/05/06 | always; needs `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama (tied/untied), Mistral with sliding window, Qwen2, Qwen3 against transformers; llama2.c against the run.c port; duplicated tied output; truncated file; unsupported models | FR-MDL | always |
 | `tests/kernel-footprint.spec.ts` | startup time and idle RSS of harnessd | NFR-01 (kernel part) | Linux |
-| `tests/web-ui.spec.ts` | catalog parity; every page in both languages in a browser | AC-M1-12 | browser part needs `apps/web/dist` and Chromium |
+| `tests/numeric-schemes.spec.ts` | any recovered graph (tiny Qwen3, the proxy from its own artifacts) quantized and its L2 evaluated against L0, a narrow accumulator overflowing, `numeric.accuracy` judged, a graph spec refused by the vector engine; with the EDA image, a half-even / wrap / 24-bit-accumulator scheme from the numeric spec to the chip spec, RTL equal to L2 on the ISA simulator and in Verilator, the ALU tested in those modes | FR-QNT, FR-RTL-01, FR-VER | graph part always; RTL part needs the EDA image (about 4 min) |
+| `tests/web-ui.spec.ts` | catalog parity; every page in both languages in a browser; the S0, S1 and S2 detail views | AC-M1-12 | browser part needs `apps/web/dist` and Chromium |
 | `tests/containers.spec.ts` | no network, read-only inputs, container removed on cancel | IF-3 | needs `python:3.12-slim` image |
 | `tests/calibration.spec.ts` | every storage candidate ends available or unavailable; stage entry on views | AC-M15-01/02/03 | needs EDA image |
 | `tests/m3-flow.spec.ts` | verification plan, G3, injected defect localized | M3, AC-03/09 | needs EDA image |
@@ -551,7 +563,9 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 - **UI**: no conditional approval or condition closing in the UI. No incident filters or jump links. No RTL, waveform or layout viewer beyond PNG. Settings lack LLM, quota and egress configuration (FR-UI-09/10/11/13, FR-AGT-25/26).
 - **CLI**: approvals, waivers, declassification, export and migration have no dedicated commands. Use `llmchip call` (FR-INT-07).
 - **TypeScript plugin SDK** has no tests of its own. It is exercised only through `stub-tool`.
-- **Imported Hugging Face models** stop at S1: S2–S8 consume the llama2.c Model IR (`model.ir`), not the recovered graph (`model.graph`). L0 runs the graph without a KV cache (full sequence per step), so long generations on large models are slow.
+- **Imported Hugging Face models** reach S2 as analysis only: S3–S8 consume the llama2.c Model IR (`model.ir`), and arch-taalas refuses a graph numeric spec with a reason. L0 and the graph L2 run the graph without a KV cache (full sequence per step), so long generations on large models are slow.
+- **Numeric analysis results** (int8, groups of 32, half-up, saturate, fraction bits per layer, 24-bit residual stream; 4 prompts × 8 tokens, 3 passages; on the development machine, 2026-10-19): stories260K perplexity 3.16 → 3.17, next-token agreement 98.6%, 1 s; SmolLM2-135M 12.64 → 12.76, 94.3%, 30 s; Qwen3-0.6B 23.00 → 22.39, 88.8%, 136 s; DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92, 88.8%, 584 s. At int4 SmolLM2 rises to 22.6 and Qwen3 to 28.6. With one 16-bit format per tensor kind SmolLM2 collapses (perplexity about 2.9 million): a few layers carry residual values near 20 000. `numeric.accuracy` asks for next-token agreement ≥ 0.9, which Qwen3 and DeepSeek at int8 miss narrowly.
+- **A failed analysis check opens an incident**, as every failed check does (FR-VER-06), so trying poor schemes on the S2 bench fills the incident list.
 
 ### 7.3 Conflicts between code and upstream documents (open, reported, not resolved)
 

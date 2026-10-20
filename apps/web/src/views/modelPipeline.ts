@@ -40,9 +40,9 @@ async function judge(client: KernelClient, project: string, check: string, r: Ru
   return (await client.call('verdicts.evaluate', { check, run: r.id, project })).verdict
 }
 
-/** S0 from real weights. Returns the verdict of the feasibility check. */
-export async function startFromWeights(client: KernelClient, o: StartOptions, report: Report): Promise<string> {
-  const step = async <T,>(name: string, work: () => Promise<T>, detail?: (value: T) => string): Promise<T> => {
+/** Runs one reported step: running, then done with a detail, or failed with the error. */
+function stepper(report: Report) {
+  return async <T,>(name: string, work: () => Promise<T>, detail?: (value: T) => string): Promise<T> => {
     report(name, 'running')
     try {
       const value = await work()
@@ -53,6 +53,11 @@ export async function startFromWeights(client: KernelClient, o: StartOptions, re
       throw e
     }
   }
+}
+
+/** S0 from real weights. Returns the verdict of the feasibility check. */
+export async function startFromWeights(client: KernelClient, o: StartOptions, report: Report): Promise<string> {
+  const step = stepper(report)
   const { project } = o
   await step('project', async () => {
     const { projects } = await client.call('projects.list')
@@ -120,17 +125,7 @@ export async function importPath(client: KernelClient, project: string, path: st
 
 /** S1: graph recovery, L0 and the full test suite, from the project's latest import. */
 export async function recoverGraph(client: KernelClient, project: string, report: Report, options: TestOptions = {}): Promise<void> {
-  const step = async <T,>(name: string, work: () => Promise<T>, detail?: (value: T) => string): Promise<T> => {
-    report(name, 'running')
-    try {
-      const value = await work()
-      report(name, 'done', detail?.(value))
-      return value
-    } catch (e) {
-      report(name, 'failed', (e as Error).message)
-      throw e
-    }
-  }
+  const step = stepper(report)
   const imported = (await latestImport(client, project)) ?? (await step('importWeights', () => importProjectWeights(client, project)))
   // Enter S1 when G0 allows it; otherwise the runs are analysis outside the stage.
   const release = await client.call('gates.release', { project, gate: 'G0' })
@@ -145,6 +140,102 @@ export async function recoverGraph(client: KernelClient, project: string, report
   await step('l0', () => run(client, project, 'model-llama', 'run_graph', inputs, params))
   const compared = await step('compare', () => run(client, project, 'model-llama', 'compare', [...inputs, ['census', census]], params), (r) => `${r.metrics.tests_passed}/${r.metrics.tests_total}`)
   await step('upstreamCheck', () => judge(client, project, 'model.upstream', compared), (v) => v)
+}
+
+/** The numeric behavior chosen in S2 (numeric/quantize, numeric/quantize_graph). */
+export interface Scheme {
+  weightFormat: 'int8' | 'int4' | 'int3' | 'ternary'
+  groupSize: number
+  /** Narrower than the proven no-overflow width when set. */
+  accumulatorBits?: number
+  rounding: 'half-up' | 'half-even' | 'truncate'
+  overflow: 'saturate' | 'wrap'
+  /** Recovered graphs only: fraction bits per layer, and the width of the residual stream. */
+  perLayer?: boolean
+  residualBits?: 16 | 24
+}
+
+/** How much of the evaluation set a recovered graph is evaluated on (large models are slow in L2). */
+export interface EvalSize {
+  maxPrompts: number
+  steps: number
+  passageTokens: number
+}
+
+export interface NumericSources {
+  /** The llama2.c Model IR the vector engine implements: quantize gives the formal numeric spec. */
+  chip?: { ir: string; tokenizer: string; evalset: string; context: number }
+  /** The recovered graph of an imported model: quantize_graph gives an analysis. */
+  graph?: { inputs: [string, string][]; evalset?: string }
+}
+
+const ok = (runs: RunRecord[], plugin: string, handler: string) => runs.filter((r) => r.plugin === plugin && r.handler === handler && r.execution === 'exited_zero')
+const input = (r: RunRecord | undefined, name: string) => r?.inputs.find((i) => i.name === name)?.hash
+
+/** What S2 can quantize in a project. */
+export async function numericSources(client: KernelClient, project: string): Promise<NumericSources> {
+  const { runs } = await client.call('runs.list', { project, limit: 1000 })
+  const sources: NumericSources = {}
+  const intake = ok(runs, 'model-llama', 'intake').at(-1)
+  const quantized = ok(runs, 'numeric', 'quantize').at(-1)
+  const evalset = input(quantized, 'evalset') ?? input(ok(runs, 'model-llama', 'reference').at(-1), 'evalset')
+  if (intake && evalset) {
+    const context = Number((quantized?.params as { contextLength?: number } | undefined)?.contextLength ?? 64)
+    sources.chip = { ir: outputs(intake, 'ir')[0]!, tokenizer: input(intake, 'tokenizer')!, evalset, context }
+  }
+  const imported = ok(runs, 'model-llama', 'import').at(-1)
+  const recovered = ok(runs, 'model-llama', 'recover').filter((r) => r.metrics.family_supported === true).at(-1)
+  if (imported && recovered) {
+    const inputs: [string, string][] = [['graph', outputs(recovered, 'graph')[0]!], ['bundle', outputs(imported, 'bundle')[0]!], ...outputs(imported, 'file').map((h): [string, string] => ['files', h])]
+    // A project's own llama2.c model (the proxy) has a tiny alphabet: use the evaluation set of its chip path.
+    sources.graph = { inputs, ...(evalset ? { evalset } : {}) }
+  }
+  return sources
+}
+
+/** S2: quantizes with a scheme and evaluates L2 against L0, on the chip path or the recovered graph. */
+export async function runScheme(client: KernelClient, project: string, path: 'chip' | 'graph', scheme: Scheme, size: EvalSize, report: Report): Promise<{ quantize: RunRecord; evaluate: RunRecord }> {
+  const step = stepper(report)
+  const sources = await numericSources(client, project)
+  const params: Record<string, unknown> = { weightFormat: scheme.weightFormat, groupSize: scheme.groupSize, rounding: scheme.rounding, overflow: scheme.overflow }
+  if (scheme.accumulatorBits) params.accumulatorBits = scheme.accumulatorBits
+  if (path === 'chip') {
+    const c = sources.chip
+    if (!c) throw new Error('this project has no Model IR (S1 intake)')
+    const base: [string, string][] = [['ir', c.ir], ['tokenizer', c.tokenizer], ['evalset', c.evalset]]
+    const quantize = await step('quantize', () => run(client, project, 'numeric', 'quantize', base, { ...params, contextLength: c.context }))
+    const spec: [string, string][] = [['spec', outputs(quantize, 'spec')[0]!], ['weights', outputs(quantize, 'weights')[0]!]]
+    const evaluate = await step('evaluate', () => run(client, project, 'numeric', 'evaluate', [...base, ...spec]), (r) => `${(r.metrics.ppl_increase_pct as number).toFixed(1)}%`)
+    return { quantize, evaluate }
+  }
+  const g = sources.graph
+  if (!g) throw new Error('this project has no recovered graph (S1)')
+  const base: [string, string][] = [...g.inputs, ...(g.evalset ? [['evalset', g.evalset] as [string, string]] : [])]
+  const quantize = await step('quantize', () => run(client, project, 'numeric', 'quantize_graph', base, { ...params, perLayer: scheme.perLayer ?? true, residualBits: scheme.residualBits ?? 24 }))
+  const spec: [string, string][] = [['spec', outputs(quantize, 'spec')[0]!], ['weights', outputs(quantize, 'weights')[0]!]]
+  const evaluate = await step('evaluate', () => run(client, project, 'numeric', 'evaluate_graph', [...base, ...spec], { ...size }), (r) => `${(r.metrics.ppl_increase_pct as number).toFixed(1)}%`)
+  await step('check', () => judge(client, project, 'numeric.accuracy', evaluate), (v) => v)
+  return { quantize, evaluate }
+}
+
+/**
+ * Makes a chip-path scheme the formal numeric spec of the project: binds the G1 slots
+ * (this invalidates earlier G1/G2 approvals), judges the G1 check on its evaluation,
+ * and runs L2 with observation-point traces for S3-S5. G1 itself stays a human decision.
+ */
+export async function adoptScheme(client: KernelClient, project: string, quantize: RunRecord, evaluate: RunRecord, report: Report): Promise<void> {
+  const step = stepper(report)
+  const spec = outputs(quantize, 'spec')[0]!
+  const weights = outputs(quantize, 'weights')[0]!
+  const tokenizer = input(quantize, 'tokenizer')!
+  const evalset = input(quantize, 'evalset')!
+  await step('bind', async () => {
+    for (const [slot, hash] of [['model-ir', input(quantize, 'ir')!], ['tokenizer', tokenizer], ['eval-set', evalset], ['numeric-spec', spec], ['l2-weights', weights]] as const) {
+      await client.call('projects.bind', { project, slot, hash })
+    }
+  })
+  await step('budget', () => judge(client, project, 'accuracy.budget', evaluate), (v) => v)
+  await step('infer', () => run(client, project, 'numeric', 'infer', [['spec', spec], ['weights', weights], ['tokenizer', tokenizer], ['evalset', evalset]]))
 }
 
 /** A project id from a model directory, e.g. ~/models/Qwen3-0.6B -> qwen3-0-6b. */

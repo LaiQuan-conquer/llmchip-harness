@@ -99,30 +99,46 @@ def run_node(node: dict, env: dict[str, np.ndarray], w: Weights, i: int | None, 
         env[name] = value
 
 
-def forward(graph: dict, w: Weights, tokens: list[int], hidden: list[np.ndarray] | None = None) -> np.ndarray:
+Observer = Callable[[dict, list[np.ndarray], int | None], None]
+
+
+def forward(
+    graph: dict,
+    w: Weights,
+    tokens: list[int],
+    hidden: list[np.ndarray] | None = None,
+    observe: Observer | None = None,
+) -> np.ndarray:
     """Logits (T, vocab) for every position of `tokens`.
 
     `hidden`, when given, receives the residual stream after the embedding, after
     each decoder layer, and after the final norm (layers + 2 arrays of shape (T, d)).
+    `observe(node, outputs, layer)` is called after every node (e.g. to calibrate a quantization).
     """
     if not graph.get("supported"):
         raise ValueError("the graph was not recovered")
     nodes = graph["nodes"]
     env: dict[str, np.ndarray] = {"tokens": np.asarray(tokens, dtype=np.int64)}
     pos = np.arange(len(tokens))
+
+    def run(node: dict, i: int | None) -> None:
+        run_node(node, env, w, i, pos)
+        if observe is not None:
+            observe(node, [env[name] for name in node["outputs"]], i)
+
     for node in nodes["prologue"]:
-        run_node(node, env, w, None, pos)
+        run(node, None)
     if hidden is not None:
         hidden.append(env["x"])
     for i in range(nodes["repeat"]):
         for node in nodes["block"]:
-            run_node(node, env, w, i, pos)
+            run(node, i)
         if hidden is not None:
             hidden.append(env["x"])
     for node in nodes["epilogue"]:
         if node["op"] == "argmax":
             continue
-        run_node(node, env, w, None, pos)
+        run(node, None)
         if hidden is not None and node["op"] == "rmsnorm":
             hidden.append(env[node["outputs"][0]])
     return env["logits"]

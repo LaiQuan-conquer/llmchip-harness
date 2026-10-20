@@ -31,16 +31,40 @@ MODE_DEBUG = 2  # step mode bit: also copy the output of every operation
 # -- scalar functions (reference for the RTL arithmetic unit) -----------------
 
 
-def rsh(v, s: int):
-    """Round-half-up shift: (v + 2^(s-1)) >> s, arithmetic; negative s shifts left."""
-    if s > 0:
+ROUND_MODES = ("half-up", "half-even", "truncate")  # the design parameter ROUND_MODE indexes this
+
+
+def rsh(v, s: int, mode: str = "half-up"):
+    """v / 2^s rounded per the numeric spec's rounding mode (arithmetic shifts):
+    half-up (v + 2^(s-1)) >> s, half-even (ties to even), truncate v >> s; negative s shifts left."""
+    if s < 0:
+        return v << (-s)
+    if s == 0:
+        return v
+    if mode == "half-up":
         return (v + (1 << (s - 1))) >> s
-    return v << (-s) if s < 0 else v
+    if mode == "half-even":
+        return (v + ((1 << (s - 1)) - 1) + ((v >> s) & 1)) >> s
+    if mode == "truncate":
+        return v >> s
+    raise ValueError(f"unknown rounding mode {mode}")
 
 
-def sat(v, bits: int):
+def sat(v, bits: int, mode: str = "saturate"):
+    """v narrowed to a signed `bits`-bit integer: clamped (saturate) or its low bits (wrap)."""
     lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    if mode == "wrap":
+        return ((v - lo) & ((1 << bits) - 1)) + lo
     return np.clip(v, lo, hi) if isinstance(v, np.ndarray) else min(max(v, lo), hi)
+
+
+def modes(params: dict) -> dict:
+    """Machine keyword arguments from the design parameters of an RTL bundle."""
+    return {
+        "rounding": ROUND_MODES[int(params.get("ROUND_MODE", 0))],
+        "overflow": "wrap" if params.get("OVERFLOW_WRAP") else "saturate",
+        "acc_bits": int(params["ACCB"]) if params.get("ACC_NARROW") else None,
+    }
 
 
 def rsqrt_index(v: int) -> tuple[int, int]:
@@ -99,7 +123,11 @@ class Machine:
         lanes: int,
         dmem_words: int,
         context: int,
+        rounding: str = "half-up",
+        overflow: str = "saturate",
+        acc_bits: int | None = None,
     ):
+        self.rounding, self.overflow, self.acc_bits = rounding, overflow, acc_bits
         self.program = [decode(w) for w in program]
         self.wrom, self.srom, self.crom = wrom.astype(np.int64), srom.astype(np.int64), crom.astype(np.int64)
         self.lanes = lanes
@@ -132,6 +160,13 @@ class Machine:
             raise ValueError(f"position {pos} exceeds the context of {self.context}")
         d = self.dmem
         result = 0
+
+        def rsh_(v, s):
+            return rsh(v, s, self.rounding)
+
+        def sat_(v, bits):
+            return sat(v, bits, self.overflow)
+
         for index, (op, f) in enumerate(self.program):
             if op == "END":
                 break
@@ -139,7 +174,7 @@ class Machine:
                 dst, dim, wbase, sbase, group, ngroups, shift = f[:7]
                 w, m = self.rows(wbase, sbase, dim, token + 1, group, ngroups)
                 q, mm = w[token], m[token]
-                d[dst : dst + dim] = sat(rsh(q * mm[np.arange(dim) // group], shift), 16)
+                d[dst : dst + dim] = sat_(rsh_(q * mm[np.arange(dim) // group], shift), 16)
             elif op == "MATVEC":
                 x, dst, inp, out, wbase, sbase, group, ngroups, shift, flags, stride = f[:11]
                 w, m = self.rows(wbase, sbase, inp, out, group, ngroups)
@@ -148,7 +183,15 @@ class Machine:
                 wp = np.zeros((out, ngroups * group), np.int64)
                 wp[:, :inp] = w
                 acc = np.einsum("ogk,gk->og", wp.reshape(out, ngroups, group), xp.reshape(ngroups, group))
-                y = sat(rsh((acc * m).sum(axis=1), shift), 32 if flags & FLAG_SAT32 else 16)
+                terms = acc * m
+                if self.acc_bits is None:
+                    total = terms.sum(axis=1)
+                else:
+                    # A narrow accumulator adds the groups in index order, narrowing every sum.
+                    total = np.zeros(out, np.int64)
+                    for g in range(ngroups):
+                        total = sat_(total + terms[:, g], self.acc_bits)
+                y = sat_(rsh_(total, shift), 32 if flags & FLAG_SAT32 else 16)
                 base = dst + (pos * stride if flags & FLAG_POS else 0)
                 d[base : base + out] = y
             elif op == "RMS":
@@ -156,7 +199,7 @@ class Machine:
                 v = int((d[x : x + n] * d[x : x + n]).sum()) // n + ((eps_hi << 32) | (eps_lo & 0xFFFFFFFF))
                 e2, t = rsqrt_index(v)
                 r = int(self.crom[lut + t - 64])
-                d[dst : dst + n] = sat(rsh(d[x : x + n] * self.crom[cbase : cbase + n] * r, shift_base + e2 // 2), 16)
+                d[dst : dst + n] = sat_(rsh_(d[x : x + n] * self.crom[cbase : cbase + n] * r, shift_base + e2 // 2), 16)
             elif op == "ROPE":
                 addr, n, hs, cos, sin, flags, stride = f[:7]
                 base = addr + (pos * stride if flags & FLAG_POS else 0)
@@ -165,8 +208,8 @@ class Machine:
                 c = self.crom[cos + pos * (hs // 2) + j]
                 s = self.crom[sin + pos * (hs // 2) + j]
                 a, b = v[0::2], v[1::2]
-                d[base : base + n : 2] = sat(rsh(a * c - b * s, 14), 16)
-                d[base + 1 : base + n : 2] = sat(rsh(a * s + b * c, 14), 16)
+                d[base : base + n : 2] = sat_(rsh_(a * c - b * s, 14), 16)
+                d[base + 1 : base + n : 2] = sat_(rsh_(a * s + b * c, 14), 16)
             elif op == "ATTN":
                 q, kbase, vbase, dst, heads, kv_mul, hs, scale, shift, exp, scratch, kv_dim, cap, ishift = f[:14]
                 for h in range(heads):
@@ -177,20 +220,20 @@ class Machine:
                     vals = np.array(
                         [d[vbase + t * kv_dim + kvh : vbase + t * kv_dim + kvh + hs] for t in range(pos + 1)]
                     )
-                    s = sat(rsh((keys @ d[q + h * hs : q + (h + 1) * hs]) * scale, shift), 32)
+                    s = sat_(rsh_((keys @ d[q + h * hs : q + (h + 1) * hs]) * scale, shift), 32)
                     e = self.crom[exp + exp_index(s.max() - s, cap, ishift)]
                     p = (e << 15) // e.sum()
                     d[scratch : scratch + pos + 1] = s
                     d[scratch + self.context : scratch + self.context + pos + 1] = p
-                    d[dst + h * hs : dst + (h + 1) * hs] = sat(rsh(p @ vals, 15), 16)
+                    d[dst + h * hs : dst + (h + 1) * hs] = sat_(rsh_(p @ vals, 15), 16)
             elif op == "SILU":
                 h1, h3, dst, n, frac, sig, sh2, clamp, offset = f[:9]
                 a = d[h1 : h1 + n]
-                s = rsh(a * self.crom[sig + silu_index(a, frac, clamp, offset)], 15)
-                d[dst : dst + n] = sat(rsh(s * d[h3 : h3 + n], sh2), 16)
+                s = rsh_(a * self.crom[sig + silu_index(a, frac, clamp, offset)], 15)
+                d[dst : dst + n] = sat_(rsh_(s * d[h3 : h3 + n], sh2), 16)
             elif op == "ADD":
                 x, y, n = f[:3]
-                d[x : x + n] = sat(d[x : x + n] + d[y : y + n], 16)
+                d[x : x + n] = sat_(d[x : x + n] + d[y : y + n], 16)
             elif op == "TRACE":
                 addr, n, point, layer, flags, stride, buffer = f[:7]
                 if not mode & (MODE_DEBUG if flags & FLAG_DEBUG else MODE_POINTS):

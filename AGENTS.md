@@ -134,7 +134,7 @@ Planned directories still to be created: `apps/desktop/` and `images/` (architec
 | `yarn build` | Compile every package to `lib/` and build the Web UI to `apps/web/dist/` |
 | `yarn ui` | Open the Web UI of the running kernel in the browser (`llmchip ui`) |
 | `yarn demo [--until G0..G4]` | Drive project `demo` through the default flow on the running kernel, for the Web UI's Flow page (S5 onwards needs the EDA image) |
-| `yarn demo --model PATH` | Start a project from a downloaded model on this machine: import, census, estimate, graph recovery, L0, comparison with transformers |
+| `yarn demo --model PATH` | Start a project from a downloaded model on this machine: import, census, estimate, graph recovery, L0, comparison with transformers, and an int8 numeric analysis (S2) |
 | `yarn clean` | Remove build output |
 | `yarn harnessd serve [--home DIR]` | Run the kernel daemon from source (home defaults to `$LLMCHIP_HOME` or `~/.llmchip`) |
 | `yarn llmchip <command>` | Run the CLI from source against a running kernel; `yarn llmchip --help` lists commands |

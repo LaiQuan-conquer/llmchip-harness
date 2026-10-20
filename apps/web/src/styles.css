@@ -229,3 +229,18 @@ pre.content { max-height: 60vh; }
 .s1-tests td { vertical-align: top; }
 .s1-tests td:nth-child(3) { max-width: 320px; white-space: normal; }
 .s1-tests td:nth-child(5) { white-space: normal; }
+
+/* S2 detail: numeric scheme, test bench and comparison */
+.s2-acc { display: flex; gap: 6px; }
+.s2-acc input { width: 70px; }
+.s2-compare td { vertical-align: middle; }
+.s2-compare td:first-child, .s2-wrap td { white-space: normal; }
+.s2-scroll { overflow-x: auto; }
+.s2-example td, .s2-example th { text-align: right; font-variant-numeric: tabular-nums; }
+.s2-example th { text-align: left; white-space: nowrap; }
+.s2-modes td, .s2-modes th { text-align: center; font-variant-numeric: tabular-nums; }
+.s2-modes .current { background: #eef3fe; font-weight: 600; }
+.s2-bars { display: grid; gap: 3px; margin: 6px 0 10px; }
+.s2-bar { display: grid; grid-template-columns: 64px 1fr 64px; align-items: center; gap: 8px; }
+.s2-bar span { height: 10px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+.s2-bar small:last-child { text-align: right; font-variant-numeric: tabular-nums; }

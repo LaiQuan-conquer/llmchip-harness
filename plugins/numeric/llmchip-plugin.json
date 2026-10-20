@@ -1,12 +1,15 @@
 {
   "id": "numeric",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Numeric co-design: quantization, numeric spec, L2 bit-exact model, accuracy (S2)",
   "kinds": ["quantizer", "numeric-spec"],
   "runtime": "process",
   "entry": { "command": ["${python}", "-m", "llmchip_numeric"] },
   "kernelApi": "^0.3",
-  "data": [{ "id": "evalset-tinystories", "type": "eval.set", "path": "data/evalset-tinystories.json", "label": "public" }],
+  "data": [
+    { "id": "evalset-tinystories", "type": "eval.set", "path": "data/evalset-tinystories.json", "label": "public" },
+    { "id": "evalset-general", "type": "eval.set", "path": "data/evalset-general.json", "label": "public" }
+  ],
   "handlers": [
     {
       "name": "quantize",
@@ -26,7 +29,10 @@
         "properties": {
           "weightFormat": { "enum": ["int8", "int4", "int3", "ternary"], "default": "int4" },
           "groupSize": { "type": "integer", "minimum": 4, "maximum": 4096, "default": 32 },
-          "contextLength": { "type": "integer", "minimum": 8, "maximum": 4096, "default": 64 }
+          "contextLength": { "type": "integer", "minimum": 8, "maximum": 4096, "default": 64 },
+          "rounding": { "enum": ["half-up", "half-even", "truncate"], "default": "half-up" },
+          "overflow": { "enum": ["saturate", "wrap"], "default": "saturate" },
+          "accumulatorBits": { "type": "integer", "minimum": 16, "maximum": 64 }
         }
       },
       "timeoutMs": 1800000
@@ -60,6 +66,58 @@
       "outputs": [{ "name": "report", "type": "accuracy.report", "mediaType": "application/json" }],
       "params": { "type": "object", "additionalProperties": false },
       "timeoutMs": 3600000
+    },
+    {
+      "name": "quantize_graph",
+      "title": "Quantize a recovered graph (any model) and write its numeric spec (analysis)",
+      "inputs": [
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "bundle", "types": ["model.bundle"], "required": true },
+        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": true, "multiple": true },
+        { "name": "evalset", "types": ["eval.set"], "required": false }
+      ],
+      "outputs": [
+        { "name": "spec", "type": "numeric.spec", "mediaType": "application/json" },
+        { "name": "weights", "type": "numeric.weights", "mediaType": "application/x-npz" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weightFormat": { "enum": ["int8", "int4", "int3", "ternary"], "default": "int8" },
+          "groupSize": { "type": "integer", "minimum": 4, "maximum": 256, "default": 32 },
+          "contextLength": { "type": "integer", "minimum": 16, "maximum": 4096, "default": 256 },
+          "perLayer": { "type": "boolean", "default": true },
+          "residualBits": { "enum": [16, 24], "default": 24 },
+          "rounding": { "enum": ["half-up", "half-even", "truncate"], "default": "half-up" },
+          "overflow": { "enum": ["saturate", "wrap"], "default": "saturate" },
+          "accumulatorBits": { "type": "integer", "minimum": 16, "maximum": 64 }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "evaluate_graph",
+      "title": "Accuracy of a recovered graph's L2 against L0 (analysis)",
+      "inputs": [
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "bundle", "types": ["model.bundle"], "required": true },
+        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": true, "multiple": true },
+        { "name": "evalset", "types": ["eval.set"], "required": false },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true }
+      ],
+      "outputs": [{ "name": "report", "type": "accuracy.report", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxPrompts": { "type": "integer", "minimum": 1, "maximum": 20, "default": 4 },
+          "steps": { "type": "integer", "minimum": 1, "maximum": 64, "default": 8 },
+          "passageTokens": { "type": "integer", "minimum": 8, "maximum": 1024, "default": 128 }
+        }
+      },
+      "timeoutMs": 7200000
     }
   ]
 }

@@ -224,7 +224,9 @@ class Bundle:
         img = np.load(self.root / "isa-image.npz")
         program = [int(w) for w in img["program"]]
         p = self.params
-        return self.isa.Machine(program, img["wrom"], img["srom"], img["crom"], p["LANES"], p["NDMEM"], p["CTX"])
+        return self.isa.Machine(
+            program, img["wrom"], img["srom"], img["crom"], p["LANES"], p["NDMEM"], p["CTX"], **self.isa.modes(p)
+        )
 
 
 def parse(data: bytes) -> list[dict]:

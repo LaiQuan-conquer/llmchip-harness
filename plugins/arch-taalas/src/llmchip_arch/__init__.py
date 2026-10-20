@@ -162,6 +162,9 @@ def design(
             "activations": "int16, formats from the numeric spec; "
             + ("in the external memory with the KV cache" if act_location == "offchip" else "in on-chip registers"),
             "accumulatorBits": spec["accumulator"]["bits"],
+            "accumulatorCanOverflow": spec["accumulator"].get("canOverflow", False),
+            "rounding": spec.get("rounding", {}).get("mode", "half-up"),
+            "overflow": spec.get("overflow", {}).get("mode", "saturate"),
             "nonlinear": [
                 "rsqrt table (rmsnorm)",
                 "exp table (softmax)",

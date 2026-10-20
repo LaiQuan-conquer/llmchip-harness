@@ -73,6 +73,11 @@ class Compiled:
         exps = spec["weights"]["exponents"]
         self.wbits = spec["weights"]["storageBits"]
         self.context = ctx
+        # Rounding, overflow and accumulator width of the numeric spec (defaults: today's behavior).
+        self.rounding = spec.get("rounding", {}).get("mode", "half-up")
+        self.overflow = spec.get("overflow", {}).get("mode", "saturate")
+        acc_spec = spec["accumulator"]
+        self.acc_bits = acc_spec["bits"] if acc_spec.get("canOverflow") else None
 
         # Weight and scale ROMs.
         wrom: list[np.ndarray] = []
@@ -417,6 +422,17 @@ class Compiled:
         }
         widths["RSH_POSITIVE"] = int(min(shifts) >= 1)
         widths["SILU_FRAC_GE4"] = int(min(silu_frac, default=4) >= 4)
+        # Numeric modes: rounding of every result shift, overflow of every narrowing, and a
+        # MATVEC total narrower than its proven bound (narrowed after each group addition).
+        widths["ROUND_MODE"] = ("half-up", "half-even", "truncate").index(self.rounding)
+        widths["ROUND_HALF_EVEN"] = int(self.rounding == "half-even")
+        widths["ROUND_TRUNCATE"] = int(self.rounding == "truncate")
+        widths["OVERFLOW_WRAP"] = int(self.overflow == "wrap")
+        narrow = self.acc_bits is not None and self.acc_bits < widths["TOTW"]
+        widths["ACC_NARROW"] = int(narrow)
+        widths["ACCB"] = self.acc_bits if narrow else widths["TOTW"]
+        if narrow:
+            widths["TOTW"] = self.acc_bits
         dims = [self.cfg[k] for k in ("dim", "hidden_dim", "vocab_size")] + [self.context, 2 * self.lanes]
         widths["IW"] = max(dims).bit_length() + 1
         if widths["AW"] > 22:

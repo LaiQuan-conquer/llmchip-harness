@@ -3,8 +3,9 @@
 Selected by the environment: ALU_TESTS (comma-separated test ids), ISA_PATH,
 H1_FRAC (fraction bits of h1 in the design), RESULTS (JSON file for counts), and
 the design's proven domains: DW (datapath width), RSH_POSITIVE (all shifts are
-right shifts), SILU_FRAC_GE4 (fraction bits of h1 >= 4). Each function is tested
-on the domain the core uses it on.
+right shifts), SILU_FRAC_GE4 (fraction bits of h1 >= 4), and the numeric modes of
+the design: ROUND_MODE (index into isa.ROUND_MODES), OVERFLOW_WRAP, ACC_NARROW and
+ACCB (accumulator width). Each function is tested on the domain the core uses it on.
 """
 
 import importlib.util
@@ -24,6 +25,9 @@ DW = int(os.environ.get("DW", "64"))
 RSH_MIN = 1 if os.environ.get("RSH_POSITIVE") == "1" else -8
 FRAC_MIN = 4 if os.environ.get("SILU_FRAC_GE4") == "1" else 0
 VMAX = 2 ** (DW - 2)  # values of the datapath stay below 2^(DW-1)
+ROUNDING = isa.ROUND_MODES[int(os.environ.get("ROUND_MODE", "0"))]
+OVERFLOW = "wrap" if os.environ.get("OVERFLOW_WRAP") == "1" else "saturate"
+ACCB = int(os.environ["ACCB"]) if os.environ.get("ACC_NARROW") == "1" else None
 COUNTS: dict = {}
 
 
@@ -54,9 +58,18 @@ async def check_rsh_sat(dut, cases):
         if not (-VMAX <= v < VMAX and s >= RSH_MIN):
             continue
         await apply(dut, v, s)
-        want = (isa.rsh(v, s), isa.sat(v, 16), isa.sat(v, 32))
-        got = (dut.rsh.value.to_signed(), dut.sat16.value.to_signed(), dut.sat32.value.to_signed())
-        want = (want[0], want[1], want[2])
+        want = (
+            isa.rsh(v, s, ROUNDING),
+            isa.sat(v, 16, OVERFLOW),
+            isa.sat(v, 32, OVERFLOW),
+            v if ACCB is None else isa.sat(v, ACCB, OVERFLOW),
+        )
+        got = (
+            dut.rsh.value.to_signed(),
+            dut.sat16.value.to_signed(),
+            dut.sat32.value.to_signed(),
+            dut.acc.value.to_signed(),
+        )
         if got != want:
             failures.append({"v": v, "s": s, "got": got, "want": want})
     return failures
@@ -112,6 +125,8 @@ async def boundary_alu(dut):
             ]
     for v in (32767, 32768, -32768, -32769, 2**31 - 1, 2**31, -(2**31), -(2**31) - 1, 2**40, -(2**40), 0, -1):
         cases += [(v, 0), (v, 3), (v, -2)]
+    if ACCB is not None:  # the edges of a narrow accumulator
+        cases += [(v, 3) for v in (2 ** (ACCB - 1) - 1, 2 ** (ACCB - 1), -(2 ** (ACCB - 1)), -(2 ** (ACCB - 1)) - 1)]
     failures = await check_rsh_sat(dut, cases)
     silu_values = []
     for frac in range(FRAC_MIN, 16):

@@ -6,7 +6,7 @@
 |---|---|
 | 文档版本 | v0.1 |
 | 日期 | 2026-10-19 |
-| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原 |
+| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案 |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.9 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -160,7 +160,7 @@ plugins/                   额外的插件搜索路径
 | `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`package-gf180mcu`；`signoff-gf180mcu` | S0、S3、S6–S8 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
-| `numeric` | process（Python） | `quantize`、`infer`、`evaluate` | S2/G1 | `test_numeric.py` |
+| `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2/G1 | `test_numeric.py`、`test_graph_l2.py` |
 | `arch-taalas` | process（Python） | `design`、`verify_spec` | S3/G2 | `test_arch.py` |
 | `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py` |
 | `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5/G3、S7、Playground | `test_simlib.py` |
@@ -183,7 +183,7 @@ plugins/                   额外的插件搜索路径
   - 把 llama2.c 检查点与分词器导入为 S2–S8 使用的 llama2.c 模型 IR。
   - 生成占位模型：采用某个规划模型的结构，固定种子，未训练，附带 `evalset-proxy`。
   - 提供 L0 FP32 参考，即 `run.c` 的 NumPy 移植。它与 `plugins/model-llama/upstream/` 中随仓库提供并编译的 `run.c` 对照检查。
-- **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（G1 证据），并附带评估集。
+- **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（G1 证据），并附带评估集。舍入（`half-up`、`half-even`、`truncate`）、溢出处理（`saturate`、`wrap`）和累加器位宽（已证明不溢出的位宽，或更窄的位宽）是规格中的结构化字段，统一定义在 [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)；默认值得到的 L2 与引入这些选项之前逐位相同。`quantize_graph` / `evaluate_graph` 对任何已还原的计算图做同样的事（[graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py)，规格格式 `llmchip-numeric-graph-spec/1`）：这是对向量引擎无法实现的模型的分析，默认逐层确定小数位、残差流 24 位，由 `numeric.accuracy` 判定。在 llama2.c 计算图上，它与芯片 L2 逐位相同。
 - **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（G2 证据）。
 - **rtl-taalas**：把数值规格编译成微码化向量引擎，产出一个确定性的 `rtl.bundle`。其中包含：
   - Verilog 核心（数据放在片外 SPI SRAM），以及 SPI 主机接口；
@@ -442,6 +442,17 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 家族不支持的情况必须返回 `supported: false` 和原因码，绝不给出近似的图。
 
+### 5.3b 数值模式（舍入、溢出、累加器）
+
+示例：`half-even` 舍入。模式是芯片行为，所以有四份实现，必须逐位一致：
+
+1. [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)（`l2.py` 和 `graph_l2.py` 使用）以及 `plugins/numeric/llmchip-plugin.json` 中 `quantize` / `quantize_graph` 的参数枚举；`spec.py` 把它连同定义写进规格。
+2. [isa.py](../plugins/rtl-taalas/src/llmchip_rtl/isa.py) 中自包含的副本（它随 RTL 包一起发布），由 `modes(params)` 选择。
+3. [compiler.py](../plugins/rtl-taalas/src/llmchip_rtl/compiler.py) 中 `Compiled._widths` 输出的宏（列在 `bundle.py` 的 `flags` 中），以及 [llmchip_functions.vh](../plugins/rtl-taalas/src/llmchip_rtl/rtl/llmchip_functions.vh) 中的 `ifdef` 分支。
+4. `plugins/sim-verilator/cocotb_alu.py` 中的 ALU 单元测试，它从 RTL 包参数读取模式。
+
+测试：`test_rounding_modes_match_exact_arithmetic`（与精确有理数比较），`plugins/rtl-taalas/tests/test_rtl.py` 中的 `test_isa_rules_are_the_numeric_spec_rules` 和 `test_every_numeric_scheme_compiles_to_the_same_bits_as_l2`，以及 `tests/numeric-schemes.spec.ts` 的 RTL 部分（Verilator 与 L2 对比，ALU 按该模式测试）。注意 Verilog 的有无符号：一个无符号操作数会让整个表达式变成无符号，`>>>` 变成逻辑移位（偶数舍入的第一版就因此在 9920 个随机 ALU 向量上出错）。
+
 ### 5.4 内核 API 方法
 
 示例：`kernel.pause`（FR-AGT-23）。可以按以下各层追踪：
@@ -500,7 +511,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 示例：S6 的“核心区面积”和“布局布线后时序”读取 `eda-gf180/implement` 的 `core_area_um2` 和 `flow_setup_violations`。
 
-阶段还可以有详细演示视图，从卡片上的“详细演示”按钮打开。把它写成 `views/steps/<阶段>.tsx`，并在 `Flow.tsx` 的 `DETAILS` 中注册；打开的详细视图记在 `selection.stage` 中，因此左侧栏会在选中的项目下列出它，返回栏（以及浏览器的后退按钮）能回到它，就像回到之前访问过的任何页面和产物一样。示例：[views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) 读取该阶段的 `estimate.report`，依次展示问题与回答、输入、面积与速度的计算、反推能放下的模型、检查与审批门，以及一个在项目之外重新运行估算器的表单。说明文字要由结构化字段生成，不要直接用插件的自由文本，这样两种语言读起来都自然。`tests/web-ui.spec.ts` 会以两种语言从流程页和左侧栏打开 S0、S1 视图，并用返回栏返回。
+阶段还可以有详细演示视图，从卡片上的“详细演示”按钮打开。把它写成 `views/steps/<阶段>.tsx`，并在 `Flow.tsx` 的 `DETAILS` 中注册；打开的详细视图记在 `selection.stage` 中，因此左侧栏会在选中的项目下列出它，返回栏（以及浏览器的后退按钮）能回到它，就像回到之前访问过的任何页面和产物一样。示例：[views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) 读取该阶段的 `estimate.report`，依次展示问题与回答、输入、面积与速度的计算、反推能放下的模型、检查与审批门，以及一个在项目之外重新运行估算器的表单。说明文字要由结构化字段生成，不要直接用插件的自由文本，这样两种语言读起来都自然。`tests/web-ui.spec.ts` 会以两种语言从流程页和左侧栏打开 S0、S1、S2 视图，并用返回栏返回。[views/steps/S2.tsx](../apps/web/src/views/steps/S2.tsx) 逐节解释数值规格，通过 `modelPipeline.ts` 的 `runScheme` 运行方案，对比所有评估过的方案，并用 `adoptScheme` 把芯片路径的方案设为正式规格（绑定 G1 的槽位、判定 `accuracy.budget`、运行 `infer`）。
 
 ### 5.9 内核内系统插件（Cordis）
 
@@ -556,7 +567,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/model-import.spec.ts` | 导入真实 Hugging Face 布局的小 Qwen3，普查、按普查估算、图还原、L0、与 transformers 的全量测试；llama2.c 与 run.c 移植对拍；项目自带的占位模型权重；没有 config.json 的模型如实报告而不猜测 | FR-MDL-01/03/05/06 | 总是；需要 `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama（共享/不共享输出层）、带滑动窗口的 Mistral、Qwen2、Qwen3 与 transformers 对拍；llama2.c 与 run.c 移植对拍；重复存储的共享输出层；截断的文件；不支持的模型 | FR-MDL | 总是 |
 | `tests/kernel-footprint.spec.ts` | harnessd 启动时间与空闲 RSS | NFR-01（内核部分） | Linux |
-| `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
+| `tests/numeric-schemes.spec.ts` | 任何已还原的计算图（小 Qwen3、从自身产物导入的占位模型）量化并评估 L2 对 L0，窄累加器确实溢出，判定 `numeric.accuracy`，向量引擎拒绝计算图规格；有 EDA 镜像时，把偶数舍入 / 回绕 / 24 位累加器方案从数值规格带到芯片规格，RTL 在指令级模拟器和 Verilator 中与 L2 一致，ALU 按这些模式测试 | FR-QNT、FR-RTL-01、FR-VER | 计算图部分总是运行；RTL 部分需 EDA 镜像（约 4 分钟） |
+| `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2 详细视图 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
 | `tests/containers.spec.ts` | 无网络、输入只读、取消时移除容器 | IF-3 | 需 `python:3.12-slim` 镜像 |
 | `tests/calibration.spec.ts` | 每个存储候选都得出可用或不可用；按视图的阶段准入 | AC-M15-01/02/03 | 需 EDA 镜像 |
 | `tests/m3-flow.spec.ts` | 验证计划、G3、注入缺陷的定位 | M3、AC-03/09 | 需 EDA 镜像 |
@@ -598,7 +610,9 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **UI**：没有条件审批与关闭条件的界面。没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-09/10/11/13、FR-AGT-25/26）。
 - **CLI**：审批、豁免、去密、导出、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
 - **TypeScript 插件 SDK** 没有自己的测试，只通过 `stub-tool` 间接覆盖。
-- **导入的 Hugging Face 模型**目前止于 S1：S2–S8 使用的是 llama2.c 模型 IR（`model.ir`），而不是还原的计算图（`model.graph`）。L0 执行计算图时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
+- **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S8 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
+- **数值分析结果**（int8、分组 32、四舍五入、饱和、逐层小数位、残差流 24 位；4 个提示 × 8 个 token、3 段文本；开发机，2026-10-19）：stories260K 困惑度 3.16 → 3.17，下一 token 一致率 98.6%，1 秒；SmolLM2-135M 12.64 → 12.76，94.3%，30 秒；Qwen3-0.6B 23.00 → 22.39，88.8%，136 秒；DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92，88.8%，584 秒。int4 时 SmolLM2 升到 22.6，Qwen3 升到 28.6。每类张量只用一个 16 位格式时 SmolLM2 会崩溃（困惑度约 290 万）：少数层的残差流值接近 20000。`numeric.accuracy` 要求下一 token 一致率 ≥ 0.9，Qwen3 和 DeepSeek 在 int8 时略差一点没有达到。
+- **分析检查不通过也会开事故单**，与所有不通过的检查一样（FR-VER-06），所以在 S2 试验台上尝试较差的方案会让事故列表变长。
 
 ### 7.3 代码与上游文档的冲突（未解决，已上报）
 

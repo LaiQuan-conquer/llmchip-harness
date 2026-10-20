@@ -11,6 +11,7 @@ module llmchip_alu (
   output wire signed [`DW-1:0] rsh,
   output wire signed [`DW-1:0] sat16,
   output wire signed [`DW-1:0] sat32,
+  output wire signed [`DW-1:0] acc,
   output wire [15:0]           silu_index,
   output wire [15:0]           exp_index,
   output wire [6:0]            rsqrt_e2,
@@ -20,6 +21,7 @@ module llmchip_alu (
   assign rsh = f_rsh(v, s[7:0]);
   assign sat16 = f_sat16(v);
   assign sat32 = f_sat32(v);
+  assign acc = f_acc(v);
   // Each function is exercised on its domain: h1 int16, frac 8-bit, cap < 2^16, shift < 32.
   assign silu_index = f_silu_index(v[15:0], s[7:0], clamp[23:0], offset[15:0]);
   assign exp_index = f_exp_index(v, clamp[15:0], s[4:0]);

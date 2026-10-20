@@ -11,7 +11,7 @@ from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
 from .bundle import bundle_files, write_tar
 from .compiler import MAPPING_RULE, Compiled
-from .isa import Machine
+from .isa import Machine, modes
 
 
 def generate(ctx: InvokeContext) -> Result:
@@ -68,6 +68,7 @@ def check_isa(ctx: InvokeContext) -> Result:
         p["LANES"],
         p["NDMEM"],
         p["CTX"],
+        **modes(p),
     )
     l2 = L2Model.load(ctx.input("spec").path, ctx.input("weights").path)
     tokenizer = Tokenizer(Path(ctx.input("tokenizer").path).read_bytes(), l2.vocab)

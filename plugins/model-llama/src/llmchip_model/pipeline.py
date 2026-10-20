@@ -218,8 +218,9 @@ def recover_graph(ctx: InvokeContext) -> Result:
     )
 
 
-class _Model:
-    """A recovered graph with its weights and tokenizer, from the run's inputs."""
+class LoadedModel:
+    """A recovered graph with its weights and tokenizer, from the run's inputs
+    (`graph`, `bundle` and `files`). Also used by the numeric plugin (S2)."""
 
     def __init__(self, ctx: InvokeContext) -> None:
         self.graph = json.loads(Path(ctx.input("graph").path).read_text())
@@ -299,7 +300,7 @@ def _named(path: Path, name: str) -> Path:
 
 
 def run_graph(ctx: InvokeContext) -> Result:
-    m = _Model(ctx)
+    m = LoadedModel(ctx)
     steps = int(ctx.params.get("steps", 8))
     results = []
     prompts = m.prompts(ctx.params)
@@ -328,7 +329,7 @@ def run_graph(ctx: InvokeContext) -> Result:
 
 def compare_upstream(ctx: InvokeContext) -> Result:
     """The full test suite of the recovered graph against the official implementation."""
-    m = _Model(ctx)
+    m = LoadedModel(ctx)
     steps = int(ctx.params.get("steps", 8))
     prompts = m.prompts(ctx.params)
     census = json.loads(Path(ctx.input("census").path).read_text())

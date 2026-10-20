@@ -1,0 +1,25 @@
+{
+  "format": "llmchip-evalset/1",
+  "description": "General evaluation set for Hugging Face models, written for llmchip-harness (English and Chinese). 8 prompts for greedy generation, 3 calibration texts kept apart from them, and 3 passages for perplexity and next-token agreement under teacher forcing.",
+  "steps": 8,
+  "prompts": [
+    "The capital of France is",
+    "Water boils at a temperature of",
+    "def add(a, b):\n    return",
+    "Once upon a time, a small robot",
+    "中国的首都是",
+    "一年有四个季节，分别是",
+    "1, 2, 3, 4, 5,",
+    "The opposite of hot is"
+  ],
+  "calibration": [
+    "A chip that holds the weights of a language model in its own memory can answer without reading them from outside. The design trades flexibility for speed and energy.",
+    "Rivers carry water from the mountains to the sea. Along the way they shape valleys, feed farms and give towns a reason to grow on their banks.",
+    "计算机把数字存成二进制。整数用固定的位数表示，超出范围时要么截断，要么饱和到最大值。"
+  ],
+  "passages": [
+    "The library opened at nine in the morning. Students came in with their bags and found seats near the windows, where the light was best. Some read quietly, others took notes, and a few whispered about the exam that would take place the next week. At noon the room grew warm, and the librarian opened the windows to let in the cool air from the garden.",
+    "Numbers on a computer are stored with a fixed number of bits. When a result is too large to fit, the hardware must decide what to do: keep only the low bits, or clamp the value to the largest number it can hold. Both choices are common, and each has its own cost in accuracy and in circuit area.",
+    "春天来了，山上的雪慢慢融化，小河里的水变得清澈。农民们开始在田里播种，孩子们在路边放风筝。到了傍晚，村子里飘出饭菜的香味，大家坐在一起说着今年的收成。"
+  ]
+}

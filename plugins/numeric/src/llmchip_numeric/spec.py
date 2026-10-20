@@ -24,7 +24,10 @@ from dataclasses import asdict
 import numpy as np
 from llmchip_model import Config, Model, Tokenizer
 
+from .arith import OVERFLOW, ROUNDING
+
 SPEC_FORMAT = "llmchip-numeric-spec/1"
+GRAPH_SPEC_FORMAT = "llmchip-numeric-graph-spec/1"  # graph_l2.py: analysis of any recovered graph
 WEIGHTS_FORMAT = "llmchip-numeric-weights/1"
 
 WEIGHT_FORMATS = {
@@ -81,24 +84,51 @@ def array_hash(a: np.ndarray) -> str:
 
 def quantize_matrix(w: np.ndarray, fmt: str, group: int) -> tuple[np.ndarray, np.ndarray, int]:
     """Returns (q int, group mantissas m int, matrix exponent e): w[o, i] ~ q[o, i] * m[o, i // group] * 2^-e."""
-    spec = WEIGHT_FORMATS[fmt]
+    scale = group_scales(w, fmt, group)
+    e = matrix_exponent(scale)
+    m = mantissas(scale, e)
+    return quantize_rows(w, m, e, fmt, group), m, e
+
+
+def _groups(w: np.ndarray, group: int) -> np.ndarray:
     out, inp = w.shape
     ngroups = -(-inp // group)
     padded = np.zeros((out, ngroups * group), np.float64)
     padded[:, :inp] = w
-    g = padded.reshape(out, ngroups, group)
+    return padded.reshape(out, ngroups, group)
+
+
+def group_scales(w: np.ndarray, fmt: str, group: int) -> np.ndarray:
+    """The float scale of every (row, group): absmax / qmax, or the mean |w| (ternary)."""
+    spec = WEIGHT_FORMATS[fmt]
+    inp = w.shape[1]
+    g = _groups(w, group)
+    ngroups = g.shape[1]
     if spec["method"] == "absmean":
         counts = np.full(ngroups, group, dtype=np.float64)
         counts[-1] = inp - (ngroups - 1) * group
         scale = np.abs(g).sum(axis=2) / counts[None, :]
     else:
         scale = np.abs(g).max(axis=2) / spec["qmax"]
-    scale = np.where(scale > 0, scale, 1e-12)
-    e = math.floor(math.log2(32767.0 / scale.max()))
-    m = np.clip(np.round(scale * 2.0**e), 1, 32767).astype(np.int64)
+    return np.where(scale > 0, scale, 1e-12)
+
+
+def matrix_exponent(scale: np.ndarray) -> int:
+    return math.floor(math.log2(32767.0 / scale.max()))
+
+
+def mantissas(scale: np.ndarray, e: int) -> np.ndarray:
+    return np.clip(np.round(scale * 2.0**e), 1, 32767).astype(np.int64)
+
+
+def quantize_rows(w: np.ndarray, m: np.ndarray, e: int, fmt: str, group: int) -> np.ndarray:
+    """The integer levels of rows `w` given their mantissas and the matrix exponent (row-wise, so
+    a large matrix can be quantized in chunks with the same result)."""
+    qmax = WEIGHT_FORMATS[fmt]["qmax"]
+    g = _groups(w, group)
     effective = m * 2.0**-e
-    q = np.clip(np.round(g / effective[:, :, None]), -spec["qmax"], spec["qmax"]).astype(np.int64)
-    return q.reshape(out, ngroups * group)[:, :inp], m, e
+    q = np.clip(np.round(g / effective[:, :, None]), -qmax, qmax).astype(np.int64)
+    return q.reshape(w.shape[0], g.shape[1] * group)[:, : w.shape[1]]
 
 
 def calibrate(model: Model, tokenizer: Tokenizer, prompts: list[str], tokens: int) -> dict[str, float]:
@@ -124,10 +154,15 @@ def build(
     calibration_tokens: int = 64,
     ir_hash: str = "",
     tokenizer_hash: str = "",
+    rounding: str = "half-up",
+    overflow: str = "saturate",
+    accumulator_bits: int | None = None,
 ) -> tuple[dict, bytes]:
     """Quantizes the model and writes the numeric spec. Returns (spec, weights npz bytes)."""
     if weight_format not in WEIGHT_FORMATS:
         raise ValueError(f"unknown weight format {weight_format}")
+    if rounding not in ROUNDING or overflow not in OVERFLOW:
+        raise ValueError(f"unknown rounding {rounding} or overflow {overflow}")
     context = min(context, cfg.seq_len)
     stats = calibrate(Model(cfg, weights), tokenizer, calibration_prompts, min(calibration_tokens, context))
     frac = {kind: frac_bits(stats.get(kind, 1.0)) for kind in ACT_KINDS}
@@ -164,11 +199,7 @@ def build(
     }
 
     fmt = WEIGHT_FORMATS[weight_format]
-    # Accumulator bound: per group |sum x*q| <= 2^15 * qmax * group, then times a 15-bit mantissa, summed over groups.
-    widest = max(cfg.dim, cfg.hidden_dim)
-    groups = -(-widest // group_size)
-    bound = groups * (2**15 * fmt["qmax"] * group_size) * 32767
-    acc_bits = math.ceil(math.log2(bound + 1)) + 1
+    accumulator = accumulator_spec(max(cfg.dim, cfg.hidden_dim), fmt["qmax"], group_size, accumulator_bits, overflow)
 
     spec = {
         "format": SPEC_FORMAT,
@@ -198,17 +229,10 @@ def build(
         },
         "scores": {"format": "int32", "frac": SCORE_FRAC, "scale": "multiply by round(2^15 / sqrt(head_size)), shift"},
         "logits": {"format": "int32", "frac": logits_frac},
-        "accumulator": {
-            "bits": acc_bits,
-            "overflow": "impossible by construction (bound below)",
-            "bound": bound,
-            "order": "results are independent of summation order because no intermediate overflows",
-        },
-        "rounding": {
-            "mode": "round-half-up",
-            "definition": "rshift(v, s) = (v + 2^(s-1)) >> s with arithmetic shift for s > 0; v << -s for s < 0",
-        },
-        "saturation": "every int16 result is clamped to [-32768, 32767]; int32 results to [-2^31, 2^31 - 1]",
+        "accumulator": accumulator,
+        "rounding": rounding_spec(rounding),
+        "overflow": overflow_spec(overflow),
+        "saturation": overflow_spec(overflow)["definition"],
         "operators": {
             "matmul": "y = sat(rshift(sum_g m[o,g] * sum_{i in g} x[i] * q[o,i], frac_in + e - frac_out))",
             "embedding": "x[i] = sat16(rshift(q[t,i] * m[t, i // groupSize], e_emb - frac_x))",
@@ -284,10 +308,96 @@ def build(
             {"id": "token", "description": "token emitted at each step", "shape": [], "format": "uint"},
         ],
         "arrays": {name: array_hash(a) for name, a in sorted(arrays.items())},
+        "example": weight_example(
+            "layers.0.attention.wq",
+            weights["wq"][0][0],
+            arrays["0.wq.q"][0],
+            arrays["0.wq.m"][0],
+            exponents["0.wq"],
+            group_size,
+        ),
     }
     buf = io.BytesIO()
     np.savez(buf, meta=np.array(json.dumps({"format": WEIGHTS_FORMAT})), **arrays)
     return spec, buf.getvalue()
+
+
+ROUNDING_DEFINITIONS = {
+    "half-up": "rshift(v, s) = (v + 2^(s-1)) >> s: halves round up (towards +infinity)",
+    "half-even": "rshift(v, s) = (v + 2^(s-1) - 1 + ((v >> s) & 1)) >> s: halves round to the even neighbour",
+    "truncate": "rshift(v, s) = v >> s: the fraction is dropped (rounds towards -infinity)",
+}
+OVERFLOW_DEFINITIONS = {
+    "saturate": "a result that does not fit is clamped: int16 to [-32768, 32767], int32 to [-2^31, 2^31 - 1]",
+    "wrap": "a result that does not fit keeps its low bits (two's complement): 32767 + 1 becomes -32768",
+}
+
+
+def rounding_spec(mode: str) -> dict:
+    return {
+        "mode": mode,
+        "definition": ROUNDING_DEFINITIONS[mode] + "; arithmetic shifts; s < 0 shifts left exactly",
+        "appliesTo": "every rshift of the operators: embedding, matmul, rmsnorm, rope, attention, silu",
+        "alwaysFloor": "table indices (exp, sigmoid, rsqrt) and the divisions of softmax and the rmsnorm mean",
+    }
+
+
+def overflow_spec(mode: str) -> dict:
+    return {
+        "mode": mode,
+        "definition": OVERFLOW_DEFINITIONS[mode],
+        "appliesTo": "every int16 / int32 result (sat16 / sat32 of the operators) and the accumulator",
+    }
+
+
+def accumulator_spec(widest: int, qmax: int, group: int, bits: int | None, overflow: str) -> dict:
+    """Accumulator of a matrix-vector product: per group |sum x*q| <= 2^15 * qmax * group, times a
+    15-bit mantissa, summed over the groups of the widest input. `bits` narrower than that bound
+    makes overflow possible; the groups are then added in index order, each sum narrowed."""
+    groups = -(-widest // group)
+    term = 2**15 * qmax * group * 32767
+    bound = groups * term
+    auto = math.ceil(math.log2(bound + 1)) + 1
+    width = auto if bits is None else bits
+    if not 16 <= width <= 64:
+        raise ValueError(f"accumulator width {width} must be between 16 and 64 bits")
+    narrow = width < auto
+    return {
+        "bits": width,
+        "autoBits": auto,
+        "bound": bound,
+        "derivation": {
+            "inputs": widest,
+            "groups": groups,
+            "groupSize": group,
+            "qmax": qmax,
+            "activationMax": 2**15,
+            "mantissaMax": 32767,
+        },
+        "canOverflow": narrow,
+        "overflow": f"possible; each partial sum is narrowed to {width} bits ({overflow})" if narrow else "impossible",
+        "order": "groups are added in index order" if narrow else "results do not depend on the summation order",
+    }
+
+
+def weight_example(name: str, w_row: np.ndarray, q_row: np.ndarray, m_row: np.ndarray, e: int, group: int) -> dict:
+    """The first values of one real weight row, its group scale and integer levels (for reading the spec)."""
+    n = min(8, group, len(w_row))
+    scale = float(m_row[0]) * 2.0**-e
+    values = [float(v) for v in w_row[:n]]
+    levels = [int(v) for v in q_row[:n]]
+    return {
+        "tensor": name,
+        "row": 0,
+        "groupSize": group,
+        "values": values,
+        "mantissa": int(m_row[0]),
+        "exponent": e,
+        "scale": scale,
+        "levels": levels,
+        "reconstructed": [q * scale for q in levels],
+        "maxError": max(abs(v - q * scale) for v, q in zip(values, levels, strict=True)),
+    }
 
 
 def storage_bits(spec: dict, arrays: dict[str, np.ndarray]) -> dict[str, int]:

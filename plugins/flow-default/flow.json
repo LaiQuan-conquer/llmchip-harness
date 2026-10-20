@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "stages": [
     {
       "id": "S0",
@@ -300,6 +300,37 @@
         }
       ],
       "waiver": "risk_acceptance"
+    },
+    {
+      "id": "numeric.accuracy",
+      "version": "1",
+      "title": "L2 of a recovered graph within the accuracy budget against L0 (analysis)",
+      "plugin": "numeric",
+      "handler": "evaluate_graph",
+      "completeness": [
+        {
+          "metric": "prompts_evaluated",
+          "op": ">=",
+          "value": 1
+        },
+        {
+          "metric": "passage_tokens",
+          "op": ">=",
+          "value": 64
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "ppl_increase_pct",
+          "op": "<=",
+          "value": 20
+        },
+        {
+          "metric": "teacher_forced_top1",
+          "op": ">=",
+          "value": 0.9
+        }
+      ]
     },
     {
       "id": "arch.spec",

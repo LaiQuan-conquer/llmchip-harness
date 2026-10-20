@@ -437,7 +437,7 @@ module llmchip_core (
         end
         S_MV_SC: `MUL(S_MV_SC2)
         S_MV_SC2: begin
-          tot[lane] <= tot[lane] + mp;
+          tot[lane] <= f_acc(tot[lane] + mp);  // narrowed when the accumulator is (ACC_NARROW)
           acc[lane] <= 0;
           if (lane == L - 1) begin
             lane <= 0;

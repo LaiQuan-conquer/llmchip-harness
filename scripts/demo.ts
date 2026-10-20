@@ -9,7 +9,8 @@
 // With `--model PATH`, it instead starts a project from a downloaded model on this
 // machine, as the Web UI's "Start from model weights" does: S0 (import, tensor
 // census, estimate) and S1 (graph recovery, L0, comparison with the official
-// implementation). `--bits` and `--process` choose the estimate's assumptions.
+// implementation) and S2 as analysis (the recovered graph quantized to int8, its L2
+// against L0). `--bits` and `--process` choose the estimate's assumptions.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -17,7 +18,7 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { KernelClient } from '@llmchip/client'
 import type { RunRecord } from '@llmchip/kernel-api'
-import { projectIdFor, recoverGraph, startFromWeights, type ProcessId } from '../apps/web/src/views/modelPipeline.ts'
+import { projectIdFor, recoverGraph, runScheme, startFromWeights, type ProcessId } from '../apps/web/src/views/modelPipeline.ts'
 
 const GATES = ['G0', 'G1', 'G2', 'G3', 'G4']
 const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 }
@@ -54,6 +55,8 @@ if (values.model) {
     log(`S0 feasibility: ${feasibility}; G0 is a human decision (Approvals page)`)
     log('S1 graph recovery')
     await recoverGraph(client, project, report)
+    log('S2 numeric analysis: int8, groups of 32')
+    await runScheme(client, project, 'graph', { weightFormat: 'int8', groupSize: 32, rounding: 'half-up', overflow: 'saturate' }, { maxPrompts: 4, steps: 8, passageTokens: 128 }, report)
     log('done')
   } finally {
     await client.close()
