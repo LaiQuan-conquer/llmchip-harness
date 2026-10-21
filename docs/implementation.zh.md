@@ -5,8 +5,8 @@
 | 项目 | 内容 |
 |---|---|
 | 文档版本 | v0.1 |
-| 日期 | 2026-10-19 |
-| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项 |
+| 日期 | 2026-10-21 |
+| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，以及到 S5 为止的空间引擎 `taalas-spatial/1` |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.9 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -152,7 +152,7 @@ plugins/                   额外的插件搜索路径
 
 ### 2.4 内置插件
 
-在全新主目录上，`plugins.list` 列出以下插件。阶段与审批门来自 `flow-default`（流程版本 0.4.0）。
+在全新主目录上，`plugins.list` 列出以下插件。阶段与审批门来自 `flow-default`（流程版本 0.8.0；行覆盖率开始计入全部覆盖的文件，`rtl.equivalence` 因此升到版本 2）。
 
 | 插件 | 运行方式 | 处理器 | 用于 | 单元测试 |
 |---|---|---|---|---|
@@ -161,8 +161,8 @@ plugins/                   额外的插件搜索路径
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
 | `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2/G1 | `test_numeric.py`、`test_graph_l2.py` |
-| `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3/G2 | `test_arch.py` |
-| `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py` |
+| `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3/G2 | `test_arch.py`、`test_spatial.py` |
+| `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py`、`test_spatial.py` |
 | `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5/G3、S7、Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`、`constraints`、`implement`、`drc`、`lvs`、`sta` | M1.5、S6、S7 | `test_calibrate.py`、`test_physical.py` |
 | `packager` | process（Python） | `build`、`check`、`import_external` | S8/G4 | `test_packager.py` |
@@ -192,9 +192,16 @@ plugins/                   额外的插件搜索路径
   - 指令级模拟器 `isa.py`。
 
   权重映射规则可逆，并做往返检查。`check_isa` 对照 L2 验证微码。
+- **空间引擎 `taalas-spatial/1`**（负责人决定，2026-10-20：演示芯片复刻 Taalas，把模型做成电路）。`arch-taalas design` 带参数 `architecture: taalas-spatial/1`（[spatial.py](../plugins/arch-taalas/src/llmchip_arch/spatial.py)），`rtl-taalas generate` 读到这样的芯片规格时生成空间引擎（[spatial/](../plugins/rtl-taalas/src/llmchip_rtl/spatial/)）：
+  - 每个矩阵的每一行是一棵按整数权重连线的位串行加法树（+1 加上输入，−1 减去输入，0 不连线，更大的值加上移位副本）；组缩放尾数是移位副本的固定和（CSD 数字，每组一条带抽头的延迟线）；行输出按数值规格舍入和收窄（[sp_lib.v](../plugins/rtl-taalas/src/llmchip_rtl/spatial/rtl/sp_lib.v)）。每层都有自己的电路；
+  - 注意力是共享单元（16 个乘法器，两个头对同一个 KV 头；16 个精确的恢复除法器），KV 缓存在片上，是每拍转一行的环形寄存器；没有程序，也没有片外存储器；
+  - 状态机为 `Spatial.schedule()` 的每个阶段设一个状态，所以每一步在任何位置都是固定周期数（占位模型 1,327 周期：8 MHz 下 6,029 tok/s）；
+  - 往返检查（FR-RTL-02）从生成的网表读回每个电路，把它的线性映射与 q × m 比较（`check_round_trip`）；bundle（格式 `llmchip-rtl-bundle/3`）附带电路模型 `sp_model.py`，在 L2 跟踪没有覆盖的地方作参考；
+  - 主机接口增加 `0x30 READ`（读观测字）；验证通过它读取所有观测点，不走后门；
+  - 面积等于生成的结构数乘以综合实测的单元面积（`gf180mcu` 工艺档案中的 `spatialCells`），按档案的利用率摆放；晶粒取尺寸规则内最小的一个（占位模型为 5.0 × 3 mm）。
 - **sim-verilator**（在固定版本的 `iic-osic-tools` 镜像中运行 Verilator、Icarus Verilog 和 cocotb）：
   - lint 与仿真器资格认证；
-  - 验证计划（回归、定向、边界、穷举、随机、覆盖率；内置默认计划），带首个分歧定位（算子、元素、周期、VCD 窗口）；
+  - 验证计划（回归、定向、边界、穷举、随机、覆盖率；内置默认计划），带首个分歧定位（算子、元素、周期、VCD 窗口）；空间 bundle 使用 `verification-plan-spatial`（位串行单元由 cocotb 在设计的数据流长度下做单元测试，`cocotb_spatial.py`；核心的查表索引单元做穷举测试，`cocotb_spatial_index.py`）。行覆盖率统计每个带注释的源文件，包括全部覆盖的文件（`--annotate-all`；2026-10-21 之前这些文件没有计入）；常量表是数据，不计入。生成的 C++ 被拆分（`--output-split`），以便并行编译；
   - 布线后网表的门级仿真（L4，使用 PDK 单元模型的 Icarus Verilog）；
   - 带反标统计的 SDF 时序仿真（补充能力，尚未认证）；
   - 为芯片 Playground 生成 L3 结果。
@@ -463,6 +470,15 @@ yarn llmchip gate release chip G0                                # invalidated�
 4. 把它加入 [tests/arch-perf.spec.ts](../tests/arch-perf.spec.ts) 的 `OPTIONS`：RTL 每一步的忙碌周期必须等于芯片规格的预测，RTL 必须与 L2 一致。
 5. 实测它的面积：综合并在晶粒上做物理实现（`eda-gf180 implement`）。工艺库的面积估算不够（§7.2）。
 
+### 5.3d 空间引擎的算子
+
+示例：空间核心中的 SiLU 门（[generator.py](../plugins/rtl-taalas/src/llmchip_rtl/spatial/generator.py) 中的 `core_verilog`）。
+
+1. 在 `Spatial.schedule()` 中加一个阶段，写明它的精确周期数；生成器为每个阶段输出一个状态，所以这个时序表就是周期模型。
+2. 在 `core_verilog` 中输出它的逻辑：运算写成连续赋值（时钟块中不调用带局部变量的函数），常量写成 `sp_rom_*` 表模块，乘法用 `sp_mul` 实例，每个寄存器都有复位值。lint 必须保持零警告。
+3. 在 [sp_model.py](../plugins/rtl-taalas/src/llmchip_rtl/spatial/sp_model.py) 中对应实现，并保持 `test_the_model_of_the_circuits_equals_l2` 通过。
+4. 运行 [tests/spatial-flow.spec.ts](../tests/spatial-flow.spec.ts)：RTL 与 L2 逐位一致，每一步的周期等于时序表。算子增加了逻辑时，用综合重新实测面积，并更新 `spatialCells`。
+
 ### 5.4 内核 API 方法
 
 示例：`kernel.pause`（FR-AGT-23）。可以按以下各层追踪：
@@ -577,6 +593,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/model-import.spec.ts` | 导入真实 Hugging Face 布局的小 Qwen3，普查、按普查估算、图还原、L0、与 transformers 的全量测试；llama2.c 与 run.c 移植对拍；项目自带的占位模型权重；没有 config.json 的模型如实报告而不猜测 | FR-MDL-01/03/05/06 | 总是；需要 `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama（共享/不共享输出层）、带滑动窗口的 Mistral、Qwen2、Qwen3 与 transformers 对拍；llama2.c 与 run.c 移植对拍；重复存储的共享输出层；截断的文件；不支持的模型 | FR-MDL | 总是 |
 | `tests/kernel-footprint.spec.ts` | harnessd 启动时间与空闲 RSS | NFR-01（内核部分） | Linux |
+| `tests/spatial-flow.spec.ts` | 占位模型的空间引擎从 S2 到 S5：完成设计（周期取自固定时序表，≥ 1000 tok/s，晶粒按实测单元面积选取，`verify_spec` 重新计算周期）；生成电路，并从网表读回做往返检查；lint 无警告；`verification-plan-spatial` 的每一项都通过：观测点经主机接口读出，L3 与 L2 逐位一致，每个位置的忙碌周期相同，位串行单元有单元测试，行覆盖率 ≥ 90% | FR-ARC-04/05、FR-RTL-01/02/03、FR-VER-04 | 需 EDA 镜像（2026-10-21 用时 261 秒） |
 | `tests/arch-perf.spec.ts` | S3 的速度是精确的：占位模型在四种微架构选项下（SPI / SQI，缓冲 none / attention / all），RTL 每一步的忙碌周期逐位置等于芯片规格的预测，且 RTL 与 L2 一致 | FR-ARC-04/05、FR-EST-07 | 需 EDA 镜像（2026-10-20 用时 790 秒） |
 | `tests/numeric-schemes.spec.ts` | 任何已还原的计算图（小 Qwen3、从自身产物导入的占位模型）量化并评估 L2 对 L0，窄累加器确实溢出，判定 `numeric.accuracy`，向量引擎拒绝计算图规格；有 EDA 镜像时，把偶数舍入 / 回绕 / 24 位累加器方案从数值规格带到芯片规格，RTL 在指令级模拟器和 Verilator 中与 L2 一致，ALU 按这些模式测试 | FR-QNT、FR-RTL-01、FR-VER | 计算图部分总是运行；RTL 部分需 EDA 镜像（约 4 分钟） |
 | `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2 详细视图 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
@@ -615,7 +632,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **标定**：SRAM 的四种配置中只覆盖 512×8（FR-EST-13）。
 - **验证**：只有 `rtl-functional-sim` 是已声明并认证的能力，门级仿真没有能力门控。SDF 仿真能运行，但 `sdf.timing` 无法通过（§1.3、FR-VER-01/03、AC-12 正例）。
 - **存储内容检查**（FR-SGN-07）：映射可逆，生成时做往返检查。由于设计使用标准单元 ROM，没有比较宏内容的签核检查。
-- **物理实现**：芯片为 1.2×2 mm，不是 2 mm²（负责人决定，需求 v0.6）。设计对象是未训练的占位模型。
+- **物理实现**：芯片为 1.2×2 mm，不是 2 mm²（负责人决定，需求 v0.6）。设计对象是未训练的占位模型。空间引擎放不进这个晶粒，按实测单元面积需要 5.0 × 3 mm（负责人决定，2026-10-20：晶粒按需加大；布局确认尺寸后再更新需求文档 §11.1）。它还没有做物理实现。
+- **空间引擎**（2026-10-21 实测，占位模型，8 MHz）：每个 token 1,327 周期（6,029 tok/s）；加上主机的 START 与 STATUS 帧为 2,059 周期（约 3,900 tok/s）。综合后单元面积 5.96 mm²：KV 环形缓存 2.09，矩阵电路 1.94（串行加法器 0.80、行输出 0.75、延迟线 0.39），核心逻辑 1.03，核心寄存器 0.42，注意力乘法器 0.41，查找表 0.07，主机接口 0.02。其他形状的核心逻辑（按维度）和查找表面积是外推值。`explore` 还不覆盖空间模板，`arch.spec` 也不判定周期目标（只有 `verify_spec` 输出 `cycles_within_target`）。KV 环形寄存器的复位值来自复位后的清零过程（AGENTS.md，负责人决定，2026-10-21），门级仿真的证明随物理实现一起完成。生成器实现维度为 2 的幂（头大小至少 4）、2 个头、1 个 KV 头、上下文 64、任意层数、隐藏维度不超过 255 的模型；其他形状会被拒绝并给出原因。不给 `die`（或 `targetAreaMm2`）时，面积上限是工艺档案的 prerun 面积（2.4 mm²），空间引擎放不下；PPA 会给出建议的晶粒（`suggestedDie`），在 prerun 约束更新之前（P4），设计使用这个晶粒。
 - **迁移**：评估与审批门作废可用。下游产物不会被标记为失效（FR-MIG-03、FR-TRC-05）。没有能自动打标签的 NDA PDK 导入通道（FR-INT-04、FR-SEC-01）。
 - **智能体**：变更集没有大小阈值（FR-AGT-06）。没有软约束流程（FR-AGT-09）。没有按角色区分的工具集或 LLM（FR-AGT-14/19）。去密接手包只作为建议给出，不会实际生成（FR-AGT-13a）。
 - **UI**：没有条件审批与关闭条件的界面。没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-09/10/11/13、FR-AGT-25/26）。

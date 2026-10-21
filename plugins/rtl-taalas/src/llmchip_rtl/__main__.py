@@ -12,6 +12,16 @@ from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 from .bundle import bundle_files, write_tar
 from .compiler import MAPPING_RULE, Compiled
 from .isa import Machine, modes
+from .spatial.bundle import bundle_files as spatial_bundle_files
+from .spatial.generator import ARCHITECTURE as SPATIAL
+from .spatial.generator import Spatial
+from .spatial.sp_model import Machine as SpatialModel
+
+SPATIAL_RULE = (
+    "taalas-spatial/1: each matrix row is a bit-serial adder tree; weight q at input i adds the input "
+    "shifted by each CSD digit of |q| with the sign of q; the group mantissa m adds the group sum "
+    "shifted by each CSD digit of m; read back by evaluating the netlist's linear map (= q * m)"
+)
 
 
 def generate(ctx: InvokeContext) -> Result:
@@ -23,6 +33,8 @@ def generate(ctx: InvokeContext) -> Result:
     ):
         raise ValueError("the chip spec was designed from a different numeric spec or weights file")
     l2 = L2Model.load(spec_in.path, weights_in.path)
+    if chip.get("architecture") == SPATIAL:
+        return generate_spatial(ctx, l2, spec_in.hash, weights_in.hash)
     flow = chip["dataflow"]
     options = {
         "operandBuffers": flow.get("operandBuffers", "none"),
@@ -58,25 +70,69 @@ def generate(ctx: InvokeContext) -> Result:
     )
 
 
+def generate_spatial(ctx: InvokeContext, l2: L2Model, spec_hash: str, weights_hash: str) -> Result:
+    """The spatial engine: every matrix becomes circuits; the bundle check reads every circuit
+    back from the generated netlist and compares its linear map with the weights (FR-RTL-02)."""
+    sp = Spatial(l2.spec, l2.a)
+    out = Path(ctx.out_dir)
+    files = spatial_bundle_files(sp, {"numericSpec": spec_hash, "weights": weights_hash, "mappingRule": SPATIAL_RULE})
+    write_tar(files, out / "rtl.tar")
+    circuits = {
+        m.name: {"rows": int(m.q.shape[0]), "adders": m.adders, "delayBits": m.delays, "streamBits": m.length}
+        for m in sp.matrices.values()
+    }
+    storage = {
+        "format": "llmchip-storage-map/2",
+        "architecture": SPATIAL,
+        "weights": weights_hash,
+        "mappingRule": SPATIAL_RULE,
+        "circuits": circuits,
+        "roundTrip": {"matrices": len(circuits), "identical": True, "method": "linear map read back from the netlist"},
+    }
+    (out / "storage-map.json").write_text(json.dumps(storage, indent=2))
+    return Result(
+        outputs=[
+            Output("rtl", "rtl.tar", "rtl.bundle", "application/x-tar"),
+            Output("storage", "storage-map.json", "storage.map", "application/json"),
+        ],
+        metrics={
+            "architecture": SPATIAL,
+            "mapping_round_trip": True,
+            "serial_adders": sum(c["adders"] for c in circuits.values()),
+            "delay_bits": sum(c["delayBits"] for c in circuits.values()),
+            "output_rows": sum(c["rows"] for c in circuits.values()),
+            "cycles_per_token": sp.cycles_per_token(),
+            "memory_interface": "none",
+        },
+        parse={"status": "complete", "parser": "llmchip-rtl/generate"},
+    )
+
+
 def check_isa(ctx: InvokeContext) -> Result:
     """Compiler verification: the shipped program on the instruction-level simulator equals L2."""
     import io
     import tarfile
 
     with tarfile.open(ctx.input("rtl").path) as tar:
-        image = np.load(io.BytesIO(tar.extractfile("bundle/isa-image.npz").read()))
         design = json.loads(tar.extractfile("bundle/design.json").read())
+        if design.get("architecture") == SPATIAL:
+            # The spatial bundle's model of its circuits (sp_model.py) against L2.
+            with np.load(io.BytesIO(tar.extractfile("bundle/sp-image.npz").read())) as z:
+                machine = SpatialModel({k: z[k] for k in z.files}, design["params"])
+        else:
+            image = np.load(io.BytesIO(tar.extractfile("bundle/isa-image.npz").read()))
     p = design["params"]
-    machine = Machine(
-        [int(w) for w in image["program"]],
-        image["wrom"],
-        image["srom"],
-        image["crom"],
-        p["LANES"],
-        p["NDMEM"],
-        p["CTX"],
-        **modes(p),
-    )
+    if design.get("architecture") != SPATIAL:
+        machine = Machine(
+            [int(w) for w in image["program"]],
+            image["wrom"],
+            image["srom"],
+            image["crom"],
+            p["LANES"],
+            p["NDMEM"],
+            p["CTX"],
+            **modes(p),
+        )
     l2 = L2Model.load(ctx.input("spec").path, ctx.input("weights").path)
     tokenizer = Tokenizer(Path(ctx.input("tokenizer").path).read_bytes(), l2.vocab)
     evalset = load_evalset(ctx.input("evalset").path)

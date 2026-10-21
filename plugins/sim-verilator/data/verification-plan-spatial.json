@@ -1,0 +1,77 @@
+{
+  "format": "llmchip-verification-plan/1",
+  "description": "Verification plan of the spatial engine, architecture taalas-spatial/1 (requirements FR-VER-04). Every item is executed by sim-verilator/verify; an item it does not know is reported as not executed. Observation points are read through the host interface (READ command), not a backdoor.",
+  "items": [
+    {
+      "id": "regression.evalset",
+      "category": "regression",
+      "description": "Every evaluation prompt, 64 positions each: all observation points of L3 equal L2 bit for bit; the busy cycles of every step equal the fixed schedule",
+      "params": {
+        "steps": 64
+      }
+    },
+    {
+      "id": "directed.reset_mid_inference",
+      "category": "directed",
+      "description": "Reset in the middle of a step, then the sequence restarts from position 0 and matches L2"
+    },
+    {
+      "id": "directed.single_token",
+      "category": "directed",
+      "description": "Generation from the BOS token alone matches the bundle's model of the circuits (sp_model.py)"
+    },
+    {
+      "id": "directed.max_context",
+      "category": "directed",
+      "description": "A sequence filling the whole context (every row of the KV rings) matches the model; a step beyond the context raises `error`"
+    },
+    {
+      "id": "directed.illegal_input",
+      "category": "directed",
+      "description": "A position beyond the context or a token beyond the vocabulary ends the step with `error`"
+    },
+    {
+      "id": "directed.start_while_busy",
+      "category": "directed",
+      "description": "A START frame with a different token and position while busy is ignored (the testbench sends one inside every step)"
+    },
+    {
+      "id": "boundary.serial_output",
+      "category": "boundary",
+      "description": "Bit-serial adder and row output stage at every rounding shift and width of the design: rounding ties, saturation and wrap edges, adding and subtracting"
+    },
+    {
+      "id": "random.serial_output",
+      "category": "random",
+      "description": "Bit-serial adder and row output stage: random operands at every rounding shift and width of the design"
+    },
+    {
+      "id": "exhaustive.rsqrt",
+      "category": "exhaustive",
+      "description": "rmsnorm's rsqrt index unit (sp_rms_index): every sum of squares up to 2^16 times the dimension, and both sides of every power of two up to the register width"
+    },
+    {
+      "id": "exhaustive.exp_index",
+      "category": "exhaustive",
+      "description": "softmax's exp index unit (sp_exp_index): every difference up to the cap and beyond it"
+    },
+    {
+      "id": "exhaustive.silu_index",
+      "category": "exhaustive",
+      "description": "SiLU's sigmoid index unit (sp_silu_index): every int16 input"
+    },
+    {
+      "id": "random.tokens",
+      "category": "random",
+      "description": "Random token sequences of the L2 trace, every position forced: all observation points of L3 equal L2"
+    },
+    {
+      "id": "coverage.line",
+      "category": "coverage",
+      "description": "Line coverage of the chip RTL (circuits, core, host interface) over two regression prompts, a mid-inference reset and illegal inputs",
+      "params": {
+        "threshold": 90
+      }
+    }
+  ]
+}

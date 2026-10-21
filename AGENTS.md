@@ -184,7 +184,7 @@ The full recipe, with a worked example and the tests to copy, is in implementati
 ### Generated hardware
 
 - Never edit a generated `rtl.bundle`; change the generator. The weight mapping rule must stay reversible; the generator checks the round trip (FR-RTL-02).
-- Every register of generated RTL has a reset value: synthesized logic is X-pessimistic in four-state gate-level simulation, and un-reset control registers turn the whole netlist X.
+- Every register of generated RTL has a reset value: synthesized logic is X-pessimistic in four-state gate-level simulation, and un-reset control registers turn the whole netlist X. Owner decision 2026-10-21: the registers of the KV cache of the spatial engine (`taalas-spatial/1`, its rotating rings) may instead get their reset value from a documented synchronous initialization: after reset the state machine shifts zeros into every ring before the first step, with `busy` high. The generator states the initialization in the RTL, and gate-level simulation of the routed netlist must prove it (no X reaches an observation point). Every other register, including control registers, keeps a reset value.
 - Gate-level simulation of a routed netlist runs on an event-driven simulator (Icarus Verilog) with the PDK's cell models; Verilator races on the PDK's sequential UDPs behind clock-tree buffers.
 - Do not call Verilog functions with local variables inside clocked blocks of generated RTL: synthesis turns the locals into registers.
 - A bidirectional pad (`gf180mcu_fd_io__bi_t`) enables its input only while it does not drive (IE = not OE): its A -> PAD timing arcs exist only with IE low, so a tied IE leaves the output untimed. The gate-level pad model must pass the input path for such pins.

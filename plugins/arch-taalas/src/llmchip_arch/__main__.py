@@ -21,6 +21,7 @@ def handle_design(ctx: InvokeContext) -> Result:
     (out / "chip-spec.json").write_text(json.dumps(chip, indent=2, ensure_ascii=False))
     (out / "ppa.json").write_text(json.dumps(ppa, indent=2, ensure_ascii=False))
     metrics = {
+        "architecture": chip["architecture"],
         "feasibility": ppa["conclusion"]["feasibility"],
         "tokens_per_second": chip["performance"]["tokensPerSecond"],
         "cycles_per_token": chip["performance"]["cyclesPerToken"],
@@ -31,6 +32,16 @@ def handle_design(ctx: InvokeContext) -> Result:
         "clock_mhz": chip["targets"]["clockMHz"],
         "stored_bits": sum(storage_bits(l2.spec, l2.a).values()),
     }
+    if "structure" in ppa:  # spatial: the circuits and the die chosen from their measured area
+        s = ppa["structure"]
+        die = ppa["area"]["chosenDie"]
+        metrics |= {
+            "serial_adders": s["serialAdders"],
+            "kv_bits": s["kvBits"],
+            "cell_area_mm2.typ": round(ppa["area"]["cellsMm2"]["typ"], 4),
+            "die_x_mm": die["xMm"],
+            "die_y_mm": die["yMm"],
+        }
     if "area" in ppa:
         metrics["die_area_mm2.typ"] = ppa["area"]["dieMm2"]["typ"]
     return Result(

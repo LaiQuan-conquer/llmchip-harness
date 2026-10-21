@@ -131,6 +131,8 @@ def chip_top(plan: dict) -> str:
     A -> PAD timing arcs exist only with IE low, so a tied IE would leave the output
     untimed), dvdd/dvss for the supplies."""
     pp = "`ifdef USE_POWER_PINS\n    .DVDD(VDD), .DVSS(VSS), .VDD(VDD), .VSS(VSS),\n`endif\n"
+    # The bus enable of an external memory (kv_oe); a chip without one (spatial) has no port.
+    enabled = any(p.get("enable") for p in plan["pads"])
     ports = ["`ifdef USE_POWER_PINS", "  inout wire VDD,", "  inout wire VSS,", "`endif"]
     # Directed ports, so STA sees each pad's off-chip side as an input or an output.
     kinds = {"in": "input", "out": "output", "inout": "inout"}
@@ -151,7 +153,7 @@ def chip_top(plan: dict) -> str:
             else f"  wire c_{p['pin']};"
             for p in plan["pads"]
         ],
-        "  wire c_kv_oe;",
+        *(["  wire c_kv_oe;"] if enabled else []),
     ]
     for p in plan["pads"]:
         if p["dir"] == "in":
@@ -196,7 +198,8 @@ def chip_top(plan: dict) -> str:
         else f".{p['pin']}(c_{p['pin']})"
         for p in plan["pads"]
     )
-    lines += [f"  llmchip_chip u_chip ({conns}, .kv_oe(c_kv_oe));", "endmodule", ""]
+    kv_oe = ", .kv_oe(c_kv_oe)" if enabled else ""
+    lines += [f"  llmchip_chip u_chip ({conns}{kv_oe});", "endmodule", ""]
     return "\n".join(lines)
 
 

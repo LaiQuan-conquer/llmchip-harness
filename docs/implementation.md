@@ -5,8 +5,8 @@ English | [中文](implementation.zh.md)
 | Item | Content |
 |---|---|
 | Document version | v0.1 |
-| Date | 2026-10-19 |
-| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, and the exact speed and microarchitecture options of S3 |
+| Date | 2026-10-21 |
+| Describes | the code at commit `9cc76a0` (M4), plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, the exact speed and microarchitecture options of S3, and the spatial engine `taalas-spatial/1` through S5 |
 | Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.6, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.9 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
@@ -148,7 +148,7 @@ plugins/                   extra plugin search path
 
 ### 2.4 Bundled plugins
 
-`plugins.list` on a fresh home shows the following plugins. Stages and gates come from `flow-default` (flow version 0.4.0).
+`plugins.list` on a fresh home shows the following plugins. Stages and gates come from `flow-default` (flow version 0.8.0; `rtl.equivalence` is at version 2 since line coverage counts fully covered files).
 
 | Plugin | Runtime | Handlers | Used in | Unit tests |
 |---|---|---|---|---|
@@ -157,8 +157,8 @@ plugins/                   extra plugin search path
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0/G0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
 | `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import`, `recover`, `run_graph`, `compare` | S0 (import), S1 | `test_model.py`, `test_graph.py` |
 | `numeric` | process (Python) | `quantize`, `infer`, `evaluate`, `quantize_graph`, `evaluate_graph` | S2/G1 | `test_numeric.py`, `test_graph_l2.py` |
-| `arch-taalas` | process (Python) | `design`, `verify_spec`, `explore` | S3/G2 | `test_arch.py` |
-| `rtl-taalas` | process (Python) | `generate`, `check_isa` | S4, S5 | `test_rtl.py` |
+| `arch-taalas` | process (Python) | `design`, `verify_spec`, `explore` | S3/G2 | `test_arch.py`, `test_spatial.py` |
+| `rtl-taalas` | process (Python) | `generate`, `check_isa` | S4, S5 | `test_rtl.py`, `test_spatial.py` |
 | `sim-verilator` | container | `lint`, `qualify`, `verify`, `gatesim`, `sdfsim`, `generate` | S5/G3, S7, Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`, `constraints`, `implement`, `drc`, `lvs`, `sta` | M1.5, S6, S7 | `test_calibrate.py`, `test_physical.py` |
 | `packager` | process (Python) | `build`, `check`, `import_external` | S8/G4 | `test_packager.py` |
@@ -184,9 +184,16 @@ What each domain plugin produces:
   - the instruction-level simulator `isa.py`.
 
   The weight mapping rule is reversible and round-trip checked. `check_isa` verifies the microcode against L2.
+- **The spatial engine `taalas-spatial/1`** (owner decision 2026-10-20: the demo chip follows Taalas, the model as circuits). `arch-taalas design` with `architecture: taalas-spatial/1` ([spatial.py](../plugins/arch-taalas/src/llmchip_arch/spatial.py)), and `rtl-taalas generate` on such a chip spec ([spatial/](../plugins/rtl-taalas/src/llmchip_rtl/spatial/)):
+  - every matrix row is a bit-serial adder tree wired from its integer weights (+1 adds an input, −1 subtracts it, 0 is no wire, larger levels add shifted copies); the group mantissa is a fixed sum of shifted copies (CSD digits, one tapped delay line per group); the row output rounds and narrows as the numeric spec says ([sp_lib.v](../plugins/rtl-taalas/src/llmchip_rtl/spatial/rtl/sp_lib.v)). Every layer has its own circuits;
+  - attention is a shared unit (16 multipliers, both heads against the one KV head; 16 exact restoring dividers), the KV cache is on chip as rotating rings, one row per clock; there is no program and no external memory;
+  - the state machine has one state per stage of `Spatial.schedule()`, so a step takes a fixed number of cycles at every position (1,327 for the proxy: 6,029 tok/s at 8 MHz);
+  - the round trip (FR-RTL-02) reads every circuit back from the generated netlist and compares its linear map with q × m (`check_round_trip`); the bundle (format `llmchip-rtl-bundle/3`) ships a model of the circuits, `sp_model.py`, used as the reference where the L2 trace has none;
+  - the host interface adds `0x30 READ` (observation words); verification reads every observation point through it, not through a backdoor;
+  - area is the generated structure times cell areas measured by synthesis (`spatialCells` in the `gf180mcu` profile), placed at the profile's utilization; the die is the smallest within the size rules (5.0 × 3 mm for the proxy).
 - **sim-verilator** (Verilator, Icarus Verilog and cocotb in the pinned `iic-osic-tools` image):
   - lint and simulator qualification;
-  - the verification plan (regression, directed, boundary, exhaustive, random, coverage; a default plan is bundled), with first-divergence localization (operation, element, cycle, VCD window);
+  - the verification plan (regression, directed, boundary, exhaustive, random, coverage; a default plan is bundled), with first-divergence localization (operation, element, cycle, VCD window); for a spatial bundle, `verification-plan-spatial` (the bit-serial cells unit-tested with cocotb at the design's stream lengths, `cocotb_spatial.py`; the core's table-index units tested exhaustively, `cocotb_spatial_index.py`). Line coverage counts every annotated source file, including the fully covered ones (`--annotate-all`; before 2026-10-21 those were left out of the count); the constant tables are data and are not counted. The generated C++ is split (`--output-split`) so it compiles in parallel;
   - gate-level simulation of the routed netlist (L4, Icarus Verilog with the PDK cell models);
   - SDF timing simulation with annotation statistics (supplementary, not qualified);
   - L3 generations for the Chip Playground.
@@ -426,6 +433,15 @@ Example: `memoryInterface: sqi` ([llmchip_sqimem.v](../plugins/rtl-taalas/src/ll
 4. Add it to `OPTIONS` in [tests/arch-perf.spec.ts](../tests/arch-perf.spec.ts): the busy cycles of every RTL step must equal the chip spec's prediction, and the RTL must equal L2.
 5. Measure its area: synthesize it and implement it on the die (`eda-gf180 implement`). The area estimate of the process library is not enough (§7.2).
 
+### 5.3d An operator of the spatial engine
+
+Example: the SiLU gate of the spatial core (`core_verilog` in [generator.py](../plugins/rtl-taalas/src/llmchip_rtl/spatial/generator.py)).
+
+1. Add a stage to `Spatial.schedule()` with its exact cycle count; the generator emits one state per stage, so the schedule is the cycle model.
+2. Emit its logic in `core_verilog`: arithmetic as continuous assignments (no function with local variables in a clocked block), constants as `sp_rom_*` table modules, multipliers as `sp_mul` instances, every register with a reset value. Lint must stay at zero warnings.
+3. Mirror it in [sp_model.py](../plugins/rtl-taalas/src/llmchip_rtl/spatial/sp_model.py) and keep `test_the_model_of_the_circuits_equals_l2` passing.
+4. Run [tests/spatial-flow.spec.ts](../tests/spatial-flow.spec.ts): the RTL equals L2 bit for bit and every step takes the scheduled cycles. Re-measure the area by synthesis when the operator adds logic and update `spatialCells`.
+
 ### 5.4 A kernel API method
 
 Example: `kernel.pause` (FR-AGT-23). Follow it through every layer:
@@ -531,6 +547,7 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | `plugins/model-llama/tests/test_graph.py` | Llama (tied/untied), Mistral with sliding window, Qwen2, Qwen3 against transformers; llama2.c against the run.c port; duplicated tied output; truncated file; unsupported models | FR-MDL | always |
 | `tests/kernel-footprint.spec.ts` | startup time and idle RSS of harnessd | NFR-01 (kernel part) | Linux |
 | `tests/arch-perf.spec.ts` | the S3 speed is exact: for the proxy in four microarchitecture options (SPI / SQI, buffers none / attention / all), the busy cycles of every RTL step equal the chip spec's prediction position by position, and the RTL equals L2 | FR-ARC-04/05, FR-EST-07 | needs the EDA image (790 s on 2026-10-20) |
+| `tests/spatial-flow.spec.ts` | the spatial engine from S2 to S5 on the proxy: designed (cycles from the fixed schedule, ≥ 1000 tok/s, die from the measured cells, `verify_spec` recomputes the cycles), generated with the round trip read back from the netlist, lint-clean, and every item of `verification-plan-spatial` passed: L3 equals L2 bit for bit with observation points read over the host interface, busy cycles equal at every position, the bit-serial cells unit-tested, line coverage ≥ 90% | FR-ARC-04/05, FR-RTL-01/02/03, FR-VER-04 | needs the EDA image (261 s on 2026-10-21) |
 | `tests/numeric-schemes.spec.ts` | any recovered graph (tiny Qwen3, the proxy from its own artifacts) quantized and its L2 evaluated against L0, a narrow accumulator overflowing, `numeric.accuracy` judged, a graph spec refused by the vector engine; with the EDA image, a half-even / wrap / 24-bit-accumulator scheme from the numeric spec to the chip spec, RTL equal to L2 on the ISA simulator and in Verilator, the ALU tested in those modes | FR-QNT, FR-RTL-01, FR-VER | graph part always; RTL part needs the EDA image (about 4 min) |
 | `tests/web-ui.spec.ts` | catalog parity; every page in both languages in a browser; the S0, S1 and S2 detail views | AC-M1-12 | browser part needs `apps/web/dist` and Chromium |
 | `tests/containers.spec.ts` | no network, read-only inputs, container removed on cancel | IF-3 | needs `python:3.12-slim` image |
@@ -568,7 +585,8 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 - **Calibration** covers SRAM 512×8 only of the four configurations (FR-EST-13).
 - **Verification**: only `rtl-functional-sim` is a declared, qualified capability. Gate-level simulation has no capability gate. SDF simulation runs, but `sdf.timing` cannot pass (§1.3, FR-VER-01/03, AC-12 positive case).
 - **Storage contents check** (FR-SGN-07): the mapping is reversible and round-trip checked at generation. No signoff check compares macro contents, because the design uses a standard-cell ROM.
-- **Physical**: the die is 1.2×2 mm, not 2 mm² (owner decision, requirements v0.6). The design subject is the untrained proxy.
+- **Physical**: the die is 1.2×2 mm, not 2 mm² (owner decision, requirements v0.6). The design subject is the untrained proxy. The spatial engine does not fit that die; it needs 5.0 × 3 mm by its measured cells (owner decision 2026-10-20: the die grows as needed; the requirements' §11.1 is updated once the size is confirmed by placement). It has not been implemented physically yet.
+- **Spatial engine** (measured 2026-10-21, proxy, 8 MHz): 1,327 cycles per token (6,029 tok/s); with the host's START and STATUS frames 2,059 cycles (about 3,900 tok/s). Synthesized cells 5.96 mm²: KV rings 2.09, matrix circuits 1.94 (serial adders 0.80, row outputs 0.75, delay lines 0.39), core logic 1.03, core registers 0.42, attention multipliers 0.41, tables 0.07, host 0.02. The core logic per dimension and the table cost are extrapolated for other shapes. `explore` does not cover the spatial template yet, and `arch.spec` does not judge a cycle target (only `verify_spec` reports `cycles_within_target`). The KV rings get their reset value from a zero pass after reset (AGENTS.md, owner decision 2026-10-21); the gate-level proof is due with the physical implementation. The generator implements dim a power of two (head size at least 4), 2 heads, 1 KV head and a context of 64, any number of layers and any hidden size up to 255, and refuses other shapes with a reason. Without a `die` (or `targetAreaMm2`) the area limit is the profile's prerun area (2.4 mm²), which the spatial engine does not fit; the PPA states the die it suggests (`suggestedDie`), and the design is made with that die until the prerun constraint is updated (P4).
 - **Migration**: the assessment and gate invalidation work. Downstream artifacts are not marked invalid (FR-MIG-03, FR-TRC-05). There is no NDA PDK import channel with automatic labelling (FR-INT-04, FR-SEC-01).
 - **Agents**: no change set size threshold (FR-AGT-06). No soft-constraint path (FR-AGT-09). No per-role tool profiles or LLMs (FR-AGT-14/19). The declassified handoff pack is suggested, not generated (FR-AGT-13a).
 - **UI**: no conditional approval or condition closing in the UI. No incident filters or jump links. No RTL, waveform or layout viewer beyond PNG. Settings lack LLM, quota and egress configuration (FR-UI-09/10/11/13, FR-AGT-25/26).

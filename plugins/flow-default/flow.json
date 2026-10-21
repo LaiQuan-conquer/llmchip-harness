@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "stages": [
     {
       "id": "S0",
@@ -383,7 +383,7 @@
     },
     {
       "id": "rtl.equivalence",
-      "version": "1",
+      "version": "2",
       "title": "Every item of the verification plan executed; L3 equals L2 bit for bit; coverage reaches the threshold (G3, AC-03)",
       "plugin": "sim-verilator",
       "handler": "verify",

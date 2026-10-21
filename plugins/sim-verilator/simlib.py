@@ -43,11 +43,30 @@ class Bundle:
         self.root = work / "bundle"
         self.rtl = self.root / "rtl"
         self.design = json.loads((self.root / "design.json").read_text())
-        spec = importlib.util.spec_from_file_location("bundle_isa", self.root / "isa.py")
-        self.isa = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.isa)
+        # The bundle's reference model: the instruction-level simulator of the vector engine
+        # (isa.py), or the model of a spatial design (design.json "reference").
+        reference = self.design.get("reference")
+        name = reference["module"] if reference else "isa.py"
+        spec = importlib.util.spec_from_file_location("bundle_reference", self.root / name)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.isa = None if reference else module
+        self.model = module
         self.binaries: dict[str, Path] = {}
         self.coverage_files: list[str] = []
+
+    @property
+    def spatial(self) -> bool:
+        """A spatial design (taalas-spatial/1): no program, no external memory."""
+        return self.design.get("format") == "llmchip-rtl-bundle/3"
+
+    @property
+    def testbench(self) -> tuple[list[str], str]:
+        """Testbench sources (Verilog) and the C++ harness of the bundle."""
+        tb = self.design.get("testbench")
+        if tb:
+            return [Path(p).name for p in tb["sources"]], Path(tb["cpp"]).name
+        return ["tb_top.v", "spi_sram_model.v", "sqi_sram_model.v"], "tb.cpp"
 
     @property
     def params(self) -> dict:
@@ -88,6 +107,12 @@ class Bundle:
             "-Wno-fatal",
             "-Wno-lint",
             "-Wno-style",
+            # Split the generated C++ (the spatial engine's circuits make very large functions)
+            # so the compiler runs in parallel and in bounded memory.
+            "--output-split",
+            "20000",
+            "--output-split-cfuncs",
+            "2000",
             "-j",
             str(os.cpu_count() or 4),
             "--Mdir",
@@ -96,11 +121,9 @@ class Bundle:
             "Vsim",
             "--top-module",
             "tb_top",
-            "tb_top.v",
-            "spi_sram_model.v",
-            "sqi_sram_model.v",
+            *self.testbench[0],
             *self.sources,
-            "tb.cpp",
+            self.testbench[1],
             "-CFLAGS",
             "-O2",
         ]
@@ -223,6 +246,10 @@ class Bundle:
         return records
 
     def machine(self):
+        if self.spatial:
+            ref = self.design["reference"]
+            with np.load(self.root / ref["image"]) as img:
+                return self.model.Machine({k: img[k] for k in img.files}, self.params)
         img = np.load(self.root / "isa-image.npz")
         program = [int(w) for w in img["program"]]
         p = self.params
@@ -475,13 +502,26 @@ def coverage_summary(bundle: Bundle, data_files: list[str]) -> dict:
     """Line coverage of the Verilog sources, merged over the coverage runs: a source line
     with coverage points counts as covered when all of its points were hit."""
     annotate = bundle.rtl / "coverage-annotated"
-    run([f"{TOOLS}/verilator_coverage", "--annotate", str(annotate), "--annotate-min", "1", *data_files], bundle.rtl)
+    # --annotate-all: files whose points are all hit are written too (and counted).
+    run(
+        [
+            f"{TOOLS}/verilator_coverage",
+            "--annotate",
+            str(annotate),
+            "--annotate-all",
+            "--annotate-min",
+            "1",
+            *data_files,
+        ],
+        bundle.rtl,
+    )
     files, uncovered = {}, []
     # Logic only: the ROM case tables are data (their lines are the table entries a run happens
     # to read) and the testbench is not part of the design.
     logic = {Path(p).name for p in bundle.design["sources"] + bundle.design["includes"]} - {
         "llmchip_roms.v",
         "llmchip_params.vh",
+        "sp_roms.v",
     }
     for file in sorted(f for f in annotate.glob("*.v*") if f.name in logic):
         counted = covered = 0

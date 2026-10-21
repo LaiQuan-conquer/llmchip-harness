@@ -28,6 +28,12 @@
       "type": "verification.plan",
       "path": "data/verification-plan.json",
       "label": "public"
+    },
+    {
+      "id": "verification-plan-spatial",
+      "type": "verification.plan",
+      "path": "data/verification-plan-spatial.json",
+      "label": "public"
     }
   ],
   "handlers": [

@@ -16,9 +16,11 @@ import numpy as np
 from llmchip_estimator.estimate import estimate as estimate_area
 from llmchip_rtl.compiler import Compiled
 
+from . import spatial
 from .performance import buffer_bits, options_of, performance
 
 ARCHITECTURE = "taalas-hardwired/0.2"
+TEMPLATES = (ARCHITECTURE, spatial.ARCHITECTURE)
 
 
 def design(
@@ -32,7 +34,11 @@ def design(
     arrays: dict[str, np.ndarray] | None = None,
 ) -> tuple[dict, dict]:
     """Chip spec and PPA. `arrays` are the numeric weights: the program is compiled from them
-    (the cycles do not depend on their values; without them the program is built from the shape)."""
+    (the cycles do not depend on their values; without them the program is built from the shape).
+    params["architecture"] selects the template: the microcoded vector engine (default) or the
+    spatial engine (`spatial.py`, the model as circuits)."""
+    if params.get("architecture", ARCHITECTURE) == spatial.ARCHITECTURE:
+        return spatial.design(spec, spec_hash, weights_hash, storage, profile, params, arrays)
     cfg = spec["model"]["config"]
     lanes = int(params.get("parallelMacs", 8))
     clock = float(params.get("clockMHz", 50))
@@ -279,7 +285,10 @@ def design(
 
 def verify(chip: dict, spec: dict, spec_hash: str, ppa: dict, arrays: dict | None = None) -> dict:
     """Consistency of a chip spec with its numeric spec and area limit (G2 evidence). With the
-    numeric weights, the stated speed is recomputed from the microcode the chip spec implies."""
+    numeric weights, the stated speed is recomputed from the microcode the chip spec implies
+    (or, for the spatial template, from the circuits the weights give)."""
+    if chip.get("architecture") == spatial.ARCHITECTURE:
+        return spatial.verify(chip, spec, spec_hash, ppa, arrays)
     covered = set(chip.get("observability", {}).get("covers", []))
     speed: dict = {}
     if arrays is not None:

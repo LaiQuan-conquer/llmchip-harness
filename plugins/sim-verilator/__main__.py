@@ -279,6 +279,8 @@ class Verification:
             {"case": "input", "token": t, "pos": p, "error": bool(r["error"]), "cycles": r["cycles"]}
             for (t, p), r in zip(cases, records, strict=False)
         ]
+        if self.bundle.spatial:
+            return out  # no program: the spatial engine is circuits
         # A program word with an undefined opcode (a corrupted program ROM) must end the step with `error`.
         bits = self.bundle.isa.WORD_BITS
         (self.bundle.rtl / "prog_illegal.hex").write_text(f"{0xFF:0{-(-bits // 4)}x}\n")
@@ -290,7 +292,7 @@ class Verification:
 
     def directed_illegal_input(self, item: dict) -> tuple:
         cases = self.illegal_inputs()
-        ok = len(cases) == 5 and all(c["error"] for c in cases)
+        ok = len(cases) == (4 if self.bundle.spatial else 5) and all(c["error"] for c in cases)
         return ("passed" if ok else "failed"), {"illegal_cases": len(cases)}, {"reference": "chip spec", "cases": cases}
 
     def directed_start_while_busy(self, item: dict) -> tuple:
@@ -376,6 +378,99 @@ class Verification:
         )
         return json.loads(results_file.read_text()) if results_file.exists() else {}
 
+    def serial_units(self, items: list[dict]) -> dict:
+        """Unit tests of the bit-serial cells of a spatial bundle (cocotb on Icarus Verilog), for
+        every (rounding shift, width) of the design's matrices, adding and subtracting."""
+        from cocotb_tools.runner import get_runner
+
+        work = Path(self.ctx.work_dir) / "serial"
+        work.mkdir(parents=True, exist_ok=True)
+        results_file = work / "serial-results.json"
+        results_file.unlink(missing_ok=True)
+        os.environ["PATH"] = simlib.ENV["PATH"]
+        os.environ["LD_LIBRARY_PATH"] = simlib.ENV["LD_LIBRARY_PATH"]
+        p = self.bundle.params
+        # Each (shift, width) at the stream length of the design's matrices, and at a longer
+        # stream that reaches the saturation and wrap edges.
+        runs = sorted(
+            {(int(m[1]), int(m[2]), int(m[3])) for m in p["MATRICES"]}
+            | {(int(m[1]), int(m[2]), int(m[1]) + int(m[2]) + 8) for m in p["MATRICES"]}
+        )
+        for shift, width, length in runs:
+            for sub in (0, 1):
+                params = {"S": shift, "W": width, "L": length, "SUB": sub, "ROUND": p["ROUND_MODE"]}
+                params["WRAP"] = p["OVERFLOW_WRAP"]
+                build = work / f"build_{shift}_{width}_{length}_{sub}"
+                runner = get_runner("icarus")
+                runner.build(
+                    sources=[self.bundle.rtl / "sp_lib.v", HERE / "spatial_unit.v"],
+                    hdl_toplevel="spatial_unit",
+                    parameters=params,
+                    build_dir=build,
+                    always=True,
+                )
+                env = {
+                    "UNIT_TESTS": ",".join(i["id"] for i in items),
+                    "S": str(shift),
+                    "W": str(width),
+                    "L": str(length),
+                    "SUB": str(sub),
+                    "ROUND_MODE": str(p["ROUND_MODE"]),
+                    "OVERFLOW_WRAP": str(p["OVERFLOW_WRAP"]),
+                    "RESULTS": str(results_file),
+                    "PYTHONPATH": os.pathsep.join([str(HERE), *sys.path]),
+                    "PATH": simlib.ENV["PATH"],
+                    "LD_LIBRARY_PATH": simlib.ENV["LD_LIBRARY_PATH"],
+                }
+                runner.test(
+                    test_module="cocotb_spatial",
+                    hdl_toplevel="spatial_unit",
+                    build_dir=build,
+                    test_dir=work,
+                    extra_env=env,
+                    results_xml=f"results_{shift}_{width}_{length}_{sub}.xml",
+                )
+        return json.loads(results_file.read_text()) if results_file.exists() else {}
+
+    def index_units(self, items: list[dict]) -> dict:
+        """Exhaustive tests of the table-index units of a spatial bundle (sp_units.v, cocotb on
+        Icarus Verilog): rsqrt, exp and sigmoid indices against the numeric spec's floors."""
+        from cocotb_tools.runner import get_runner
+
+        work = Path(self.ctx.work_dir) / "index"
+        work.mkdir(parents=True, exist_ok=True)
+        results_file = work / "index-results.json"
+        results_file.unlink(missing_ok=True)
+        os.environ["PATH"] = simlib.ENV["PATH"]
+        os.environ["LD_LIBRARY_PATH"] = simlib.ENV["LD_LIBRARY_PATH"]
+        p = self.bundle.params
+        units = {"exhaustive.rsqrt": "sp_rms_index", "exhaustive.exp_index": "sp_exp_index"}
+        units["exhaustive.silu_index"] = "sp_silu_index"
+        for item in items:
+            unit = units[item["id"]]
+            build = work / f"build_{unit}"
+            runner = get_runner("icarus")
+            runner.build(sources=[self.bundle.rtl / "sp_units.v"], hdl_toplevel=unit, build_dir=build, always=True)
+            env = {k: str(p[k]) for k in ("DIM", "EPS_Q", "SQ_BITS", "EXP_CAP", "EXP_SHIFT", "F_H1")}
+            env |= {k: str(p[k]) for k in ("SIG_LIMIT", "SIG_OFFSET")}
+            env |= {
+                "UNIT_TESTS": item["id"],
+                "UNIT": unit,
+                "RESULTS": str(results_file),
+                "PYTHONPATH": os.pathsep.join([str(HERE), *sys.path]),
+                "PATH": simlib.ENV["PATH"],
+                "LD_LIBRARY_PATH": simlib.ENV["LD_LIBRARY_PATH"],
+            }
+            runner.test(
+                test_module="cocotb_spatial_index",
+                hdl_toplevel=unit,
+                build_dir=build,
+                test_dir=work,
+                extra_env=env,
+                results_xml=f"results_{unit}.xml",
+            )
+        return json.loads(results_file.read_text()) if results_file.exists() else {}
+
     def coverage_line(self, item: dict) -> tuple:
         threshold = float(item.get("params", {}).get("threshold", 90))
         keys = [f"p{i}" for i in self.prompts[:2]]
@@ -389,10 +484,11 @@ class Verification:
         files: list[str] = []
         self.bundle.simulate(lines, coverage=True, name="coverage", jobs=JOBS)
         files += self.bundle.coverage_files
-        self.bundle.simulate([simlib.run_line(0, 2, [1, 5])], debug=True, coverage=True, name="coverage_debug")
-        files += self.bundle.coverage_files
+        if not self.bundle.spatial:
+            self.bundle.simulate([simlib.run_line(0, 2, [1, 5])], debug=True, coverage=True, name="coverage_debug")
+            files += self.bundle.coverage_files
         self.illegal_inputs(coverage=True)
-        files += ["illegal.dat", "illegal_op.dat"]
+        files += ["illegal.dat"] if self.bundle.spatial else ["illegal.dat", "illegal_op.dat"]
         summary = simlib.coverage_summary(self.bundle, files)
         ok = summary["pct"] >= threshold
         return (
@@ -414,6 +510,13 @@ class Verification:
             "coverage.line": self.coverage_line,
         }
         alu_ids = {"boundary.alu", "exhaustive.silu_index", "exhaustive.exp_index", "exhaustive.rsqrt", "random.alu"}
+        serial_ids = {"boundary.serial_output", "random.serial_output"}
+        serial_results: dict | None = None
+        # The table-index units of a spatial design keep the ids of the vector engine's tests.
+        index_ids = (
+            {"exhaustive.rsqrt", "exhaustive.exp_index", "exhaustive.silu_index"} if self.bundle.spatial else set()
+        )
+        index_results: dict | None = None
         items = self.plan["items"]
         # The regression runs first: later items reuse its cycles per step.
         ordered = sorted(items, key=lambda i: i["id"] != "regression.evalset")
@@ -424,7 +527,21 @@ class Verification:
             self.ctx.progress(n / len(ordered), item["id"])
             entry = {"id": item["id"], "category": item.get("category"), "evidence": "simulation"}
             try:
-                if item["id"] in alu_ids:
+                if item["id"] in index_ids:
+                    if index_results is None:
+                        index_results = self.index_units([i for i in items if i["id"] in index_ids])
+                    r = index_results.get(item["id"])
+                    if r is None:
+                        entry |= {"status": "failed", "details": {"error": "the unit test did not report"}}
+                    else:
+                        entry |= {
+                            "status": "passed" if r["failures"] == 0 and r["vectors"] > 0 else "failed",
+                            "simulator": "icarus+cocotb",
+                            "reference": "table-index rules of the numeric spec (floors)",
+                            "metrics": {"vectors": r["vectors"], "failures": r["failures"]},
+                            "details": r,
+                        }
+                elif item["id"] in alu_ids:
                     if alu_results is None:
                         alu_results = self.alu([i for i in items if i["id"] in alu_ids])
                     r = alu_results.get(item["id"])
@@ -435,6 +552,20 @@ class Verification:
                             "status": "passed" if r["failures"] == 0 else "failed",
                             "simulator": "icarus+cocotb",
                             "reference": "isa.py functions",
+                            "metrics": {"vectors": r["vectors"], "failures": r["failures"]},
+                            "details": r,
+                        }
+                elif item["id"] in serial_ids:
+                    if serial_results is None:
+                        serial_results = self.serial_units([i for i in items if i["id"] in serial_ids])
+                    r = serial_results.get(item["id"])
+                    if r is None:
+                        entry |= {"status": "failed", "details": {"error": "the unit test did not report"}}
+                    else:
+                        entry |= {
+                            "status": "passed" if r["failures"] == 0 and r["vectors"] > 0 else "failed",
+                            "simulator": "icarus+cocotb",
+                            "reference": "integer rules of the numeric spec (rounding shift, narrowing)",
                             "metrics": {"vectors": r["vectors"], "failures": r["failures"]},
                             "details": r,
                         }

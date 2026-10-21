@@ -148,6 +148,19 @@
               }
             },
             "description": "Die size chosen within the foundry's size rules (S6 uses it)."
+          },
+          "architecture": {
+            "enum": [
+              "taalas-hardwired/0.2",
+              "taalas-spatial/1"
+            ],
+            "default": "taalas-hardwired/0.2",
+            "description": "Architecture template: the microcoded vector engine with an external memory, or the spatial engine (every matrix a circuit, KV cache on chip)."
+          },
+          "cyclesPerToken": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Speed target: cycles per token at the last position; verify_spec reports cycles_within_target when it is set."
           }
         }
       },

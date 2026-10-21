@@ -128,5 +128,79 @@
       "openTools": true
     },
     "source": "gf180mcuD in the pinned iic-osic-tools image"
+  },
+  "spatialCells": {
+    "source": "Yosys synthesis (synth -booth, abc to gf180mcu_fd_sc_mcu7t5v0 tt_025C_5v00) of the taalas-spatial/1 design of the proxy model (dim 16, hidden 32, 2 layers, context 64, ternary weights), 2026-10-21; cell area before placement",
+    "confidence": "measured (synthesis of one design; placement not yet confirmed)",
+    "serialAdderUm2": {
+      "low": 162.44,
+      "typ": 165.74,
+      "high": 169.03,
+      "confidence": "measured (synthesis)",
+      "source": "sp_sadd: full adder and carry flop with the run's clear; 162.44 (add), 169.03 (subtract)"
+    },
+    "delayBitUm2": {
+      "low": 86.2,
+      "typ": 86.2,
+      "high": 86.6,
+      "confidence": "measured (synthesis)",
+      "source": "sp_taps: one flop with clear per delay bit (lines of 9, 13, 14, 15 bits: 86.2 to 86.6 per bit)"
+    },
+    "outputStageBaseUm2": {
+      "low": 515.9,
+      "typ": 515.9,
+      "high": 515.9,
+      "confidence": "measured (synthesis)",
+      "source": "sp_out without its W result bits: rounding (sticky, half, carry), overflow flag; from W = 16 (2342.28) and W = 32 (4168.68)"
+    },
+    "outputStageBitUm2": {
+      "low": 114.15,
+      "typ": 114.15,
+      "high": 114.15,
+      "confidence": "measured (synthesis)",
+      "source": "sp_out per result bit: flop with shift and saturation load"
+    },
+    "kvBitUm2": {
+      "low": 63.66,
+      "typ": 63.66,
+      "high": 70.0,
+      "confidence": "measured (typ, low); high is an assumed allowance",
+      "source": "KV ring bit: gf180mcu_fd_sc_mcu7t5v0__dffq_1 (no enable, no reset: the rings are cleared by a zero pass after reset); high allows a clock gate per ring; high 70.0 is an assumed allowance for a clock gate per ring, not measured"
+    },
+    "multiplierUm2": {
+      "low": 25756.28,
+      "typ": 25756.28,
+      "high": 25756.28,
+      "confidence": "measured (synthesis)",
+      "source": "sp_mul 18 x 18 signed, Booth (attention unit)"
+    },
+    "tableBitUm2": {
+      "low": 1.2,
+      "typ": 1.485,
+      "high": 2.0,
+      "confidence": "measured (typ); low and high are assumed allowances",
+      "source": "constant tables as logic (case statements): 64,545 um2 for 43,456 table bits of the proxy; depends on the contents; low 1.2 and high 2.0 are assumed allowances for other contents, not measured"
+    },
+    "coreFlopBitUm2": {
+      "low": 63.66,
+      "typ": 63.66,
+      "high": 75.0,
+      "confidence": "measured (typ, low); high is an assumed allowance",
+      "source": "core registers beyond the KV rings: dffq_1; their reset and enable logic is counted in the core logic; high 75 is an assumed allowance for enable or reset cells, not measured"
+    },
+    "coreLogicUm2PerDim": {
+      "low": 64649.0,
+      "typ": 64649.0,
+      "high": 84044.0,
+      "confidence": "measured at dim 16 (typ, low); other dimensions extrapolated; high is an assumed allowance",
+      "source": "core logic of the proxy (sequencing, rmsnorm, RoPE, SiLU, softmax dividers, selection): 1.034 mm2 at dim 16; other dimensions extrapolated linearly (high +30%); it also holds about seven multipliers whose count does not grow with the dimension; high (+30%) is an assumed allowance, not measured"
+    },
+    "hostUm2": {
+      "low": 18422.1,
+      "typ": 18549.4,
+      "high": 20000.0,
+      "confidence": "measured (typ, low); high is an assumed allowance",
+      "source": "sp_host (SPI slave with READ) 18,422 and chip top 127; high 20,000 is an assumed allowance, not measured"
+    }
   }
 }
