@@ -118,6 +118,14 @@ def bench(
         ]
         quality = metrics.quality(gens, [c.expected for c in prompts.cases], texts)
         speed, missing = metrics.speed(gens, s.meta)
+        measured, untrusted = metrics.measurement(gens, s.meta)
+        speed["measurement_trusted"] = measured["trusted"]
+        speed["cycles_match_design"] = measured["cycles_match_design"]
+        speed["cycles_source"] = measured["cycles_source"]
+        if untrusted:
+            missing["measurement"] = "; ".join(untrusted)
+        if measured["cycles_match_design"] is None:
+            missing.setdefault("cycles_match_design", "the chip states no design cycles (model.cycles_per_token)")
         comparisons: dict = {}
         compared_gens: dict[str, list[Generation]] = {}
         for role, other_id in (("reference", reference), ("golden", golden)):
@@ -209,6 +217,7 @@ def bench(
                 "capabilities": s.meta.capabilities,
             },
             "hashes": s.hashes,
+            "measurement": measured,
             "compared_hashes": {k: o.hashes for k, o in others.items()},
             "prompt_set": {"source": prompts.source, "prompts": len(prompts.cases), "passages": len(prompts.passages)},
             "max_tokens": max_tokens,

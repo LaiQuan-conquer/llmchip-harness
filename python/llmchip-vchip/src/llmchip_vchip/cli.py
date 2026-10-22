@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from . import prompts as pr
-from .build import new_chip
+from .build import new_chip, new_rtl_chips
 from .conform import conform
 from .generator import generate
 from .interface import ChipError
@@ -168,7 +168,7 @@ def cmd_compare(args) -> int:
 
 def cmd_conform(args) -> int:
     reg = _registry(args)
-    r = conform(reg, args.chip, _prompt_set(args, reg, args.chip), args.max_tokens)
+    r = conform(reg, args.chip, _prompt_set(args, reg, args.chip), args.max_tokens, quick=args.quick)
     for c in r["checks"]:
         print(f"{c['id']:5} {c['verdict']:5} {c['title']}{' — ' + c['detail'] if c['detail'] else ''}")
     print(f"conformance of {args.chip}: {r['verdict']}")
@@ -179,14 +179,34 @@ def cmd_conform(args) -> int:
 
 def cmd_new(args) -> int:
     chips_dir = Path(args.chips[0]) if args.chips else default_dirs()[0]
+    if args.backend == "rtl":
+        if not args.model and not args.proxy:
+            raise ValueError("give --model (a llama2.c checkpoint) or --proxy")
+        made = new_rtl_chips(
+            args.id,
+            chips_dir,
+            model=Path(args.model) if args.model else None,
+            architecture=args.architecture,
+            weight_format=args.weight_format or "ternary",
+            group_size=args.group_size or 16,
+            context=args.context or 64,
+            dividers=args.dividers,
+            clock_mhz=args.clock_mhz,
+            progress=lambda m: print(m, file=sys.stderr),
+        )
+        for d in made:
+            print(d)
+        return 0
+    if not args.model:
+        raise ValueError("give --model")
     out = new_chip(
         args.backend,
         Path(args.model),
         args.id,
         chips_dir,
         context=args.context,
-        weight_format=args.weight_format,
-        group_size=args.group_size,
+        weight_format=args.weight_format or "int8",
+        group_size=args.group_size or 32,
         progress=lambda m: print(m, file=sys.stderr),
     )
     print(out)
@@ -218,6 +238,7 @@ def parser() -> argparse.ArgumentParser:
         s.add_argument("--max-tokens", type=int, default=16 if name == "conform" else None)
         if name == "conform":
             s.add_argument("--out", help="write the result as JSON to this file")
+            s.add_argument("--quick", action="store_true", help="skip the acceptance run (T-18, T-19: not_run)")
         else:
             s.add_argument("--out", help=f"directory for run directories (default {default_runs_dir()})")
         if name == "bench":
@@ -225,13 +246,17 @@ def parser() -> argparse.ArgumentParser:
             s.add_argument("--golden", help="chip to compare bit for bit with (default: the policy's)")
             s.add_argument("--traces", action="store_true", help="keep observation points in outputs.jsonl")
         s.set_defaults(fn=fn)
-    s = sub.add_parser("new", help="make a reference or numeric chip from a model")
-    s.add_argument("backend", choices=["reference", "numeric"])
-    s.add_argument("--model", required=True, help="model directory or llama2.c checkpoint")
+    s = sub.add_parser("new", help="make a reference, numeric or rtl chip from a model")
+    s.add_argument("backend", choices=["reference", "numeric", "rtl"])
+    s.add_argument("--model", help="model directory or llama2.c checkpoint")
+    s.add_argument("--proxy", action="store_true", help="rtl: make the 5K proxy instead of --model")
     s.add_argument("--id", required=True)
     s.add_argument("--context", type=int)
-    s.add_argument("--weight-format", default="int8")
-    s.add_argument("--group-size", type=int, default=32)
+    s.add_argument("--weight-format", help="int8 (reference/numeric), ternary (rtl) by default")
+    s.add_argument("--group-size", type=int, help="32 (numeric), 16 (rtl) by default")
+    s.add_argument("--architecture", default="taalas-spatial/1", help="rtl: the engine to generate")
+    s.add_argument("--dividers", type=int, default=16, help="rtl: softmax dividers of taalas-spatial/1")
+    s.add_argument("--clock-mhz", type=float, default=8, help="rtl: the clock tok/s is computed at")
     s.set_defaults(fn=cmd_new)
     return p
 

@@ -46,9 +46,14 @@ class ChipError(Exception):
 class StepResult:
     token: int  # the next token
     cycles: int = 0  # clock cycles of the step; 0 when unknown
-    host_cycles: int | None = None  # cycles of the host frames, when the chip measures them itself
+    host_cycles: int | None = None  # cycles of the host frames, when measured on the chip's side
     logits: list[float] | None = None  # when the chip declares `logits`
     traces: dict[str, Any] | None = None  # when the chip declares `traces`
+    # Who counted the cycles: "testbench" (a pin-level testbench around the chip, independent of
+    # it), "chip" (the chip under test reports them), "model" (a formula); None: the chip.
+    cycles_source: str | None = None
+    host_cycles_source: str | None = None
+    read_cycles: int | None = None  # observation READ frames, when not part of the host's operation
 
 
 @dataclass
@@ -61,6 +66,7 @@ class ChipMeta:
     capabilities: list[str]
     host: dict
     artifacts: dict[str, str] = field(default_factory=dict)
+    measurement: dict = field(default_factory=dict)  # declared sources of cycles; L3 needs "testbench"
 
     @property
     def context(self) -> int:

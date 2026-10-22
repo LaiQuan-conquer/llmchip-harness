@@ -25,6 +25,29 @@ Chips are found in `--chips DIR` (repeatable), else `$LLMCHIP_VCHIP_CHIPS`, else
 
 `vchip new` makes the two baseline chips from any model the S1 graph recovery supports (a Hugging Face directory or a llama2.c checkpoint): `reference` (float, the quality baseline) and `numeric` (the L2 integer model of a graph numeric spec built on the spot, int8 by default, the bit-exact golden for hardware made from that spec). The model files are referenced by absolute path, not copied.
 
+## Taalas-like hardware (L3): RTL under a pin-level testbench
+
+```bash
+uv run --frozen vchip new rtl --proxy --id spatial-5k     # spatial-5k (rtl), spatial-5k-l2 (golden), spatial-5k-ref
+uv run --frozen vchip conform spatial-5k                  # T-01..T-19 on the simulated chip (--quick: without T-18/T-19)
+uv run --frozen vchip bench spatial-5k                    # its policy: bit-exact with L2, trusted cycles, > 1000 tok/s
+```
+
+`vchip new rtl` quantizes one model (a llama2.c checkpoint, or `--proxy` for the 5K proxy: untrained, fixed seed, its text means nothing) into the S2 numeric spec, generates the `taalas-spatial/1` circuits from it (`llmchip_rtl`, the S4 generator), and writes three chips: the RTL chip, the L2 golden of the same spec, and the float reference, with the RTL chip's policy naming both.
+
+The `rtl` backend builds the bundle's chip function (`design.json` `top` and `sources`) inside the harness's own testbench top ([bridges/tb/vchip_top.v](src/llmchip_vchip/bridges/tb/vchip_top.v): the chip's pins and nothing else; the bundle's own testbench files are not used, so the chip under test cannot shape what is observed) and testbench ([bridges/tb/vchip_tb.cpp](src/llmchip_vchip/bridges/tb/vchip_tb.cpp)) under Verilator in the pinned EDA image (once; cached under `<chip>/build/`), then runs it through the bridge ([bridges/rtl_bridge.py](src/llmchip_vchip/bridges/rtl_bridge.py)), a `process` chip whose simulator runs in its own container without network. The testbench drives only the chip's pins:
+
+- START (48 bits), then STATUS (40 bits) polled until `done` or `error`, then READ of the observation words while idle; SCK = clk / 8;
+- `cycles` = clocks with the `busy` pin high; `host_cycles` = the rest of the token's time at the host (START, the STATUS polls), both counted by the testbench and marked `source: testbench`. READ is reported apart (`read_cycles`) unless the host reads every token (`host.read_words` > 0);
+- token and position must fit the 16-bit START fields; legality for the model is the chip's error flag;
+- a step whose STATUS says done while the busy pin never rose, or is still high, ends with `invalid_output` (STATUS and the pin disagree), so a stale `done` cannot pass for a result.
+
+`cycles` is the chip's own busy pin, counted by the testbench: a chip that dropped busy early would report fewer compute cycles. tok/s does not depend on it: it is the token's whole time at the host, from the START frame to the last STATUS frame. `done` is seen at the next STATUS poll, so up to one poll (336 cycles) of waiting is host time, as it would be for a polling host. The design's own figure is compared separately (`cycles_match_design`); the spatial engine reports no cycle count of its own over the pins, so there is no chip-reported count to compare with.
+
+Measurement is **trusted** only when the backend is one of the harness's testbench bridges, the manifest declares `measurement: {cycles: testbench, host_cycles: testbench, trusted: true}`, and every step was counted there; a chip that claims a testbench is not believed. The counted cycles are also compared with the design's own figure (`model.cycles_per_token`, from the generator): `cycles_match_design`.
+
+Measured on 2026-10-22 (WSL2, 16 threads), 5K proxy, 16 dividers, 8 MHz: Verilator build 8 s; `conform --quick` passes T-01–T-17 in about 2 min, `conform` passes T-01–T-19 (T-06 n/a: the proxy produced no stop token) in 12.8 min with no container left behind; `bench` on all 20 prompts to the end of the 64-token context: bit-exact with L2 (tokens, logits and every observation point of 761 generated and 2,560 compared positions), 1,327 cycles per token at every position (= the design), 753 host cycles, **3,846 tok/s**, measurement trusted, verdict pass, 10.6 min. Next-token agreement with the float reference is 0.73 (the proxy is untrained and ternary).
+
 ## A chip: `chip.json`
 
 ```json
@@ -47,7 +70,7 @@ Chips are found in `--chips DIR` (repeatable), else `$LLMCHIP_VCHIP_CHIPS`, else
 
 | Field | Meaning |
 |---|---|
-| `backend` | `reference`, `numeric`, `process`, or any name with `entrypoint: "module:Class"` (an in-process adapter) |
+| `backend` | `reference`, `numeric`, `process`, `rtl`, or any name with `entrypoint: "module:Class"` (an in-process adapter) |
 | `model.context`, `model.vocab` | required; the harness assumes nothing else about the model |
 | `tokenizer` | `kind` `llama2c` (tokenizer .bin) or `hf` (tokenizer.json); `stop` token ids end a generation; optional `bos` is prepended when the tokenizer does not add it |
 | `artifacts` | named files or directories; all are hashed into every run |
@@ -55,6 +78,8 @@ Chips are found in `--chips DIR` (repeatable), else `$LLMCHIP_VCHIP_CHIPS`, else
 | `host` | `direct` (no frames) or `spi`: START (48 bits) + STATUS (40 bits), plus READ (24 + 32 per word) when `read_words` > 0, each bit `sck_div` clocks; `token_bits`/`pos_bits` (16) must hold the vocabulary and context |
 | `capabilities` | `greedy` (required), `cycles`, `logits` (perplexity), `traces` (observation points) |
 | `policy` | or `policy.json` beside the manifest; see below |
+| `measurement` | `cycles`, `host_cycles`: `testbench`, `chip` or `model`; `trusted`; `testbench` (a description). L3 chips declare testbench |
+| `simulator` | `rtl` backend: `image` pinned by digest, `tool` |
 
 An invalid manifest makes the chip `unavailable` with its reasons (`vchip list`); other chips still load.
 
@@ -117,6 +142,11 @@ The policy holds the chip's own thresholds; the harness sets none. Rules are `<m
 | T-08 | SPI host: every step accounts at least the START + STATUS frame cycles (n/a on a direct host) |
 | T-09 | two runs give identical tokens and cycles |
 | T-12 | every step reports cycles, when the chip declares `cycles` |
+| T-15 | the hardware bridge loads, resets, prefills and steps, and reports testbench measurement (n/a for other backends) |
+| T-16 | trusted cycles: testbench-counted, declared, and equal to the design's figure (n/a without a `measurement` block) |
+| T-17 | the host interface on the pins, checked by the testbench bridge (a chip's report about itself is not accepted): a START sent while the busy pin is high is ignored (same token, cycles and observation words), STATUS polled until done, READ while idle repeatable and ending with the step's token, an illegal token and an illegal position flagged, a legal step afterwards without reset; and the observation words read on the pins equal the golden's. Fails for a chip that declares trusted measurement without a testbench bridge |
+| T-18 | the policy's acceptance run: bit-exact with the golden on the whole prompt set at the policy's length, no errors (n/a without a bridge or golden; `not_run` with `--quick`) |
+| T-19 | trusted speed: measurement trusted and tok/s at least the policy's `tok_s_min` (1000 by default) |
 
 A check is `n/a` when it does not apply to the chip (frames on a direct host, no stop token declared) and `not_run` when it applies but could not be checked (no prompt of the set fits the tokenizer and context, no generation completed). The result is `pass` only without failures and without `not_run`; otherwise `fail` or `incomplete`. T-10, T-11, T-13 and T-14 are covered by `bench` (golden, reference, errors) and by the harness's own tests, not by `conform`.
 
@@ -124,6 +154,7 @@ The harness's own tests ([tests/test_harness.py](tests/test_harness.py)) cover T
 
 ## Not yet
 
-- No RTL, gate-level or perf backend of its own: hardware comes in through `process`. The frame-level host behavior (START while busy, READ) is the chip's business until a chip exposes its frames.
+- One RTL generator: `taalas-spatial/1`. `taalas-rom/1` gets an RTL chip once its generator exists. No gate-level backend yet (T-20, Icarus + SDF on the routed netlist: L3+), no perf backend.
+- `tests/test_rtl_vchip.py` runs the simulator only with the EDA image (skipped visibly otherwise) and benches 4 prompts; the full 20-prompt acceptance (T-18) runs with `LLMCHIP_VCHIP_L3=1`.
 - The reference and graph-L2 backends recompute the whole sequence each step (no KV cache): fine for small models, slow for long generations on large ones.
 - Not connected to the kernel: runs are not artifacts and verdicts are not gate evidence. No HTTP API, no Web UI page, no sampling.

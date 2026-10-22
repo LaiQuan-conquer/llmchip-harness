@@ -59,7 +59,7 @@ class SpiHost(DirectHost):
 
     def _host(self, r: StepResult) -> tuple[StepResult, int, str]:
         if r.host_cycles is not None:
-            return r, r.host_cycles, "chip"
+            return r, r.host_cycles, r.host_cycles_source or "chip"
         return r, self.frame_cycles(), "model"
 
     def step(self, token: int, pos: int) -> tuple[StepResult, int, str]:

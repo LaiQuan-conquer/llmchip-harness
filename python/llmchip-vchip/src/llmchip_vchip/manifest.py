@@ -18,6 +18,9 @@ from .interface import CAPABILITIES, ChipMeta
 FORMAT = "llmchip-vchip/1"
 TOKENIZER_KINDS = ("llama2c", "hf")
 HOST_KINDS = ("direct", "spi")
+# Who counts the cycles. Only a testbench around the chip, independent of it, makes a speed
+# measurement trustworthy (design L3): a chip's own report or a formula does not.
+MEASUREMENT_SOURCES = ("testbench", "chip", "model")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 # The Taalas-like host frames (SPI mode 0, MSB first): START = cmd + token[16] + pos[16] +
@@ -71,6 +74,7 @@ class Manifest:
             capabilities=list(d.get("capabilities", ["greedy"])),
             host=dict(d["host"]),
             artifacts=dict(d.get("artifacts", {})),
+            measurement=dict(d.get("measurement", {})),
         )
 
     def policy(self) -> dict:
@@ -201,6 +205,24 @@ def validate(m: Manifest, backends: dict[str, str] | None = None) -> list[str]:
         cmd = d.get("command")
         if not isinstance(cmd, list) or not cmd or not all(isinstance(c, str) for c in cmd):
             problems.append("a process chip needs command: a non-empty list of strings")
+    if backend == "rtl":
+        if "rtl" not in d.get("artifacts", {}):
+            problems.append("an rtl chip needs the artifact rtl (an rtl.bundle)")
+        sim = d.get("simulator")
+        if not isinstance(sim, dict) or not isinstance(sim.get("image"), str) or "@sha256:" not in sim["image"]:
+            problems.append("an rtl chip needs simulator.image, pinned by digest (name@sha256:...)")
+        if "logits" in d.get("capabilities", []) and "spec" not in d.get("artifacts", {}):
+            problems.append("an rtl chip with logits needs the artifact spec (the logits' fraction bits)")
+    measurement = d.get("measurement")
+    if measurement is not None:
+        if not isinstance(measurement, dict):
+            problems.append("measurement must be an object")
+        else:
+            for key in ("cycles", "host_cycles"):
+                if measurement.get(key) not in MEASUREMENT_SOURCES:
+                    problems.append(f"measurement.{key} must be one of {', '.join(MEASUREMENT_SOURCES)}")
+            if not isinstance(measurement.get("trusted", False), bool):
+                problems.append("measurement.trusted must be true or false")
     timeout = d.get("timeout_s")
     if timeout is not None and (not isinstance(timeout, int | float) or timeout <= 0):
         problems.append("timeout_s must be a positive number")

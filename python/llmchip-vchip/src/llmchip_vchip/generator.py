@@ -22,9 +22,10 @@ class StepRecord:
     output: int
     cycles: int
     host_cycles: int
-    host_source: str  # none | model | chip
+    host_source: str  # none | model | chip | testbench
     phase: str  # prefill | decode
     wall_s: float
+    cycles_source: str = "none"  # none | chip | model | testbench
     logits: list[float] | None = None
     traces: dict | None = None
 
@@ -68,7 +69,10 @@ def _record(
         raise ChipError("invalid_output", f"step at position {pos} returned logits that are not {vocab} values")
     if r.traces is not None and not isinstance(r.traces, dict):
         raise ChipError("invalid_output", f"step at position {pos} returned traces that are not an object")
-    return StepRecord(pos, token, r.token, r.cycles, host_cycles, source, phase, dt, r.logits, r.traces)
+    cycles_source = r.cycles_source or ("chip" if r.cycles else "none")
+    return StepRecord(
+        pos, token, r.token, r.cycles, host_cycles, source, phase, dt, cycles_source, logits=r.logits, traces=r.traces
+    )
 
 
 def _fail(g: Generation, e: Exception) -> Generation:

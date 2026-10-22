@@ -15,6 +15,7 @@ BACKENDS = {
     "reference": "llmchip_vchip.adapters.reference:ReferenceChip",
     "numeric": "llmchip_vchip.adapters.numeric:NumericChip",
     "process": "llmchip_vchip.adapters.process:ProcessChip",
+    "rtl": "llmchip_vchip.adapters.rtl:RtlChip",
 }
 
 

@@ -9,6 +9,7 @@ check makes the result `incomplete`, never a pass.
 
 from __future__ import annotations
 
+from . import metrics
 from .generator import check_prompt, generate, teacher_force
 from .interface import ChipError
 from .prompts import PromptSet
@@ -31,7 +32,7 @@ def _expect_error(fn, code: str) -> str | None:
     return f"no error, expected {code}"
 
 
-def conform(registry: Registry, chip_id: str, prompts: PromptSet, max_tokens: int = 16) -> dict:
+def conform(registry: Registry, chip_id: str, prompts: PromptSet, max_tokens: int = 16, quick: bool = False) -> dict:
     checks: list[dict] = []
     entry = registry.get(chip_id)
     if not entry.available:
@@ -44,7 +45,7 @@ def conform(registry: Registry, chip_id: str, prompts: PromptSet, max_tokens: in
         return {"chip": chip_id, "verdict": "fail", "checks": checks}
     checks.append(_check("T-01", "manifest valid, chip opens", "pass", f"backend {s.meta.backend}"))
     try:
-        _run(s, prompts, max_tokens, checks)
+        _run(s, prompts, max_tokens, checks, registry, quick)
     finally:
         s.close()
     verdicts = {c["verdict"] for c in checks}
@@ -52,7 +53,7 @@ def conform(registry: Registry, chip_id: str, prompts: PromptSet, max_tokens: in
     return {"chip": chip_id, "verdict": overall, "checks": checks}
 
 
-def _run(s: Session, prompts: PromptSet, max_tokens: int, checks: list[dict]) -> None:
+def _run(s: Session, prompts: PromptSet, max_tokens: int, checks: list[dict], registry: Registry, quick: bool) -> None:
     meta, chip, tok = s.meta, s.chip, s.tokenizer
     # T-02 tokenizer round trip
     encoded: list[tuple[str, list[int]]] = []
@@ -67,7 +68,7 @@ def _run(s: Session, prompts: PromptSet, max_tokens: int, checks: list[dict]) ->
         checks.append(
             _check("T-02", "tokenizer round trip", "not_run", "no prompt of the set fits this tokenizer and context")
         )
-        for cid in ("T-03", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09"):
+        for cid in ("T-03", "T-04", "T-05", "T-06", "T-07", "T-08", "T-09", "T-15", "T-16", "T-17", "T-18", "T-19"):
             checks.append(_check(cid, "needs an encodable prompt", "not_run", "no prompt of the set could be used"))
         return
     bad = [p for p, _ in encoded if not tok.roundtrip(p)]
@@ -219,3 +220,118 @@ def _run(s: Session, prompts: PromptSet, max_tokens: int, checks: list[dict]) ->
         )
     else:
         checks.append(_check("T-12", "cycles reported", "not_run", "no generation completed"))
+    # L3 checks (design §8.6): the hardware bridge, trusted cycles, the host interface on the pins,
+    # and the acceptance run.
+    _hardware(s, gens, errors, checks, registry, prompts, quick)
+
+
+def _hardware(
+    s: Session, gens: list, errors: list, checks: list[dict], registry: Registry, prompts, quick: bool
+) -> None:
+    from .bridges.rtl_bridge import HOST_CHECKS
+
+    meta, chip = s.meta, s.chip
+    by_id = {c["id"]: c["verdict"] for c in checks}
+    bridged = meta.backend in metrics.TESTBENCH_BACKENDS
+    if bridged:
+        basics = [by_id.get(i) for i in ("T-01", "T-03", "T-04")]
+        source = getattr(chip, "hello", {}).get("measurement")
+        ok = basics == ["pass"] * 3 and source == "testbench"
+        detail = f"hello/reset/prefill/step through the bridge; measurement {source}"
+        checks.append(_check("T-15", "hardware bridge loads and steps", "pass" if ok else "fail", detail))
+    else:
+        checks.append(_check("T-15", "hardware bridge loads and steps", "n/a", f"backend {meta.backend} has no bridge"))
+    if not meta.measurement:
+        checks.append(_check("T-16", "trusted cycles", "n/a", "the chip declares no measurement (not L3 hardware)"))
+    elif errors:
+        checks.append(_check("T-16", "trusted cycles", "not_run", "no generation completed"))
+    else:
+        block, reasons = metrics.measurement(gens, meta)
+        if block["cycles_match_design"] is False:
+            reasons.append(f"cycles differ from the design's {block['cycles_per_token_design']}")
+        detail = (
+            "; ".join(reasons) or f"testbench counted every step; equal to the design: {block['cycles_match_design']}"
+        )
+        checks.append(_check("T-16", "trusted cycles", "fail" if reasons else "pass", detail))
+    # T-17: only a testbench bridge's own check counts; a chip's report about itself does not.
+    if not bridged:
+        verdict = "fail" if meta.measurement.get("trusted") else "n/a"
+        checks.append(_check("T-17", "host interface on the pins", verdict, "no testbench bridge drives the pins"))
+    else:
+        try:
+            result = chip.op("host_check")
+            got = result.get("checks", {})
+            failed = [k for k in HOST_CHECKS if got.get(k) is not True]
+            if set(got) != set(HOST_CHECKS):
+                failed.append(f"check set {sorted(got)} is not {list(HOST_CHECKS)}")
+        except ChipError as e:
+            failed = [f"host_check: {e}"]
+        failed += _read_against_golden(s, registry)
+        detail = f"failed: {', '.join(failed)}" if failed else f"{', '.join(HOST_CHECKS)}; READ equals the golden"
+        checks.append(_check("T-17", "host interface on the pins", "fail" if failed else "pass", detail))
+    # T-18 / T-19: the acceptance run of the chip's policy (golden, all prompts, policy length).
+    policy = s.manifest.policy()
+    if not bridged or not policy.get("golden"):
+        why = "no testbench bridge" if not bridged else "the policy names no golden chip"
+        checks.append(_check("T-18", "bit-exact with the golden on the prompt set", "n/a", why))
+        checks.append(_check("T-19", "trusted speed", "n/a", why))
+        return
+    if quick:
+        for cid, title in (("T-18", "bit-exact with the golden on the prompt set"), ("T-19", "trusted speed")):
+            checks.append(_check(cid, title, "not_run", "--quick: run `vchip bench` or conform without --quick"))
+        return
+    import tempfile
+    from pathlib import Path
+
+    from .runner import bench
+
+    with tempfile.TemporaryDirectory() as tmp:
+        r = bench(registry, meta.id, prompts, out_dir=Path(tmp))
+    q, sp = r["quality"], r["speed"]
+    n = f"{r['prompt_set']['prompts']} prompts x {r['max_tokens']} tokens"
+    ok18 = q.get("bit_exact") is True and q["errors"] == 0 and q.get("comparison_errors", 0) == 0
+    checks.append(
+        _check(
+            "T-18",
+            "bit-exact with the golden on the prompt set",
+            "pass" if ok18 else "fail",
+            f"{n}; {q.get('bit_exact')}",
+        )
+    )
+    least = policy.get("speed", {}).get("tok_s_min", 1000)
+    tok_s = sp.get("tok_s")
+    ok19 = sp.get("measurement_trusted") is True and tok_s is not None and tok_s >= least
+    checks.append(
+        _check(
+            "T-19",
+            "trusted speed",
+            "pass" if ok19 else "fail",
+            f"{tok_s} tok/s (at least {least}), trusted {sp.get('measurement_trusted')}",
+        )
+    )
+
+
+def _read_against_golden(s: Session, registry: Registry) -> list[str]:
+    """One step on the chip and on its golden: the observation words read on the pins (logits and
+    traces) must equal the golden's."""
+    golden_id = s.manifest.policy().get("golden")
+    if not golden_id:
+        return ["the policy names no golden chip to compare READ with"]
+    try:
+        g = Session(registry.get(golden_id).manifest)
+    except Exception as e:
+        return [f"golden {golden_id} does not open: {e}"]
+    try:
+        out = []
+        for chip in (s.chip, g.chip):
+            chip.reset()
+        a, b = s.chip.step(2, 0), g.chip.step(2, 0)
+        if a.token != b.token:
+            out.append(f"token {a.token} != golden {b.token}")
+        if a.logits is None or a.logits != b.logits:
+            out.append("logits read on the pins differ from the golden")
+        if not a.traces or a.traces != b.traces:
+            out.append("observation words read on the pins differ from the golden")
+        return out
+    finally:
+        g.close()

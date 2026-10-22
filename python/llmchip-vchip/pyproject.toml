@@ -3,7 +3,7 @@ name = "llmchip-vchip"
 version = "0.1.0"
 description = "Test harness of llmchip-harness: loads any virtual chip, drives generation from prompts, measures quality and speed, writes reports"
 requires-python = ">=3.12"
-dependencies = ["llmchip-model", "llmchip-numeric", "numpy>=2.0"]
+dependencies = ["llmchip-model", "llmchip-numeric", "llmchip-rtl", "numpy>=2.0"]
 
 [project.scripts]
 vchip = "llmchip_vchip.cli:main"
@@ -11,6 +11,7 @@ vchip = "llmchip_vchip.cli:main"
 [tool.uv.sources]
 llmchip-model = { workspace = true }
 llmchip-numeric = { workspace = true }
+llmchip-rtl = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9,<0.14"]

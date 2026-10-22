@@ -85,6 +85,48 @@ def speed(gens: list[Generation], meta: ChipMeta) -> tuple[dict, dict]:
     return out, missing
 
 
+# Backends whose cycles are counted by the harness's own testbench (bridges/), not by the chip.
+TESTBENCH_BACKENDS = ("rtl",)
+
+
+def measurement(gens: list[Generation], meta: ChipMeta) -> tuple[dict, list[str]]:
+    """Where the cycles came from, and whether the speed can be trusted (design L3): only when
+    the chip runs under one of the harness's testbench bridges, declares it, and every step's
+    cycles and host cycles were counted there. Also compares the counted cycles with the cycles
+    the design states (`model.cycles_per_token`), when it states them (`cycles_match_design`).
+    The busy-pin count is the chip's own signal; the token's total time at the host (tok/s)
+    does not depend on it. Returns (block, reasons the measurement is not trusted)."""
+    steps = [s for g in gens for s in g.steps]
+    declared = meta.measurement
+    block: dict = {
+        "declared": declared or None,
+        "cycles_source": sorted({s.cycles_source for s in steps}),
+        "host_cycles_source": sorted({s.host_source for s in steps}),
+        "testbench": declared.get("testbench"),
+    }
+    reasons = []
+    if meta.backend not in TESTBENCH_BACKENDS:
+        reasons.append(f"backend {meta.backend} is not run under the harness's testbench")
+    if not (declared.get("trusted") and declared.get("cycles") == declared.get("host_cycles") == "testbench"):
+        reasons.append("the manifest does not declare trusted testbench measurement")
+    if not steps:
+        reasons.append("no step completed")
+    elif block["cycles_source"] != ["testbench"] or block["host_cycles_source"] != ["testbench"]:
+        reasons.append(f"steps counted by {block['cycles_source']} / {block['host_cycles_source']}, not testbench")
+    claim = meta.model.get("cycles_per_token")
+    decode = [s.cycles for g in gens for s in g.decode_steps]
+    if claim is not None and decode:
+        off = [c for c in decode if c != claim]
+        block["cycles_per_token_design"] = claim
+        block["cycles_match_design"] = not off  # judged apart (T-16, policy): a mismatch is not a source problem
+        if off:
+            block["cycles_off_design"] = {"steps": len(off), "example": off[0]}
+    else:
+        block["cycles_match_design"] = None
+    block["trusted"] = not reasons
+    return block, reasons
+
+
 def quality(gens: list[Generation], expected: list[str | None], texts: list[str]) -> dict:
     """Metrics that need no reference: length, stopping, repetition, expected text."""
     reps = [r for g in gens if (r := repetition_rate(g.tokens)) is not None]

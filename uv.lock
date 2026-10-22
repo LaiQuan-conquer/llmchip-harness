@@ -347,6 +347,7 @@ source = { editable = "python/llmchip-vchip" }
 dependencies = [
     { name = "llmchip-model" },
     { name = "llmchip-numeric" },
+    { name = "llmchip-rtl" },
     { name = "numpy" },
 ]
 
@@ -354,6 +355,7 @@ dependencies = [
 requires-dist = [
     { name = "llmchip-model", editable = "plugins/model-llama" },
     { name = "llmchip-numeric", editable = "plugins/numeric" },
+    { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "numpy", specifier = ">=2.0" },
 ]
 

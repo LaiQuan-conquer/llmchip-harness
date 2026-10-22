@@ -59,6 +59,16 @@ def markdown(r: dict) -> str:
     lines += ["", "## Speed", "", "| Metric | Value |", "|---|---|"]
     for key, v in sp.items():
         lines.append(f"| {key} | {_fmt(v)} |")
+    m = r.get("measurement") or {}
+    if m:
+        trusted = "trusted" if m["trusted"] else "NOT trusted"
+        lines += [
+            "",
+            f"Measurement: {trusted}. Cycles counted by {', '.join(m['cycles_source'])}, host cycles by "
+            f"{', '.join(m['host_cycles_source'])}" + (f" ({m['testbench']})." if m.get("testbench") else "."),
+        ]
+        if not m["trusted"] and r["missing"].get("measurement"):
+            lines.append(f"Why not: {r['missing']['measurement']}.")
     if r["comparisons"]:
         lines += ["", "## Comparisons", ""]
         for role, c in r["comparisons"].items():

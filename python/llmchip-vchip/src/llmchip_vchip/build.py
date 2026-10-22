@@ -20,7 +20,7 @@ from llmchip_model.tokens import TextTokenizer
 from llmchip_numeric import graph_eval, graph_l2
 
 from .adapters import model_source
-from .manifest import FORMAT
+from .manifest import FORMAT, file_hash
 
 
 def _base(src: model_source.ModelSource, chip_id: str, backend: str, context: int) -> dict:
@@ -103,3 +103,183 @@ def new_chip(
         shutil.rmtree(out)
         raise
     return out
+
+
+# The 5K proxy of the reference model (the shape of tests/flow-helpers.ts PROXY): untrained,
+# fixed seed, character tokenizer. Its outputs mean nothing; it proves the hardware path.
+PROXY = {"dim": 16, "hidden_dim": 32, "n_layers": 2, "n_heads": 2, "n_kv_heads": 1, "seq_len": 64, "seed": 1}
+SPATIAL = "taalas-spatial/1"
+
+
+def _sim_image() -> str:
+    """The EDA image pinned by the sim-verilator plugin of this repository."""
+    manifest = Path(__file__).resolve().parents[4] / "plugins" / "sim-verilator" / "llmchip-plugin.json"
+    return json.loads(manifest.read_text())["entry"]["image"]
+
+
+def _proxy(out: Path) -> tuple[Path, Path, dict]:
+    import llmchip_model
+    from llmchip_model import Config
+    from llmchip_model.evalset import load_evalset
+    from llmchip_model.proxy import DEFAULT_CHARS, char_tokenizer, random_checkpoint
+
+    p = PROXY
+    cfg = Config(
+        dim=p["dim"],
+        hidden_dim=p["hidden_dim"],
+        n_layers=p["n_layers"],
+        n_heads=p["n_heads"],
+        n_kv_heads=p["n_kv_heads"],
+        vocab_size=len(DEFAULT_CHARS) + 3,
+        seq_len=p["seq_len"],
+    )
+    out.mkdir(parents=True)
+    (out / "proxy.bin").write_bytes(random_checkpoint(cfg, p["seed"]))
+    (out / "tokenizer.bin").write_bytes(char_tokenizer(DEFAULT_CHARS))
+    evalset = load_evalset(Path(llmchip_model.__file__).parents[2] / "data" / "evalset-proxy.json")
+    return out / "proxy.bin", out / "tokenizer.bin", evalset
+
+
+def new_rtl_chips(
+    chip_id: str,
+    chips_dir: Path,
+    *,
+    model: Path | None = None,
+    architecture: str = SPATIAL,
+    weight_format: str = "ternary",
+    group_size: int = 16,
+    context: int = 64,
+    dividers: int = 16,
+    clock_mhz: float = 8,
+    image: str | None = None,
+    progress=print,
+) -> list[Path]:
+    """Three chips of one model and one numeric spec: `<id>-ref` (float reference), `<id>-l2`
+    (the L2 golden) and `<id>` (the RTL of `architecture`, judged against both by its policy).
+    Without `model`, the 5K proxy is made. The numeric spec is the llama2.c one of S2, the one
+    the RTL generators consume."""
+    from llmchip_model import Tokenizer, load_llama2c
+    from llmchip_numeric.l2 import L2Model
+    from llmchip_numeric.spec import build as build_spec
+    from llmchip_rtl.bundle import write_tar
+    from llmchip_rtl.spatial.bundle import bundle_files
+    from llmchip_rtl.spatial.generator import Spatial
+
+    if architecture != SPATIAL:
+        raise ValueError(f"`vchip new rtl` builds {SPATIAL} only (taalas-rom/1 has no RTL generator yet)")
+    targets = [chips_dir / chip_id, chips_dir / f"{chip_id}-l2", chips_dir / f"{chip_id}-ref"]
+    if any(t.exists() for t in targets):
+        raise ValueError(f"one of {', '.join(str(t) for t in targets)} exists")
+    rtl_dir, l2_dir, ref_dir = targets
+    rtl_dir.mkdir(parents=True)
+    try:
+        if model is None:
+            progress("making the 5K proxy (untrained, fixed seed)")
+            weights_path, tok_path, evalset = _proxy(rtl_dir / "model")
+            proxy = True
+        else:
+            weights_path = Path(model).expanduser().resolve()
+            tok_path = next((p for p in weights_path.parent.glob("tok*.bin")), None)
+            if tok_path is None:
+                raise ValueError(f"no llama2.c tokenizer (tok*.bin) beside {weights_path}")
+            evalset = graph_eval.default_evalset("llama2c")
+            proxy = False
+        cfg, weights = load_llama2c(weights_path.read_bytes())
+        tok = Tokenizer(tok_path.read_bytes(), cfg.vocab_size)
+        progress(f"quantizing ({weight_format}, groups of {group_size}, context {context})")
+        spec, npz = build_spec(
+            cfg,
+            weights,
+            tok,
+            evalset.get("calibration") or evalset["prompts"],
+            weight_format=weight_format,
+            group_size=group_size,
+            context=context,
+        )
+        (rtl_dir / "numeric-spec.json").write_text(json.dumps(spec, indent=2))
+        (rtl_dir / "l2-weights.npz").write_bytes(npz)
+        l2 = L2Model.load(rtl_dir / "numeric-spec.json", rtl_dir / "l2-weights.npz")
+        progress(f"generating the {SPATIAL} circuits ({dividers} dividers)")
+        sp = Spatial(l2.spec, l2.a, dividers=dividers)
+        source = {
+            "numericSpec": file_hash(rtl_dir / "numeric-spec.json"),
+            "weights": file_hash(rtl_dir / "l2-weights.npz"),
+        }
+        write_tar(bundle_files(sp, source), rtl_dir / "rtl.tar")
+        cycles = sp.cycles_per_token()
+        (rtl_dir / "prompts.json").write_text(json.dumps(evalset, indent=2, ensure_ascii=False))
+        params = sum(v.size for k, v in weights.items() if k != "wcls")
+        model_block = {
+            "family": "llama2c",
+            "params": int(params),
+            "dim": cfg.dim,
+            "layers": cfg.n_layers,
+            "heads": cfg.n_heads,
+            "kv_heads": cfg.n_kv_heads,
+            "context": context,
+            "vocab": cfg.vocab_size,
+            "proxy": proxy,
+        }
+        tokenizer = {"kind": "llama2c", "path": str(tok_path.resolve()), "stop": [1]}
+        spec_abs = str((rtl_dir / "numeric-spec.json").resolve())
+        weights_abs = str((rtl_dir / "l2-weights.npz").resolve())
+        prompts_abs = str((rtl_dir / "prompts.json").resolve())
+        base = {"format": FORMAT, "tokenizer": tokenizer, "prompts": prompts_abs}
+        chips = {
+            ref_dir: {
+                **base,
+                "id": f"{chip_id}-ref",
+                "backend": "reference",
+                "description": f"float reference of {weights_path.name}",
+                "model": model_block,
+                "artifacts": {"model": str(weights_path)},
+                "clock_mhz": None,
+                "host": {"kind": "direct"},
+                "capabilities": ["greedy", "logits"],
+            },
+            l2_dir: {
+                **base,
+                "id": f"{chip_id}-l2",
+                "backend": "numeric",
+                "description": f"L2 golden of {weights_path.name} ({weight_format}, groups of {group_size})",
+                "model": model_block,
+                "artifacts": {"spec": spec_abs, "weights": weights_abs},
+                "clock_mhz": None,
+                "host": {"kind": "direct"},
+                "capabilities": ["greedy", "logits", "traces"],
+            },
+            rtl_dir: {
+                **base,
+                "id": chip_id,
+                "backend": "rtl",
+                "description": f"{SPATIAL} RTL of {weights_path.name}, under the pin-level testbench",
+                "model": {**model_block, "architecture": SPATIAL, "cycles_per_token": cycles},
+                "artifacts": {"rtl": "rtl.tar", "spec": "numeric-spec.json"},
+                "clock_mhz": clock_mhz,
+                "host": {"kind": "spi", "sck_div": 8, "read_words": 0},
+                "capabilities": ["greedy", "cycles", "logits", "traces"],
+                "simulator": {"image": image or _sim_image(), "tool": "verilator"},
+                "measurement": {
+                    "cycles": "testbench",
+                    "host_cycles": "testbench",
+                    "trusted": True,
+                    "testbench": "llmchip-vchip pin-level testbench on Verilator",
+                },
+                "timeout_s": 120,
+                "policy": {
+                    "max_tokens": 64,
+                    "golden": f"{chip_id}-l2",
+                    "reference": f"{chip_id}-ref",
+                    "quality": {"bit_exact": True},
+                    "speed": {"tok_s_min": 1000, "measurement_trusted": True, "cycles_match_design": True},
+                },
+            },
+        }
+        for d, manifest in chips.items():
+            d.mkdir(exist_ok=True)
+            (d / "chip.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    except BaseException:
+        for t in targets:
+            shutil.rmtree(t, ignore_errors=True)
+        raise
+    return targets

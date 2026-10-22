@@ -37,10 +37,10 @@ PROTOCOL = "llmchip-vchip-process/1"
 
 
 class ProcessChip(BaseChip):
-    def __init__(self, m: Manifest) -> None:
+    def __init__(self, m: Manifest, command: list[str] | None = None) -> None:
         super().__init__(m.meta())
         subst = {"chip_dir": str(m.dir.resolve()), "python": sys.executable}
-        self.command = [part.format(**subst) for part in m.data["command"]]
+        self.command = [part.format(**subst) for part in (command or m.data["command"])]
         self.cwd = m.dir
         self.timeout = float(m.data.get("timeout_s", 60))
         self.proc: subprocess.Popen | None = None
@@ -66,7 +66,7 @@ class ProcessChip(BaseChip):
         os.set_blocking(self.proc.stdin.fileno(), False)
         self.starts += 1
         self._buf = b""
-        hello = self._call({"op": "hello"})
+        hello = self.hello = self._call({"op": "hello"})
         if hello.get("protocol") != PROTOCOL:
             self._kill()
             raise ChipError("crash", f"the chip process speaks {hello.get('protocol')!r}, not {PROTOCOL}")
@@ -87,6 +87,11 @@ class ProcessChip(BaseChip):
 
     def _kill(self) -> None:
         if self.proc and self.proc.poll() is None:
+            # SIGTERM first, so that a bridge can remove its container; then SIGKILL.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.proc.wait(timeout=5)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self.proc.pid, signal.SIGKILL)
             self.proc.wait()
@@ -177,7 +182,15 @@ class ProcessChip(BaseChip):
             host_cycles=d.get("host_cycles"),
             logits=d.get("logits"),
             traces=d.get("traces"),
+            cycles_source=d.get("cycles_source"),
+            host_cycles_source=d.get("host_cycles_source"),
+            read_cycles=d.get("read_cycles"),
         )
+
+    def op(self, name: str, **params) -> dict:
+        """An operation beyond the VirtualChip interface (e.g. `host_check` of a hardware bridge);
+        `unsupported` when the chip does not implement it."""
+        return self._call({"op": name, **params})
 
     def reset(self) -> None:
         if self.proc is None or self.proc.poll() is not None:

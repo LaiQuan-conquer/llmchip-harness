@@ -23,7 +23,8 @@ def handle(chip: VirtualChip, request: dict) -> dict | None:
     op = request.get("op")
     try:
         if op == "hello":
-            return {"ok": True, "protocol": PROTOCOL, "id": chip.metadata().id}
+            info = getattr(chip, "hello_info", dict)()  # e.g. a bridge's {"measurement": "testbench"}
+            return {"ok": True, "protocol": PROTOCOL, "id": chip.metadata().id, **info}
         if op == "reset":
             chip.reset()
             return {"ok": True}
@@ -33,6 +34,10 @@ def handle(chip: VirtualChip, request: dict) -> dict | None:
             return {"ok": True, **_step(chip.step(int(request["token"]), int(request["pos"])))}
         if op == "close":
             return None
+        extra = getattr(chip, f"op_{op}", None) if isinstance(op, str) else None
+        if extra is not None:
+            params = {k: v for k, v in request.items() if k != "op"}
+            return {"ok": True, **extra(**params)}
         return {"ok": False, "error": {"code": "unsupported", "message": f"unknown op {op!r}"}}
     except ChipError as e:
         return {"ok": False, "error": {"code": e.code, "message": e.message}}
