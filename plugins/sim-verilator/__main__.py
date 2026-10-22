@@ -751,6 +751,8 @@ def sdfsim(ctx: InvokeContext) -> Result:
         f'-DSDF_FILE="{sdf}"',
         # The memory pins of the padded top: quad SPI when it has kv_sio0.
         *(["-DMEM_SQI"] if re.search(r"\bkv_sio0\b", text.split(";", 1)[0]) else []),
+        # No memory pins at all (the spatial engine).
+        *(["-DNO_MEM"] if not re.search(r"\bkv_sclk\b", text.split(";", 1)[0]) else []),
         str(HERE / "sdf_tb.v"),
         str(netlist),
         str(layout / models["pads"]),

@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "stages": [
     {
       "id": "S0",
@@ -335,8 +335,8 @@
     },
     {
       "id": "arch.spec",
-      "version": "2",
-      "title": "Chip spec follows the frozen numeric spec, covers every observation point and fits the area (G2)",
+      "version": "3",
+      "title": "Chip spec follows the frozen numeric spec, covers every observation point, fits the area and, when a cycle target is set, meets it (G2)",
       "plugin": "arch-taalas",
       "handler": "verify_spec",
       "criteria": [
@@ -359,6 +359,16 @@
           "metric": "cycles_match_model",
           "op": "==",
           "value": true
+        },
+        {
+          "metric": "cycles_within_target",
+          "op": "==",
+          "value": true,
+          "when": {
+            "metric": "cycles_target_set",
+            "op": "==",
+            "value": true
+          }
         }
       ]
     },

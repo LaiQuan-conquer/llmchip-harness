@@ -184,10 +184,32 @@
           "synthStrategy": {
             "type": "string",
             "default": "AREA 0"
+          },
+          "synthHierarchy": {
+            "enum": [
+              "flatten",
+              "deferred_flatten"
+            ],
+            "default": "flatten",
+            "description": "Yosys hierarchy during synthesis: flatten first (default), or synthesize each module, then flatten (large designs such as the spatial engine: technology mapping per module instead of one netlist)."
+          },
+          "holdMarginNs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.1,
+            "description": "Hold slack margin of the timing repair after CTS (ns); signoff STA still requires hold slack >= 0 at every corner."
+          },
+          "grtHoldMarginNs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.15,
+            "description": "Hold slack margin of the timing repair after global routing (ns)."
           }
         }
       },
-      "timeoutMs": 14400000
+      "timeoutMs": 36000000
     },
     {
       "name": "drc",

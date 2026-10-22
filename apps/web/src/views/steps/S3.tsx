@@ -4,8 +4,9 @@ import type { RunRecord } from '@llmchip/kernel-api'
 import { useKernel, useQuery } from '../../api.ts'
 import { useI18n, type Key } from '../../i18n.ts'
 import { ErrorLine, Section } from '../common.tsx'
-import { designArch, exploreArch, type ArchPoint, type StepState } from '../modelPipeline.ts'
+import { designArch, exploreArch, SPATIAL, SPATIAL_BASE, type ArchPoint, type SpatialPoint, type StepState } from '../modelPipeline.ts'
 import { useModelChoices } from './S1.tsx'
+import { SpatialAnswer, SpatialArea, SpatialCompute, SpatialSpace, SpatialSpeed } from './S3Spatial.tsx'
 
 // S3 in detail: how the chip computes and stores (lanes, operand buffers, the external
 // memory interface, the clock), its area against the die, and its speed. The speed is the
@@ -94,6 +95,9 @@ export function S3Detail({ project, onBack, onProject }: { project: string; onBa
   const hasGraphSpec = runs.some((r) => r.plugin === 'numeric' && r.handler === 'quantize_graph' && r.execution === 'exited_zero')
   const analysis = !hasChipSpec && hasGraphSpec
   const g1 = state?.gates.find((g) => g.gate === 'G1')
+  // The spatial engine (taalas-spatial/1) has its own views: circuits instead of a program.
+  const spatial = chip?.architecture === SPATIAL
+  const spatialSpace = exploration?.architecture === SPATIAL
   const archVerdict = verdicts?.verdicts.filter((v) => v.check === 'arch.spec' && v.run === archCheck?.id).at(-1)
 
   return (
@@ -114,15 +118,31 @@ export function S3Detail({ project, onBack, onProject }: { project: string; onBa
         </div>
         <p className="muted">{t(hasChipSpec ? 's3.pathChip' : hasGraphSpec ? 's3.pathGraph' : 's3.pathNone')}</p>
         {hasChipSpec && g1 && !g1.released && <p className="flow-note">{t('s3.g1Open', { status: t(`status.${g1.status}` as Key) })}</p>}
-        {chip && ppa && !analysis && <Answer chip={chip} ppa={ppa} verify={verify} bound={bound} />}
-        {chip && ppa && !analysis && !ppa.microarchitecture && <p className="flow-note">{t('s3.oldDesign')}</p>}
-        {analysis && exploration && <AnalysisAnswer exploration={exploration} />}
+        {chip && ppa && !analysis && !spatial && <Answer chip={chip} ppa={ppa} verify={verify} bound={bound} />}
+        {chip && ppa && !analysis && spatial && <SpatialAnswer chip={chip} ppa={ppa} verify={verify} bound={bound} />}
+        {chip && ppa && !analysis && !spatial && !ppa.microarchitecture && <p className="flow-note">{t('s3.oldDesign')}</p>}
+        {analysis && exploration && !spatialSpace && <AnalysisAnswer exploration={exploration} />}
       </Section>
 
       {(hasChipSpec || hasGraphSpec) && <Bench key={out(design, 'chip') ?? 'none'} project={project} chipPath={hasChipSpec} current={chip} />}
-      {exploration && <DesignSpace exploration={exploration} chosen={chip ? `L${chip.dataflow.lanes}-${chip.dataflow.memoryInterface ?? 'spi'}-${buffersOf(chip.dataflow.operandBuffers)}-${chip.targets.clockMHz}MHz` : undefined} />}
+      {exploration && !spatialSpace && <DesignSpace exploration={exploration} chosen={chip ? `L${chip.dataflow.lanes}-${chip.dataflow.memoryInterface ?? 'spi'}-${buffersOf(chip.dataflow.operandBuffers)}-${chip.targets.clockMHz}MHz` : undefined} />}
+      {exploration && spatialSpace && <SpatialSpace exploration={exploration} chosen={spatial ? `D${chip.dataflow.dividers ?? 16}-${chip.targets.clockMHz}MHz` : undefined} />}
 
-      {chip && ppa && !analysis && (
+      {chip && ppa && !analysis && spatial && (
+        <>
+          <SpatialCompute chip={chip} ppa={ppa} />
+          <SpatialArea ppa={ppa} implement={implement} />
+          <SpatialSpeed ppa={ppa} verify={verify} gatesim={gatesim} sta={sta} chip={chip} />
+          <ul className="flow-checks">
+            <li>
+              <span className={`pill ${archVerdict?.verdict === 'pass' ? 'ok' : archVerdict ? 'bad' : ''}`}>{t(`flow.verdict.${archVerdict?.verdict ?? 'none'}` as Key)}</span>
+              {t('flow.check.arch')}
+              {archVerdict && archVerdict.verdict !== 'pass' && <small className="muted"> · {archVerdict.reasons.map(message).join('; ')}</small>}
+            </li>
+          </ul>
+        </>
+      )}
+      {chip && ppa && !analysis && !spatial && (
         <>
           {ppa.microarchitecture && <Compute chip={chip} ppa={ppa} />}
           {ppa.microarchitecture && <Store chip={chip} ppa={ppa} />}
@@ -198,6 +218,13 @@ function Progress({ progress }: { progress: Record<string, { state: StepState; d
 function Bench({ project, chipPath, current }: { project: string; chipPath: boolean; current: Json }) {
   const { t } = useI18n()
   const { client } = useKernel()
+  const [template, setTemplate] = useState<'hardwired' | 'spatial'>(current?.architecture === SPATIAL ? 'spatial' : 'hardwired')
+  const [spatialPoint, setSpatialPoint] = useState<SpatialPoint>({
+    architecture: SPATIAL,
+    dividers: current?.dataflow?.dividers ?? 16,
+    clockMHz: current?.targets?.clockMHz ?? 8,
+    die: current?.architecture === SPATIAL && current.targets?.die ? { xMm: current.targets.die.xMm, yMm: current.targets.die.yMm } : SPATIAL_BASE.die,
+  })
   const [point, setPoint] = useState<ArchPoint>({
     parallelMacs: current?.dataflow?.lanes ?? 2,
     clockMHz: current?.targets?.clockMHz ?? 8,
@@ -223,6 +250,61 @@ function Bench({ project, chipPath, current }: { project: string; chipPath: bool
   return (
     <Section title={t('s3.bench')}>
       <p className="flow-what">{t(chipPath ? 's3.benchIntro' : 's3.benchIntroAnalysis')}</p>
+      <div className="s1-picker">
+        <button className={template === 'spatial' ? 'active' : ''} onClick={() => setTemplate('spatial')}>
+          {t('s3sp.template.spatial')}
+        </button>
+        <button className={template === 'hardwired' ? 'active' : ''} onClick={() => setTemplate('hardwired')}>
+          {t('s3sp.template.hardwired')}
+        </button>
+      </div>
+      <p className="muted">{t(template === 'spatial' ? 's3sp.template.spatialNote' : 's3sp.template.hardwiredNote')}</p>
+      {template === 'spatial' && (
+        <div className="form grid">
+          <label>
+            {t('s3sp.in.dividers')}
+            <select value={spatialPoint.dividers} onChange={(e) => setSpatialPoint({ ...spatialPoint, dividers: Number(e.target.value) })}>
+              {[4, 8, 16, 32, 64].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t('s3.in.clock')}
+            <input type="number" min={1} max={40} step={0.5} value={spatialPoint.clockMHz} onChange={(e) => setSpatialPoint({ ...spatialPoint, clockMHz: Number(e.target.value) })} />
+          </label>
+          <label>
+            {t('s3sp.in.dieX')}
+            <input type="number" min={1} max={20} step={0.1} value={spatialPoint.die.xMm} onChange={(e) => setSpatialPoint({ ...spatialPoint, die: { ...spatialPoint.die, xMm: Number(e.target.value) } })} />
+          </label>
+          <label>
+            {t('s3sp.in.dieY')}
+            <select value={spatialPoint.die.yMm} onChange={(e) => setSpatialPoint({ ...spatialPoint, die: { ...spatialPoint.die, yMm: Number(e.target.value) } })}>
+              {[2, 3, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button disabled={busy} onClick={() => go(() => exploreArch(client, project, spatialPoint, report))}>
+            {t('s3.explore')}
+          </button>
+          {chipPath && (
+            <>
+              <button disabled={busy} onClick={() => go(() => designArch(client, project, spatialPoint, false, report))}>
+                {t('s3.design')}
+              </button>
+              <button className="active" disabled={busy} onClick={() => go(() => designArch(client, project, spatialPoint, true, report))}>
+                {t('s3.adopt')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {template === 'hardwired' && (
       <div className="form grid">
         <label>
           {t('s3.in.lanes')}
@@ -269,6 +351,7 @@ function Bench({ project, chipPath, current }: { project: string; chipPath: bool
           </>
         )}
       </div>
+      )}
       <p className="muted">{t(chipPath ? 's3.benchNote' : 's3.benchNoteAnalysis')}</p>
       <Progress progress={progress} />
       <ErrorLine error={error} />

@@ -78,3 +78,14 @@ def test_bonding_diagram_numbers_every_pad():
     }
     svg = bonding_svg(pads)
     assert "1: clk" in svg and "2: VDD" in svg
+
+
+def test_the_test_plan_names_the_memory_the_chip_has():
+    from llmchip_packager import memory_setup
+
+    pins = lambda *names: {"pins": [{"name": n} for n in names]}  # noqa: E731
+    assert "quad-SPI" in memory_setup(pins("clk", "kv_sclk", "kv_cs_n", "kv_sio0"))
+    assert "SPI SRAM" in memory_setup(pins("clk", "kv_sclk", "kv_cs_n", "kv_mosi", "kv_miso"))
+    # The spatial engine has no memory pins: the plan must not ask for an SRAM.
+    none = memory_setup(pins("clk", "rst_n", "host_sclk", "host_cs_n", "host_mosi", "host_miso", "busy"))
+    assert "none" in none and "SRAM" not in none

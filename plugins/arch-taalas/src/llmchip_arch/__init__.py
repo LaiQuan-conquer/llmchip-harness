@@ -185,6 +185,7 @@ def design(
             "areaLimitMm2": area_limit,
             "clockMHz": clock,
             "contextTokens": context,
+            **({"cyclesPerToken": int(params["cyclesPerToken"])} if params.get("cyclesPerToken") else {}),
             **(
                 {"die": {"xMm": die["xMm"], "yMm": die["yMm"], "areaMm2": round(die["xMm"] * die["yMm"], 4)}}
                 if die
@@ -298,6 +299,12 @@ def verify(chip: dict, spec: dict, spec_hash: str, ppa: dict, arrays: dict | Non
         stated = chip.get("performance", {}).get("cyclesPerToken")
         speed = {"cycles_match_model": stated is not None and abs(stated - exact["cyclesPerToken"]) < 0.5}
         speed["cycles_per_token.model"] = exact["cyclesPerToken"]
+        # The speed target is cycles per token at the last position (the slowest).
+        target = chip["targets"].get("cyclesPerToken")
+        speed["cycles_target_set"] = bool(target)
+        if target:
+            speed["cycles_within_target"] = exact["cyclesLast"] <= target
+            speed["cycles_target"] = target
     needed = {p["id"] for p in spec["observationPoints"]}
     limit = chip["targets"].get("areaLimitMm2")
     die = ppa.get("area", {}).get("dieMm2", {}).get("typ")

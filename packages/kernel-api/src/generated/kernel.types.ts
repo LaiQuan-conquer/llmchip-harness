@@ -628,6 +628,15 @@ export interface Criterion {
   metric: string
   op: '==' | '!=' | '<' | '<=' | '>' | '>='
   value: number | string | boolean
+  when?: CriterionCondition
+}
+/**
+ * The condition of a conditional criterion (`when`): the criterion applies only when it holds; when it does not, the verdict records that the criterion was not applied (CRITERION_NOT_APPLIED). A missing condition metric makes the verdict indeterminate, as a missing metric does.
+ */
+export interface CriterionCondition {
+  metric: string
+  op: '==' | '!=' | '<' | '<=' | '>' | '>='
+  value: number | string | boolean
 }
 /**
  * How the verdict engine judges a check (K6). Hard constraint.

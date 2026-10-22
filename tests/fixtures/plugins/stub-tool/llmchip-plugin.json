@@ -60,6 +60,14 @@
           "crash": {
             "type": "boolean",
             "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "conditional": {
+            "type": "boolean",
+            "default": true
           }
         }
       }

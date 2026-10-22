@@ -64,9 +64,9 @@ def test_area_follows_the_measured_cells_and_picks_a_die_within_the_size_rules(p
     area = ppa["area"]
     blocks = {b["item"]: b["areaMm2"]["typ"] for b in area["blocks"]}
     assert sum(blocks.values()) == pytest.approx(area["cellsMm2"]["typ"])
-    # Synthesis of this design measured 5.96 mm2 of cells (2026-10-21).
-    assert area["cellsMm2"]["typ"] == pytest.approx(5.96, abs=0.15)
-    assert blocks["KV cache rings"] == pytest.approx(32768 * 63.66e-6)
+    # Synthesis of this design (KV register file) measured 7.34 mm2 of cells (2026-10-21).
+    assert area["cellsMm2"]["typ"] == pytest.approx(7.34, abs=0.15)
+    assert blocks["KV cache (register file)"] == pytest.approx(32768 * 106.0e-6)
     die = area["suggestedDie"]
     assert die["yMm"] in (2, 3, 5) and die["xMm"] >= 1
     assert die["xMm"] * die["yMm"] >= area["dieMm2"]["typ"] - 1e-9
@@ -83,7 +83,9 @@ def test_verify_recomputes_the_cycles_and_judges_the_area_against_the_chosen_die
     assert ppa["reverse"]["areaLimitMm2"] == pytest.approx(die["areaMm2"])
     m = verify(chip, spec, "a" * 64, ppa, arrays)
     assert m["numeric_spec_matches"] and m["observation_points_covered"] and m["fits_area"]
-    assert m["cycles_match_model"] and m["cycles_within_target"]
+    assert m["cycles_match_model"] and m["cycles_target_set"] and m["cycles_within_target"]
+    slow, slow_ppa = run(spec, arrays, cyclesPerToken=1000, die={"xMm": die["xMm"], "yMm": die["yMm"]})
+    assert verify(slow, spec, "a" * 64, slow_ppa, arrays)["cycles_within_target"] is False
     tampered = json.loads(json.dumps(chip))
     tampered["performance"]["cyclesPerToken"] -= 1
     assert verify(tampered, spec, "a" * 64, ppa, arrays)["cycles_match_model"] is False
@@ -98,5 +100,64 @@ def test_the_old_template_is_unchanged_by_default(proxy):
     profile = json.loads((DATA / "gf180mcu.json").read_text())
     library = json.loads((DATA / "library-180nm.json").read_text())
     p = {"weightStorage": "gf180mcu.stdcell-rom", "parallelMacs": 2, "clockMHz": 8, "memoryInterface": "sqi"}
-    chip, _ = design(spec, "a" * 64, "b" * 64, storage_bits(spec, arrays), profile, library, p, arrays)
+    chip, ppa = design(spec, "a" * 64, "b" * 64, storage_bits(spec, arrays), profile, library, p, arrays)
     assert chip["architecture"] == "taalas-hardwired/0.2"
+    # No target: the condition metric says so (arch.spec does not apply the criterion).
+    m = verify(chip, spec, "a" * 64, ppa, arrays)
+    assert m["cycles_target_set"] is False and "cycles_within_target" not in m
+    # The vector engine misses 8000 cycles by far.
+    chip, ppa = design(
+        spec, "a" * 64, "b" * 64, storage_bits(spec, arrays), profile, library, p | {"cyclesPerToken": 8000}, arrays
+    )
+    assert verify(chip, spec, "a" * 64, ppa, arrays)["cycles_within_target"] is False
+
+
+def test_explore_trades_dividers_for_speed_and_area(proxy):
+    from llmchip_arch import spatial
+
+    spec, arrays = proxy
+    profile = json.loads((DATA / "gf180mcu.json").read_text())
+    params = {"weightStorage": "gf180mcu.stdcell-rom", "architecture": "taalas-spatial/1", "clockMHz": 8}
+    _, ppa = run(spec, arrays)
+    die = {k: ppa["area"]["suggestedDie"][k] for k in ("xMm", "yMm")}
+    result = spatial.explore(spec, arrays, storage_bits(spec, arrays), profile, {}, params | {"die": die})
+    points = {p["dividers"]: p for p in result["points"]}
+    assert sorted(points) == [4, 8, 16, 32, 64] and not result["analysis"]
+    # Exact cycles: those of the generated schedule with that many dividers.
+    for nd, p in points.items():
+        assert p["cyclesPerToken"] == Spatial(spec, arrays, dividers=nd).cycles_per_token()
+    cycles = [points[n]["cyclesPerToken"] for n in sorted(points)]
+    cells = [points[n]["cellsMm2"]["typ"] for n in sorted(points)]
+    assert cycles == sorted(cycles, reverse=True) and cells == sorted(cells)
+    assert result["chosen"]["id"] == "D16-8MHz" and result["chosen"]["fits"]
+    assert any(p["pareto"] for p in result["points"])
+    # Without a die the prerun area (2.4 mm2) holds none of them.
+    assert not any(p["fits"] for p in spatial.explore(spec, arrays, {}, profile, {}, params)["points"])
+
+
+def test_explore_analyses_a_large_model_from_its_shape():
+    from llmchip_arch import spatial
+
+    profile = json.loads((DATA / "gf180mcu.json").read_text())
+    graph = {
+        "format": "llmchip-numeric-graph-spec/1",
+        "model": {"family": "llama"},
+        "hyper": {
+            "hidden": 4096,
+            "intermediate": 14336,
+            "layers": 32,
+            "heads": 32,
+            "kvHeads": 8,
+            "headDim": 128,
+            "vocab": 128256,
+        },
+        "context": {"maxTokens": 2048},
+        "weights": {"groupSize": 32, "storageBits": 4, "classifier": "separate"},
+    }
+    result = spatial.explore(
+        graph, None, {}, profile, {}, {"architecture": "taalas-spatial/1", "dividersOptions": [64]}
+    )
+    p = result["chosen"]
+    assert result["analysis"] and result["limits"]
+    assert p["cellsMm2"]["typ"] > 1e5 and not p["fits"]  # an 8B model is far beyond a 180 nm die
+    assert p["cyclesPerToken"] > 128256  # the argmax alone visits every vocabulary entry

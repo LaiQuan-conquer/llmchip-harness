@@ -160,7 +160,18 @@
           "cyclesPerToken": {
             "type": "integer",
             "minimum": 1,
-            "description": "Speed target: cycles per token at the last position; verify_spec reports cycles_within_target when it is set."
+            "description": "Speed target: cycles per token at the last position; arch.spec judges it when it is set (cycles_within_target)."
+          },
+          "dividers": {
+            "enum": [
+              4,
+              8,
+              16,
+              32,
+              64
+            ],
+            "default": 16,
+            "description": "Spatial engine: exact serial dividers of the softmax (fewer: smaller, slower)."
           }
         }
       },
@@ -371,6 +382,39 @@
             },
             "minItems": 1,
             "maxItems": 6
+          },
+          "architecture": {
+            "enum": [
+              "taalas-hardwired/0.2",
+              "taalas-spatial/1"
+            ],
+            "default": "taalas-hardwired/0.2",
+            "description": "Architecture template: the microcoded vector engine with an external memory, or the spatial engine (every matrix a circuit, KV cache on chip)."
+          },
+          "dividers": {
+            "enum": [
+              4,
+              8,
+              16,
+              32,
+              64
+            ],
+            "default": 16,
+            "description": "Spatial engine: exact serial dividers of the softmax (fewer: smaller, slower)."
+          },
+          "dividersOptions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                4,
+                8,
+                16,
+                32,
+                64
+              ]
+            },
+            "minItems": 1,
+            "description": "Spatial engine: the divider counts to explore."
           }
         }
       },

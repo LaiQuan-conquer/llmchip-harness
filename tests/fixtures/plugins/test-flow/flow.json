@@ -118,6 +118,30 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "stub.limit",
+      "version": "1",
+      "title": "Violations within a limit, when one is set",
+      "plugin": "stub-tool",
+      "handler": "report",
+      "criteria": [
+        {
+          "metric": "violations",
+          "op": ">=",
+          "value": 0
+        },
+        {
+          "metric": "limit.met",
+          "op": "==",
+          "value": true,
+          "when": {
+            "metric": "limit.set",
+            "op": "==",
+            "value": true
+          }
+        }
+      ]
     }
   ],
   "hardConstraintSlots": [

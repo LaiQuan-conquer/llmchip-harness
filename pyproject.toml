@@ -1,10 +1,10 @@
 # uv workspace of the Python parts of llmchip-harness: the plugin SDK
-# (python/) and Python plugins (plugins/). See AGENTS.md "Engineering".
+# and the virtual-chip test harness (python/), and Python plugins (plugins/). See AGENTS.md "Engineering".
 [project]
 name = "llmchip-harness-python"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl", "llmchip-packager"]
+dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl", "llmchip-packager", "llmchip-vchip"]
 
 [dependency-groups]
 dev = [
@@ -23,6 +23,7 @@ llmchip-numeric = { workspace = true }
 llmchip-arch = { workspace = true }
 llmchip-rtl = { workspace = true }
 llmchip-packager = { workspace = true }
+llmchip-vchip = { workspace = true }
 # CPU-only PyTorch, used by model-llama to compare recovered graphs with the official implementation.
 torch = { index = "pytorch-cpu" }
 
@@ -32,7 +33,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.workspace]
-members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager"]
+members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager", "python/llmchip-vchip"]
 
 [tool.ruff]
 line-length = 120

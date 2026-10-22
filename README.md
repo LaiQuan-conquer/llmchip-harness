@@ -29,6 +29,7 @@ yarn harnessd serve &                       # start the kernel (home: $LLMCHIP_H
 yarn llmchip estimate --model stories260K   # feasibility, area and cost estimate
 yarn llmchip run list                       # the run behind it, with its outputs
 yarn demo                                   # run the demo project through the whole flow (S0-S8)
+yarn demo --arch spatial                    # the same with the spatial engine (the model as circuits)
 yarn demo --model /path/to/Qwen3-0.6B       # import a downloaded model: census, estimate, graph recovery (S0-S1), int8 analysis (S2)
 yarn ui                                     # open the Web UI; the Flow page shows every stage
 yarn llmchip kernel stop

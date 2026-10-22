@@ -221,3 +221,16 @@ def test_shapes_the_engine_cannot_build_are_refused():
         other["model"]["config"][key] = value
         with pytest.raises(ValueError, match=reason):
             Spatial(other, arrays)
+
+
+def test_no_loop_variable_is_shared_by_two_clocked_blocks():
+    """A shared `integer` loop variable has one driver per clocked block: synthesis that keeps the
+    hierarchy reports it as multiple drivers (Yosys `check`, LibreLane stops)."""
+    import re
+
+    core = Spatial(*proxy()).core_verilog()
+    users: dict[str, int] = {}
+    for block in core.split("always @(posedge clk)")[1:]:
+        for var in set(re.findall(r"for \((\w+) = ", block.split("\n  end\n")[0])):
+            users[var] = users.get(var, 0) + 1
+    assert users and all(n == 1 for n in users.values()), users

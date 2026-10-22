@@ -11,13 +11,15 @@
 //
 // The full flow runs the EDA tools for about half an hour, so it is opt-in:
 // LLMCHIP_FULL_FLOW=1 (and the pinned image installed); otherwise it is skipped, visibly.
+// LLMCHIP_ARCH=spatial runs it on the spatial engine (taalas-spatial/1) instead of the
+// vector engine.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { KernelClient } from '@llmchip/client'
-import { flow, out, PRERUN, run, throughG3Proxy } from './flow-helpers.ts'
+import { flow, out, PRERUN, PRERUN_SPATIAL, run, SPATIAL, throughG3Proxy } from './flow-helpers.ts'
 import { connect, REPO_PLUGINS, startKernel } from './helpers.ts'
 
 const IMAGE = JSON.parse(readFileSync(join(REPO_PLUGINS, 'eda-gf180/llmchip-plugin.json'), 'utf8')).entry.image as string
@@ -34,7 +36,7 @@ function available(image: string): boolean {
 const json = async (client: KernelClient, hash: string) => JSON.parse(await (await client.download(hash)).text())
 
 describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physical implementation, signoff and tapeout package on GF180MCU', () => {
-  it('runs S0-S8, signs off, approves G4 and exports the package with its lineage', { timeout: 5_400_000 }, async () => {
+  it('runs S0-S8, signs off, approves G4 and exports the package with its lineage', { timeout: SPATIAL ? 36_000_000 : 5_400_000 }, async () => {
     const { kernel } = await startKernel(undefined, { bundled: true, config: { scheduler: { containerCpus: 16, containerMemory: '12g' } } })
     const client = await connect(kernel)
     const { bind, judge, approve, dataHash } = flow(client)
@@ -48,8 +50,9 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
     await client.call('stages.enter', { project: 'chip', stage: 'S6' })
     const sdc = out(await run(client, 'eda-gf180', 'constraints', { chip }), 'constraints')
     const registry = await client.upload(JSON.stringify({ format: 'llmchip-timing-exceptions/1', exceptions: [] }), { type: 'timing.exceptions', mediaType: 'application/json' })
-    const impl = await run(client, 'eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: PRERUN.placementDensityPct })
-    expect(impl.metrics).toMatchObject({ die_area_mm2: 2.4, routing_drc_errors: 0 })
+    const prerun = SPATIAL ? PRERUN_SPATIAL : PRERUN
+    const impl = await run(client, 'eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: prerun.placementDensityPct, ...(SPATIAL ? { synthHierarchy: PRERUN_SPATIAL.synthHierarchy } : {}) })
+    expect(impl.metrics).toMatchObject({ die_area_mm2: prerun.die.xMm * prerun.die.yMm, routing_drc_errors: 0 })
     const layout = out(impl, 'layout')
     const gds = out(impl, 'gds')
     const measurements = await json(client, out(impl, 'measurements'))
@@ -75,8 +78,9 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
 
     // AC-06: a removed input delay makes the timing check undecidable; an unregistered false path fails it.
     const sdcText = await (await client.download(sdc)).text()
-    // The memory data input of the chip: kv_miso (SPI) or kv_sio0 (quad SPI).
-    const dataPin = sdcText.includes('kv_sio0') ? 'kv_sio0' : 'kv_miso'
+    // The data input of the chip: kv_miso (SPI) or kv_sio0 (quad SPI) of the memory, or the host's
+    // host_mosi on a chip without external memory (spatial).
+    const dataPin = sdcText.includes('kv_sio0') ? 'kv_sio0' : sdcText.includes('kv_miso') ? 'kv_miso' : 'host_mosi'
     const removed = await client.upload(sdcText.split('\n').filter((l) => !l.includes('set_input_delay -clock clk -max') || !l.includes(dataPin)).join('\n'), { type: 'timing.constraints' })
     const noDelay = await run(client, 'eda-gf180', 'sta', { layout, constraints: removed.hash, exceptions: registry.hash, chip })
     expect(await judge('phy.sta', noDelay)).toMatchObject({ verdict: 'indeterminate', reasons: [{ code: 'COVERAGE_INCOMPLETE' }] })

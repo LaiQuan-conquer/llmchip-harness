@@ -252,6 +252,10 @@ def design_dir(work: Path, rtl_tar: str, chip: dict, sdc: str, params: dict) -> 
         "PL_TARGET_DENSITY_PCT": int(params.get("placementDensityPct", 62)),
         "OPENROAD_THREADS": cpu_limit(),
         "SYNTH_STRATEGY": params.get("synthStrategy", "AREA 0"),
+        "SYNTH_HIERARCHY_MODE": params.get("synthHierarchy", "flatten"),
+        # Deferred flattening re-reads the hierarchical netlist: it must keep the `keep` attribute,
+        # or the supply pads (cells without signal ports) are removed as unused.
+        "SYNTH_WRITE_NOATTR": params.get("synthHierarchy", "flatten") != "deferred_flatten",
         # Repair slew, capacitance and timing again after global routing (signoff parasitics).
         "RUN_POST_GRT_DESIGN_REPAIR": True,
         "RUN_POST_GRT_RESIZER_TIMING": True,
@@ -262,7 +266,10 @@ def design_dir(work: Path, rtl_tar: str, chip: dict, sdc: str, params: dict) -> 
         "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 60,
         # Hold margin against the signoff extraction at the fast corner (the core leaves little
         # room for delay cells, so only after routing).
-        "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.15,
+        "GRT_RESIZER_HOLD_SLACK_MARGIN": float(params.get("grtHoldMarginNs", 0.15)),
+        # Hold margin of the repair after CTS. Designs of shift chains (the spatial engine) have
+        # one hold path per link; a smaller margin there leaves the room the buffers would take.
+        "PL_RESIZER_HOLD_SLACK_MARGIN": float(params.get("holdMarginNs", 0.1)),
         # Signoff runs separately on the final GDS and netlist (signoff.py).
         "RUN_MAGIC_DRC": False,
         "RUN_KLAYOUT_DRC": False,
@@ -277,7 +284,7 @@ def design_dir(work: Path, rtl_tar: str, chip: dict, sdc: str, params: dict) -> 
     return d, config, plan
 
 
-def librelane(design: Path, tag: str, *extra: str, timeout: int = 14400) -> Path:
+def librelane(design: Path, tag: str, *extra: str, timeout: int = 36000) -> Path:
     run(
         [
             "librelane",

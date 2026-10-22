@@ -17,7 +17,7 @@ from .generator import ARCHITECTURE, EXP_RANGE, ROUND, SCORE_FRAC, SIG_RANGE, SI
 
 FORMAT = "llmchip-rtl-bundle/3"
 LIBRARY = ("sp_lib.v", "sp_host.v", "sp_chip.v")
-TESTBENCH = ("tb_top.v", "tb.cpp")
+TESTBENCH = ("tb_top.v", "tb.cpp", "gl_tb.v")
 POINTS = {"attn_residual": 1, "ffn_residual": 2, "logits": 3}
 
 
@@ -113,7 +113,7 @@ def bundle_files(sp: Spatial, source: dict | None = None) -> dict[str, bytes]:
         "traceMap": traces,
         "sources": [f"rtl/{n}" for n in ("sp_lib.v", *sorted(generated), "sp_host.v", "sp_chip.v")],
         "includes": [],
-        "testbench": {"top": "tb_top", "sources": ["rtl/tb_top.v"], "cpp": "rtl/tb.cpp"},
+        "testbench": {"top": "tb_top", "sources": ["rtl/tb_top.v"], "cpp": "rtl/tb.cpp", "gate": ["rtl/gl_tb.v"]},
         "interfaces": {
             "host": "SPI slave mode 0, SCK <= clk/8: 0x10 START token[15:0] pos[15:0] mode[7:0]; "
             "0x20 STATUS -> busy error done 13'b0 token[15:0]; 0x30 READ addr[15:0] -> 32-bit observation "

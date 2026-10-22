@@ -34,7 +34,7 @@ def generate(ctx: InvokeContext) -> Result:
         raise ValueError("the chip spec was designed from a different numeric spec or weights file")
     l2 = L2Model.load(spec_in.path, weights_in.path)
     if chip.get("architecture") == SPATIAL:
-        return generate_spatial(ctx, l2, spec_in.hash, weights_in.hash)
+        return generate_spatial(ctx, l2, spec_in.hash, weights_in.hash, chip["dataflow"].get("dividers", 16))
     flow = chip["dataflow"]
     options = {
         "operandBuffers": flow.get("operandBuffers", "none"),
@@ -70,10 +70,10 @@ def generate(ctx: InvokeContext) -> Result:
     )
 
 
-def generate_spatial(ctx: InvokeContext, l2: L2Model, spec_hash: str, weights_hash: str) -> Result:
+def generate_spatial(ctx: InvokeContext, l2: L2Model, spec_hash: str, weights_hash: str, dividers: int) -> Result:
     """The spatial engine: every matrix becomes circuits; the bundle check reads every circuit
     back from the generated netlist and compares its linear map with the weights (FR-RTL-02)."""
-    sp = Spatial(l2.spec, l2.a)
+    sp = Spatial(l2.spec, l2.a, dividers=int(dividers))
     out = Path(ctx.out_dir)
     files = spatial_bundle_files(sp, {"numericSpec": spec_hash, "weights": weights_hash, "mappingRule": SPATIAL_RULE})
     write_tar(files, out / "rtl.tar")
@@ -103,6 +103,7 @@ def generate_spatial(ctx: InvokeContext, l2: L2Model, spec_hash: str, weights_ha
             "output_rows": sum(c["rows"] for c in circuits.values()),
             "cycles_per_token": sp.cycles_per_token(),
             "memory_interface": "none",
+            "dividers": sp.dividers,
         },
         parse={"status": "complete", "parser": "llmchip-rtl/generate"},
     )

@@ -161,11 +161,11 @@
       "source": "sp_out per result bit: flop with shift and saturation load"
     },
     "kvBitUm2": {
-      "low": 63.66,
-      "typ": 63.66,
-      "high": 70.0,
+      "low": 106.0,
+      "typ": 106.0,
+      "high": 115.0,
       "confidence": "measured (typ, low); high is an assumed allowance",
-      "source": "KV ring bit: gf180mcu_fd_sc_mcu7t5v0__dffq_1 (no enable, no reset: the rings are cleared by a zero pass after reset); high allows a clock gate per ring; high 70.0 is an assumed allowance for a clock gate per ring, not measured"
+      "source": "KV register file bit: gf180mcu_fd_sc_mcu7t5v0__dffq_1 (63.66) plus its share of the row write enable and the 64:1 read multiplexer (42.4): the proxy's core logic grew from 0.837 to 2.225 mm2 for 32,768 bits when the rotating rings became a register file (synthesis 2026-10-21; the rings needed a hold buffer per bit and did not place); high 115 is an assumed allowance, not measured"
     },
     "multiplierUm2": {
       "low": 25756.28,
@@ -189,11 +189,11 @@
       "source": "core registers beyond the KV rings: dffq_1; their reset and enable logic is counted in the core logic; high 75 is an assumed allowance for enable or reset cells, not measured"
     },
     "coreLogicUm2PerDim": {
-      "low": 64649.0,
-      "typ": 64649.0,
-      "high": 84044.0,
+      "low": 60756.0,
+      "typ": 60756.0,
+      "high": 78983.0,
       "confidence": "measured at dim 16 (typ, low); other dimensions extrapolated; high is an assumed allowance",
-      "source": "core logic of the proxy (sequencing, rmsnorm, RoPE, SiLU, softmax dividers, selection): 1.034 mm2 at dim 16; other dimensions extrapolated linearly (high +30%); it also holds about seven multipliers whose count does not grow with the dimension; high (+30%) is an assumed allowance, not measured"
+      "source": "core logic of the proxy without its dividers (sequencing, rmsnorm, RoPE, SiLU, the elementwise multipliers, index units, selection): 0.972 mm2 at dim 16, synthesized 2026-10-21; other dimensions extrapolated linearly; it holds about seven multipliers whose count does not grow with the dimension; high (+30%) is an assumed allowance, not measured"
     },
     "hostUm2": {
       "low": 18422.1,
@@ -201,6 +201,13 @@
       "high": 20000.0,
       "confidence": "measured (typ, low); high is an assumed allowance",
       "source": "sp_host (SPI slave with READ) 18,422 and chip top 127; high 20,000 is an assumed allowance, not measured"
+    },
+    "dividerLogicUm2": {
+      "low": 3400.0,
+      "typ": 3400.0,
+      "high": 4000.0,
+      "confidence": "measured (least-squares over 4, 8, 16, 32 and 64 dividers); high is an assumed allowance",
+      "source": "logic of one softmax divider (23-bit compare and subtract, its probability selection): total cells of the proxy design with 4, 8, 16, 32 and 64 dividers (5.874, 5.902, 5.936, 6.028, 6.227 mm2), less the divider's registers (39 bits, counted as core registers)"
     }
   }
 }

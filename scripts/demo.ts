@@ -1,7 +1,9 @@
 // Drives a demo project through the default flow against a running harnessd,
 // with the bundled plugins and the proxy of the reference model, so that the
 // Web UI's flow page has real results for every stage. The owner token
-// approves the gates. Run with `yarn demo [--project ID] [--until G0..G4]`.
+// approves the gates. Run with `yarn demo [--project ID] [--until G0..G4] [--arch spatial]`.
+// `--arch spatial` designs the spatial engine (taalas-spatial/1: the model as circuits, the
+// KV cache on chip, die 5 x 3 mm) instead of the vector engine.
 //
 // The sequence is the positive path of tests/m4-flow.spec.ts. S5 onwards needs
 // the pinned EDA image; S6-S7 run the physical tools for about half an hour.
@@ -23,6 +25,7 @@ import { projectIdFor, recoverGraph, runScheme, startFromWeights, type ProcessId
 const GATES = ['G0', 'G1', 'G2', 'G3', 'G4']
 const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 }
 const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2, memoryInterface: 'sqi', operandBuffers: 'none', placementDensityPct: 70 }
+const PRERUN_SPATIAL = { architecture: 'taalas-spatial/1', die: { xMm: 5, yMm: 3 }, clockMHz: 8, dividers: 16, cyclesPerToken: 8000, placementDensityPct: 70, synthHierarchy: 'deferred_flatten' }
 
 const { values } = parseArgs({
   options: {
@@ -32,8 +35,10 @@ const { values } = parseArgs({
     model: { type: 'string' },
     bits: { type: 'string', default: '4' },
     process: { type: 'string', default: 'gf180mcu' },
+    arch: { type: 'string', default: 'hardwired' },
   },
 })
+const spatial = values.arch === 'spatial'
 const project = values.project ?? (values.model ? projectIdFor(values.model) : 'demo')
 const until = GATES.indexOf(values.until!)
 if (until < 0) throw new Error(`--until must be one of ${GATES.join(', ')}`)
@@ -131,7 +136,10 @@ try {
   // S3 / G2: chip spec on the 1.2 x 2 mm prerun die.
   await enter('S3')
   const l2 = await run('numeric', 'infer', { spec, weights, tokenizer, evalset })
-  const design = await run('arch-taalas', 'design', { spec, weights, profile, library }, { weightStorage: 'gf180mcu.stdcell-rom', parallelMacs: PRERUN.parallelMacs, clockMHz: PRERUN.clockMHz, die: PRERUN.die, targetAreaMm2: 2.4, memoryInterface: PRERUN.memoryInterface, operandBuffers: PRERUN.operandBuffers })
+  const { placementDensityPct: _, synthHierarchy: __, ...spatialParams } = PRERUN_SPATIAL
+  const design = await run('arch-taalas', 'design', { spec, weights, profile, library }, spatial
+    ? { weightStorage: 'gf180mcu.stdcell-rom', ...spatialParams }
+    : { weightStorage: 'gf180mcu.stdcell-rom', parallelMacs: PRERUN.parallelMacs, clockMHz: PRERUN.clockMHz, die: PRERUN.die, targetAreaMm2: 2.4, memoryInterface: PRERUN.memoryInterface, operandBuffers: PRERUN.operandBuffers })
   const chip = out(design, 'chip')
   await bind('chip-spec', chip)
   await bind('ppa-estimate', out(design, 'ppa'))
@@ -150,7 +158,7 @@ try {
   // S5 / G3: the whole verification plan, RTL against L2.
   await enter('S5')
   const trace = out(l2, 'trace')
-  const plan = await data('verification-plan-default')
+  const plan = await data(spatial ? 'verification-plan-spatial' : 'verification-plan-default')
   await bind('rtl', rtl)
   await bind('l2-trace', trace)
   await bind('verification-plan', plan)
@@ -163,7 +171,7 @@ try {
   await enter('S6')
   const sdc = out(await run('eda-gf180', 'constraints', { chip }), 'constraints')
   const registry = await upload(JSON.stringify({ format: 'llmchip-timing-exceptions/1', exceptions: [] }), 'timing.exceptions', 'application/json')
-  const impl = await run('eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: PRERUN.placementDensityPct })
+  const impl = await run('eda-gf180', 'implement', { rtl, chip, constraints: sdc }, { placementDensityPct: (spatial ? PRERUN_SPATIAL : PRERUN).placementDensityPct, ...(spatial ? { synthHierarchy: PRERUN_SPATIAL.synthHierarchy } : {}) })
   const layout = out(impl, 'layout')
   const gds = out(impl, 'gds')
 

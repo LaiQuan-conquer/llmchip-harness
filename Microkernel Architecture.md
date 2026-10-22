@@ -4,8 +4,8 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.9 (draft) |
-| Date | 2026-10-18 |
+| Document version | v0.10 (draft) |
+| Date | 2026-10-22 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.6) |
 | Chinese version | [Microkernel Architecture.zh.md](<Microkernel Architecture.zh.md>) |
@@ -627,6 +627,7 @@ llmchip-harness/
 | ADR-007 | The out-of-process plugin protocol uses JSON-RPC 2.0, one message per line, over stdio | Accepted (M1b) |
 | ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Accepted (M1c) |
 | ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Accepted (M1b) |
+| ADR-010 | The virtual-chip test harness (`llmchip-vchip`, a standalone tool outside the kernel) may judge pass / fail / incomplete itself, by each chip's own policy. ADR-009 and AP-7 bind kernel plugins and gate evidence; the harness's verdicts are not gate evidence unless they are later brought in through the kernel's verdict engine | Accepted (owner decision, 2026-10-22) |
 
 The full record of each ADR (context, alternatives, rationale, consequences) will be placed under `docs/adr/` after development starts.
 

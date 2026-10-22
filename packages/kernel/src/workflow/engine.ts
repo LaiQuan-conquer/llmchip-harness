@@ -9,6 +9,7 @@ import {
   type CheckOverride,
   type ConstraintProposal,
   type Criterion,
+  type CriterionCondition,
   type ExportResult,
   type FlowGate,
   type FlowPack,
@@ -271,14 +272,20 @@ export class Workflow {
       return 'indeterminate'
     }
     for (const criterion of check.completeness ?? []) {
+      const applies = applicable(criterion, run.metrics, reasons)
+      if (applies === undefined) return 'indeterminate'
+      if (!applies) continue
       const outcome = evaluateCriterion(criterion, run.metrics)
       if (outcome !== true) {
-        reasons.push({ code: 'COVERAGE_INCOMPLETE', params: { ...criterion, actual: run.metrics[criterion.metric] ?? null } })
+        reasons.push({ code: 'COVERAGE_INCOMPLETE', params: { ...comparison(criterion), actual: run.metrics[criterion.metric] ?? null } })
         return 'indeterminate'
       }
     }
     let failed = false
     for (const criterion of check.criteria) {
+      const applies = applicable(criterion, run.metrics, reasons)
+      if (applies === undefined) return 'indeterminate'
+      if (!applies) continue
       const outcome = evaluateCriterion(criterion, run.metrics)
       if (outcome === undefined) {
         reasons.push({ code: 'METRIC_MISSING', params: { metric: criterion.metric } })
@@ -286,7 +293,7 @@ export class Workflow {
       }
       if (!outcome) {
         failed = true
-        reasons.push({ code: 'CRITERION_FAILED', params: { ...criterion, actual: run.metrics[criterion.metric] ?? null } })
+        reasons.push({ code: 'CRITERION_FAILED', params: { ...comparison(criterion), actual: run.metrics[criterion.metric] ?? null } })
       }
     }
     return failed ? 'fail' : 'pass'
@@ -791,7 +798,30 @@ export class Workflow {
 }
 
 /** true / false, or undefined when the metric is missing or not comparable. */
-function evaluateCriterion(criterion: Criterion, metrics: RunRecord['metrics']): boolean | undefined {
+/**
+ * Whether a conditional criterion applies (`when`). A condition that does not hold is recorded
+ * as CRITERION_NOT_APPLIED; a missing condition metric is a missing metric (indeterminate).
+ */
+function applicable(criterion: Criterion, metrics: RunRecord['metrics'], reasons: Message[]): boolean | undefined {
+  if (!criterion.when) return true
+  const holds = evaluateCriterion(criterion.when, metrics)
+  if (holds === undefined) {
+    reasons.push({ code: 'METRIC_MISSING', params: { metric: criterion.when.metric } })
+    return undefined
+  }
+  if (!holds) {
+    const when = criterion.when
+    reasons.push({ code: 'CRITERION_NOT_APPLIED', params: { ...comparison(criterion), condition: `${when.metric} ${when.op} ${String(when.value)}`, actual: metrics[when.metric] ?? null } })
+  }
+  return holds
+}
+
+/** The comparison of a criterion, without its condition (message parameters). */
+function comparison(criterion: Criterion): CriterionCondition {
+  return { metric: criterion.metric, op: criterion.op, value: criterion.value }
+}
+
+function evaluateCriterion(criterion: Criterion | CriterionCondition, metrics: RunRecord['metrics']): boolean | undefined {
   const actual = metrics[criterion.metric]
   if (actual === undefined) return undefined
   const expected = criterion.value

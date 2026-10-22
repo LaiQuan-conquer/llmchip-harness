@@ -246,8 +246,29 @@ export interface ArchPoint {
   operandBuffers: 'none' | 'attention' | 'all'
 }
 
+/** S3 of the spatial engine (taalas-spatial/1): softmax dividers, clock and die. */
+export interface SpatialPoint {
+  architecture: 'taalas-spatial/1'
+  dividers: number
+  clockMHz: number
+  die: { xMm: number; yMm: number }
+}
+
+export const SPATIAL = 'taalas-spatial/1'
+
 /** The prerun die of the gf180 project (owner decision 2026-10-18) and its storage. */
 export const ARCH_BASE = { weightStorage: 'gf180mcu.stdcell-rom', die: { xMm: 1.2, yMm: 2 }, targetAreaMm2: 2.4 }
+
+/**
+ * The spatial engine's die: the one S3 suggests from the measured cells of the proxy (owner
+ * decision 2026-10-20: the die grows as needed), and its speed target (1000 tok/s at 8 MHz).
+ */
+export const SPATIAL_BASE = { weightStorage: 'gf180mcu.stdcell-rom', die: { xMm: 5, yMm: 3 }, cyclesPerToken: 8000 }
+
+/** The parameters of arch-taalas for a point of either template. */
+function archParams(point: ArchPoint | SpatialPoint): Record<string, unknown> {
+  return 'architecture' in point ? { ...SPATIAL_BASE, ...point } : { ...ARCH_BASE, ...point }
+}
 
 async function processData(client: KernelClient) {
   const data = (await client.call('plugins.list')).plugins.flatMap((p) => p.data)
@@ -264,7 +285,7 @@ export async function archSource(client: KernelClient, project: string): Promise
 }
 
 /** S3 design-space exploration around a point (also the analysis of an imported model). */
-export async function exploreArch(client: KernelClient, project: string, point: ArchPoint, report: Report): Promise<RunRecord> {
+export async function exploreArch(client: KernelClient, project: string, point: ArchPoint | SpatialPoint, report: Report): Promise<RunRecord> {
   const step = stepper(report)
   const src = await step('source', async () => {
     const s = await archSource(client, project)
@@ -272,19 +293,28 @@ export async function exploreArch(client: KernelClient, project: string, point: 
     return s
   })
   const { profile, library } = await processData(client)
-  return step('explore', () => run(client, project, 'arch-taalas', 'explore', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], { ...ARCH_BASE, ...point }), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
+  return step('explore', () => run(client, project, 'arch-taalas', 'explore', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], exploreParams(point)), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
+}
+
+function exploreParams(point: ArchPoint | SpatialPoint): Record<string, unknown> {
+  // The spatial explore takes no speed target (it is a design parameter, not an exploration axis).
+  if ('architecture' in point) {
+    const { cyclesPerToken: _, ...base } = SPATIAL_BASE
+    return { ...base, ...point }
+  }
+  return { ...ARCH_BASE, ...point }
 }
 
 /**
  * S3 chip spec and PPA at a point (chip path only), its consistency check, and, with `bind`,
  * the G2 slots (this invalidates earlier G2 approvals). G2 itself stays a human decision.
  */
-export async function designArch(client: KernelClient, project: string, point: ArchPoint, bind: boolean, report: Report): Promise<RunRecord> {
+export async function designArch(client: KernelClient, project: string, point: ArchPoint | SpatialPoint, bind: boolean, report: Report): Promise<RunRecord> {
   const step = stepper(report)
   const src = await archSource(client, project)
   if (!src || src.analysis) throw new Error('only a chip-path numeric spec (S2, formal) can become a chip spec')
   const { profile, library } = await processData(client)
-  const design = await step('design', () => run(client, project, 'arch-taalas', 'design', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], { ...ARCH_BASE, ...point }), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
+  const design = await step('design', () => run(client, project, 'arch-taalas', 'design', [['spec', src.spec], ['weights', src.weights], ['profile', profile], ['library', library]], archParams(point)), (r) => `${(r.metrics.tokens_per_second as number).toFixed(1)} tok/s`)
   const chip = outputs(design, 'chip')[0]!
   const ppa = outputs(design, 'ppa')[0]!
   if (bind) {

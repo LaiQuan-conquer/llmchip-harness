@@ -4,8 +4,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.9（草稿） |
-| 日期 | 2026-10-18 |
+| 文档版本 | v0.10（草稿） |
+| 日期 | 2026-10-22 |
 | 状态 | 评审中，尚未基线化（v1.0 为正式基线） |
 | 姊妹文档 | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.zh.md>)：说明"做什么"（对应版本 v0.6） |
 | 英文版 | [Microkernel Architecture.md](<Microkernel Architecture.md>) |
@@ -627,6 +627,7 @@ llmchip-harness/
 | ADR-007 | 进程外插件协议使用 JSON-RPC 2.0，每行一条消息，经 stdio 传输 | 已接受（M1b） |
 | ADR-008 | 唯一外发网关：大模型供应商插件不直接持有网络连接 | 已接受（M1c） |
 | ADR-009 | 判定由内核的判定引擎作出，插件只产出指标 | 已接受（M1b） |
+| ADR-010 | 虚拟芯片测试环境（`llmchip-vchip`，内核之外的独立工具）可以按芯片自己的策略自行判定 pass / fail / incomplete。ADR-009 与 AP-7 约束的是内核插件与审批门证据；测试环境的判定不登记为审批门证据，除非今后经内核的判定引擎接入 | 已接受（负责人决定，2026-10-22） |
 
 每条 ADR 的完整记录（背景、备选方案、理由、影响）在开发开始后放在 `docs/adr/` 下。
 

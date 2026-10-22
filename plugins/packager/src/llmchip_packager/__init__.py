@@ -79,6 +79,11 @@ def bonding_svg(pads: dict) -> str:
 def memory_setup(chip: dict) -> str:
     """How the external SRAM is wired, from the chip's pins."""
     names = {p["name"] for p in chip.get("pins", [])}
+    if "kv_sclk" not in names:
+        return (
+            "- External memory: none (the weights are circuits and the KV cache is on chip); the observation "
+            "points are read over the host interface (READ) while the chip is idle."
+        )
     if "kv_sio0" in names:
         return (
             "- External memory: a 23LC1024-style serial SRAM in quad-SPI (SQI) mode on kv_sclk / kv_cs_n / "

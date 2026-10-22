@@ -110,6 +110,14 @@ export const PROXY = { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, 
 /** The prerun die (owner decision 2026-10-18), the clock that closes timing at every corner, and the
  * microarchitecture chosen in S3 (owner decision 2026-10-20: operand buffers and a quad-SPI memory). */
 export const PRERUN = { die: { xMm: 1.2, yMm: 2 }, clockMHz: 8, parallelMacs: 2, memoryInterface: 'sqi', operandBuffers: 'none', placementDensityPct: 70 }
+/**
+ * The spatial engine (owner decisions 2026-10-20: the demo chip follows Taalas, the die grows as
+ * needed): the die S3 suggests from the measured cells, 16 softmax dividers, a cycle target of
+ * 1000 tok/s at 8 MHz. The full flow uses it with LLMCHIP_ARCH=spatial.
+ */
+export const PRERUN_SPATIAL = { architecture: 'taalas-spatial/1', die: { xMm: 5, yMm: 3 }, clockMHz: 8, dividers: 16, cyclesPerToken: 8000, placementDensityPct: 70, synthHierarchy: 'deferred_flatten' }
+export const SPATIAL = process.env.LLMCHIP_ARCH === 'spatial'
+
 
 /**
  * Creates project `chip` and takes the proxy model through G2: S0 estimate, S1 synthesis and
@@ -158,15 +166,18 @@ export async function throughG2Proxy(client: KernelClient) {
   await client.call('stages.enter', { project: 'chip', stage: 'S3' })
   const l2 = await run(client, 'numeric', 'infer', { spec, weights: l2weights, tokenizer, evalset })
 
-  const design = await run(client, 'arch-taalas', 'design', { spec, weights: l2weights, profile, library }, {
-    weightStorage: 'gf180mcu.stdcell-rom',
-    parallelMacs: PRERUN.parallelMacs,
-    clockMHz: PRERUN.clockMHz,
-    die: PRERUN.die,
-    memoryInterface: PRERUN.memoryInterface,
-    operandBuffers: PRERUN.operandBuffers,
-    targetAreaMm2: 2.4,
-  })
+  const { placementDensityPct: _, synthHierarchy: __, ...spatialParams } = PRERUN_SPATIAL
+  const design = await run(client, 'arch-taalas', 'design', { spec, weights: l2weights, profile, library }, SPATIAL
+    ? { weightStorage: 'gf180mcu.stdcell-rom', ...spatialParams }
+    : {
+        weightStorage: 'gf180mcu.stdcell-rom',
+        parallelMacs: PRERUN.parallelMacs,
+        clockMHz: PRERUN.clockMHz,
+        die: PRERUN.die,
+        memoryInterface: PRERUN.memoryInterface,
+        operandBuffers: PRERUN.operandBuffers,
+        targetAreaMm2: 2.4,
+      })
   await bind('chip-spec', out(design, 'chip'))
   await bind('ppa-estimate', out(design, 'ppa'))
   const archCheck = await run(client, 'arch-taalas', 'verify_spec', { chip: out(design, 'chip'), spec, ppa: out(design, 'ppa'), weights: l2weights })
@@ -187,11 +198,12 @@ export async function throughG3Proxy(client: KernelClient) {
   await client.call('stages.enter', { project: 'chip', stage: 'S4' })
   const generated = await run(client, 'rtl-taalas', 'generate', { spec, weights: l2weights, chip: out(design, 'chip') })
   const rtl = out(generated, 'rtl')
+  // The bundle's reference model (instruction-level simulator, or the model of the circuits) against L2.
   const isa = await run(client, 'rtl-taalas', 'check_isa', { rtl, spec, weights: l2weights, tokenizer, evalset })
   expect(isa.metrics).toMatchObject({ mismatches: 0 })
   expect((await judge('rtl.lint', await run(client, 'sim-verilator', 'lint', { rtl }))).verdict).toBe('pass')
   await client.call('stages.enter', { project: 'chip', stage: 'S5' })
-  const plan = await dataHash('verification-plan-default')
+  const plan = await dataHash(SPATIAL ? 'verification-plan-spatial' : 'verification-plan-default')
   const trace = out(l2, 'trace')
   await bind('rtl', rtl)
   await bind('l2-trace', trace)

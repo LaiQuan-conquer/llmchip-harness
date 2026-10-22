@@ -16,6 +16,7 @@ members = [
     "llmchip-packager",
     "llmchip-rtl",
     "llmchip-sdk",
+    "llmchip-vchip",
 ]
 
 [[package]]
@@ -240,6 +241,7 @@ dependencies = [
     { name = "llmchip-packager" },
     { name = "llmchip-rtl" },
     { name = "llmchip-sdk" },
+    { name = "llmchip-vchip" },
 ]
 
 [package.dev-dependencies]
@@ -257,6 +259,7 @@ requires-dist = [
     { name = "llmchip-packager", editable = "plugins/packager" },
     { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
+    { name = "llmchip-vchip", editable = "python/llmchip-vchip" },
 ]
 
 [package.metadata.requires-dev]
@@ -336,6 +339,23 @@ requires-dist = [
 name = "llmchip-sdk"
 version = "0.0.0"
 source = { editable = "python/llmchip-sdk" }
+
+[[package]]
+name = "llmchip-vchip"
+version = "0.1.0"
+source = { editable = "python/llmchip-vchip" }
+dependencies = [
+    { name = "llmchip-model" },
+    { name = "llmchip-numeric" },
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "llmchip-model", editable = "plugins/model-llama" },
+    { name = "llmchip-numeric", editable = "plugins/numeric" },
+    { name = "numpy", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "markdown-it-py"

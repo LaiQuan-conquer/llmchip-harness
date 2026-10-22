@@ -201,9 +201,10 @@ class Bundle:
             f"-DGATE_TOP={models['top']}",
             *[f"-D{d}" for d in models["defines"] if not sdf or d != "FUNCTIONAL"],
             *([f'-DSDF_FILE="{sdf}"', "-gspecify"] if sdf else []),
-            "gl_tb.v",
-            "spi_sram_model.v",
-            "sqi_sram_model.v",
+            *(
+                [Path(p).name for p in self.design.get("testbench", {}).get("gate", [])]
+                or ["gl_tb.v", "spi_sram_model.v", "sqi_sram_model.v"]
+            ),
             str(netlist),
             str(layout / models["pads"]),
             *models["cells"],

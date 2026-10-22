@@ -1882,6 +1882,9 @@ export const kernelSchema = {
             "string",
             "boolean"
           ]
+        },
+        "when": {
+          "$ref": "#/$defs/CriterionCondition"
         }
       },
       "required": [
@@ -1889,6 +1892,40 @@ export const kernelSchema = {
         "op",
         "value"
       ]
+    },
+    "CriterionCondition": {
+      "title": "CriterionCondition",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "==",
+            "!=",
+            "<",
+            "<=",
+            ">",
+            ">="
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "string",
+            "boolean"
+          ]
+        }
+      },
+      "required": [
+        "metric",
+        "op",
+        "value"
+      ],
+      "description": "The condition of a conditional criterion (`when`): the criterion applies only when it holds; when it does not, the verdict records that the criterion was not applied (CRITERION_NOT_APPLIED). A missing condition metric makes the verdict indeterminate, as a missing metric does."
     },
     "CheckDefinition": {
       "title": "CheckDefinition",

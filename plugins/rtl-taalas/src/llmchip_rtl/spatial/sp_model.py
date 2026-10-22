@@ -4,7 +4,7 @@ RTL bundle as the reference of the verification items that need one beyond the L
 
 It follows the hardware, not L2's text: every matrix row is the sum of the shifted copies
 its circuit adds (the CSD digits of the weights and of the group mantissas, `sp_mv_*.v`),
-rounded and narrowed as the serial output stage does; the KV cache is the rotating ring
+rounded and narrowed as the serial output stage does; the KV cache is a register file
 (rows beyond the position are masked, never cleared); the softmax divisions are the
 restoring dividers, one quotient bit per step. The tests of rtl-taalas check it against L2.
 """
@@ -85,8 +85,8 @@ class Machine:
         self.mats = {}
         for name, shift, width, *_ in p["MATRICES"]:
             self.mats[name] = Circuit(self.a[f"{name}.q"], self.a[f"{name}.m"], g, shift, width)
-        self.kring = np.zeros((self.layers, self.context, self.kv_dim), np.int64)
-        self.vring = np.zeros((self.layers, self.context, self.kv_dim), np.int64)
+        self.kcache = np.zeros((self.layers, self.context, self.kv_dim), np.int64)
+        self.vcache = np.zeros((self.layers, self.context, self.kv_dim), np.int64)
 
     def rmsnorm(self, x: list[int], weights: np.ndarray) -> list[int]:
         p = self.p
@@ -117,7 +117,7 @@ class Machine:
         valid = range(pos + 1)
         for h in range(2):
             qh = q[h * hs : (h + 1) * hs]
-            dots = [sum(qh[j] * int(self.kring[layer, t, j]) for j in range(hs)) for t in valid]
+            dots = [sum(qh[j] * int(self.kcache[layer, t, j]) for j in range(hs)) for t in valid]
             scores = [narrow(rsh(d * p["ATT_SCALE"], p["SSH"], self.mode), 32, self.wrap) for d in dots]
             mx = max(scores)
             e = [int(self.a["lut.exp"][min(mx - s, cap) >> ish]) for s in scores]
@@ -131,7 +131,7 @@ class Machine:
                     rem = (rem - total * bit) << 1
                 probs.append(quotient)
             for j in range(hs):
-                acc = sum(probs[t] * int(self.vring[layer, t, j]) for t in valid)
+                acc = sum(probs[t] * int(self.vcache[layer, t, j]) for t in valid)
                 out.append(narrow(rsh(acc, 15, self.mode), 16, self.wrap))
         return out
 
@@ -154,8 +154,8 @@ class Machine:
         for layer in range(self.layers):
             xn = self.rmsnorm(x, self.a[f"{layer}.rms_att"])
             q = self.rope(self.mats[f"{layer}.wq"](xn, self.mode, self.wrap), pos)
-            self.kring[layer, pos] = self.rope(self.mats[f"{layer}.wk"](xn, self.mode, self.wrap), pos)
-            self.vring[layer, pos] = self.mats[f"{layer}.wv"](xn, self.mode, self.wrap)
+            self.kcache[layer, pos] = self.rope(self.mats[f"{layer}.wk"](xn, self.mode, self.wrap), pos)
+            self.vcache[layer, pos] = self.mats[f"{layer}.wv"](xn, self.mode, self.wrap)
             att = self.attention(q, layer, pos)
             o = self.mats[f"{layer}.wo"](att, self.mode, self.wrap)
             x = [narrow(a + b, 16, self.wrap) for a, b in zip(x, o, strict=True)]

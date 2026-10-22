@@ -6,7 +6,7 @@ from pathlib import Path
 from llmchip_numeric import L2Model, storage_bits
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
-from . import design, explore, verify
+from . import design, explore, spatial, verify
 
 
 def handle_design(ctx: InvokeContext) -> Result:
@@ -80,6 +80,25 @@ def handle_explore(ctx: InvokeContext) -> Result:
         l2 = L2Model.load(spec_in.path, weights_in.path)
         arrays, storage = l2.a, storage_bits(l2.spec, l2.a)
     ctx.progress(0.05, "exploring the design space")
+    if ctx.params.get("architecture") == spatial.ARCHITECTURE:
+        result = spatial.explore(spec, arrays, storage, profile, library, ctx.params)
+        chosen = result["chosen"]
+        Path(ctx.out_dir, "exploration.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
+        return Result(
+            outputs=[Output("exploration", "exploration.json", "arch.exploration", "application/json")],
+            metrics={
+                "architecture": spatial.ARCHITECTURE,
+                "points": len(result["points"]),
+                "points_fitting": sum(p["fits"] for p in result["points"]),
+                "analysis": result["analysis"],
+                "tokens_per_second": chosen["tokensPerSecond"],
+                "cycles_per_token": chosen["cyclesPerToken"],
+                "fits": chosen["fits"],
+                "limits": len(result["limits"]),
+                "die_area_mm2.typ": chosen["dieMm2"]["typ"],
+            },
+            parse={"status": "complete", "parser": "llmchip-arch/explore"},
+        )
     result = explore.explore(spec, arrays, storage, profile, library, ctx.params)
     Path(ctx.out_dir, "exploration.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
     chosen = result["chosen"]

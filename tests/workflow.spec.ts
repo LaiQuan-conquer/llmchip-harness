@@ -50,6 +50,27 @@ describe('verdict engine (AC-M1-03)', () => {
     })
   })
 
+  it('applies a conditional criterion only when its condition holds, and says so', async () => {
+    const { client } = await setup()
+    const design = (await client.upload('design', { type: 'test.design' })).hash
+    // A limit is set: the criterion is judged.
+    expect(await verdict(client, 'stub.limit', design, { violations: 1, limit: 2 })).toMatchObject({ verdict: 'pass', reasons: [] })
+    expect(await verdict(client, 'stub.limit', design, { violations: 3, limit: 2 })).toMatchObject({
+      verdict: 'fail',
+      reasons: [{ code: 'CRITERION_FAILED', params: { metric: 'limit.met', actual: false } }],
+    })
+    // No limit: the criterion is not applied, and the verdict records it.
+    expect(await verdict(client, 'stub.limit', design, { violations: 3 })).toMatchObject({
+      verdict: 'pass',
+      reasons: [{ code: 'CRITERION_NOT_APPLIED', params: { metric: 'limit.met', condition: 'limit.set == true', actual: false } }],
+    })
+    // A report without the condition metric is not a pass (DP-10).
+    expect(await verdict(client, 'stub.limit', design, { violations: 3, conditional: false })).toMatchObject({
+      verdict: 'indeterminate',
+      reasons: [{ code: 'METRIC_MISSING', params: { metric: 'limit.set' } }],
+    })
+  })
+
   it('treats crashed runs and unqualified capabilities as indeterminate', async () => {
     const { client } = await setup()
     const design = (await client.upload('design', { type: 'test.design' })).hash

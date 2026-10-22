@@ -11,7 +11,14 @@ runPlugin({
   version: '1.0.0',
   handlers: {
     report: (ctx) => {
-      const { violations, truncate, coverage, crash } = ctx.params as { violations: number; truncate: boolean; coverage: boolean; crash: boolean }
+      const { violations, truncate, coverage, crash, limit, conditional } = ctx.params as {
+        violations: number
+        truncate: boolean
+        coverage: boolean
+        crash: boolean
+        limit?: number
+        conditional: boolean
+      }
       if (crash) process.exit(2)
       const design = ctx.input('design')
       const lines = [`design ${design.hash}`, `violations ${violations}`, ...(truncate ? [] : ['end of report'])]
@@ -20,7 +27,16 @@ runPlugin({
       return {
         outputs: [{ name: 'report', path: 'report.txt', type: 'test.report' }],
         // A truncated report cannot be parsed completely, so the parser does not claim metrics it did not see.
-        metrics: truncate ? {} : { violations, ...(coverage ? { 'coverage.complete': true } : {}) },
+        // `limit`: a target the report judges only when one is set (a conditional criterion);
+        // `conditional: false` omits the condition metric (a parser that does not report it).
+        metrics: truncate
+          ? {}
+          : {
+              violations,
+              ...(coverage ? { 'coverage.complete': true } : {}),
+              ...(conditional ? { 'limit.set': limit !== undefined } : {}),
+              ...(limit !== undefined ? { 'limit.met': violations <= limit } : {}),
+            },
         parse: { status: truncate ? 'incomplete' : 'complete', parser: 'stub-report/1' },
       }
     },

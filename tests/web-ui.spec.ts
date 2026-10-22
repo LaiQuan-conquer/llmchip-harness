@@ -83,6 +83,22 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     await pipeline.runScheme(client, 'ui', 'graph', { weightFormat: 'int8', groupSize: 16, rounding: 'half-even', overflow: 'saturate' }, { maxPrompts: 1, steps: 2, passageTokens: 64 }, () => {})
     // The S3 analysis of the recovered graph (design space of the engine at the model's dimensions).
     await pipeline.exploreArch(client, 'ui', { parallelMacs: 2, clockMHz: 8, memoryInterface: 'sqi', operandBuffers: 'none' }, () => {})
+    // A second project with the spatial engine designed and explored (S3 of taalas-spatial/1).
+    await client.call('projects.create', { id: 'sp', title: 'Spatial engine' })
+    const call = async (plugin: string, handler: string, inputs: Record<string, string>, params: Record<string, unknown> = {}) => {
+      const r = await client.call('runs.start', { plugin, handler, params, project: 'sp', inputs: Object.entries(inputs).map(([name, hash]) => ({ name, hash })) })
+      const done = await client.call('runs.wait', { run: r.id, timeoutMs: 120_000 })
+      expect(done, `${plugin}/${handler}`).toMatchObject({ execution: 'exited_zero' })
+      return done
+    }
+    const hash = (r: { outputs: { name: string; hash: string }[] }, name: string) => r.outputs.find((o) => o.name === name)!.hash
+    const proxy = await call('model-llama', 'synthesize', {}, { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 })
+    const ir = hash(await call('model-llama', 'intake', { weights: hash(proxy, 'weights'), tokenizer: hash(proxy, 'tokenizer') }, { license: 'proxy (untrained)' }), 'ir')
+    const evalset = data.find((d) => d.id === 'evalset-proxy')!.hash
+    await call('numeric', 'quantize', { ir, tokenizer: hash(proxy, 'tokenizer'), evalset }, { weightFormat: 'ternary', groupSize: 16, contextLength: 64 })
+    const point = { architecture: 'taalas-spatial/1' as const, dividers: 16, clockMHz: 8, die: { xMm: 5, yMm: 3 } }
+    await pipeline.designArch(client, 'sp', point, false, () => {})
+    await pipeline.exploreArch(client, 'sp', point, () => {})
     const runtime = readRuntimeInfo(kernel.layout.root)!
     try {
       const page = await chromium.newPage()
@@ -96,6 +112,8 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
 
       await page.goto(`${runtime.url}/#token=${runtime.token}`)
       await page.waitForSelector('.app')
+      // Two projects: the stage views below are those of `ui` (the spatial engine's are `sp`).
+      await page.click('li[data-project=ui] .side-project')
       for (const lang of ['zh', 'en'] as const) {
         await page.click('button[data-page=settings]')
         await page.click(`button[data-lang=${lang}]`)
@@ -159,6 +177,17 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
         expect(s3).toContain(lang === 'zh' ? '设计空间' : 'Design space')
         await page.click('.nav-back')
         await page.waitForSelector('#flow-S3 .flow-detail')
+        // The S3 view of the spatial engine: circuits, area blocks, the schedule, its design space.
+        await page.click('li[data-project=sp] .side-project')
+        await page.click('li[data-project=sp] .side-entries li:has-text("S3")')
+        await page.waitForSelector('.s3-scatter')
+        const sp = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => sp.includes(key)), `${lang}/S3 spatial`).toEqual([])
+        expect(sp).not.toMatch(/\bs3(sp)?\.[a-z]/)
+        expect(sp).toContain(lang === 'zh' ? '串行加法器' : 'Serial adders')
+        expect(sp).toContain(lang === 'zh' ? 'KV 缓存（寄存器堆）' : 'KV cache (register file)')
+        expect(sp).toContain('6,029')
+        await page.click('li[data-project=ui] .side-project')
         await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')
         expect(nav).toContain(lang === 'zh' ? '项目总览' : 'Overview')
