@@ -17,6 +17,7 @@ members = [
     "llmchip-rtl",
     "llmchip-sdk",
     "llmchip-vchip",
+    "llmchip-vchip-plugin",
 ]
 
 [[package]]
@@ -242,6 +243,7 @@ dependencies = [
     { name = "llmchip-rtl" },
     { name = "llmchip-sdk" },
     { name = "llmchip-vchip" },
+    { name = "llmchip-vchip-plugin" },
 ]
 
 [package.dev-dependencies]
@@ -260,6 +262,7 @@ requires-dist = [
     { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
     { name = "llmchip-vchip", editable = "python/llmchip-vchip" },
+    { name = "llmchip-vchip-plugin", editable = "plugins/vchip" },
 ]
 
 [package.metadata.requires-dev]
@@ -357,6 +360,21 @@ requires-dist = [
     { name = "llmchip-numeric", editable = "plugins/numeric" },
     { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "numpy", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "llmchip-vchip-plugin"
+version = "0.1.0"
+source = { editable = "plugins/vchip" }
+dependencies = [
+    { name = "llmchip-sdk" },
+    { name = "llmchip-vchip" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
+    { name = "llmchip-vchip", editable = "python/llmchip-vchip" },
 ]
 
 [[package]]

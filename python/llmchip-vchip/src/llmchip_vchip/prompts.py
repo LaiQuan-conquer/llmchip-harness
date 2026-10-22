@@ -29,11 +29,20 @@ def inline(prompts: list[str]) -> PromptSet:
     return PromptSet([PromptCase(f"p{i}", p) for i, p in enumerate(prompts)])
 
 
+def _evalset(text: str) -> dict | None:
+    """The file as an `llmchip-evalset/1` document, by its content (kernel inputs have no suffix)."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data.get("format") == "llmchip-evalset/1" else None
+
+
 def load(path: Path) -> PromptSet:
     text = path.read_text()
-    if path.suffix == ".json":
-        data = json.loads(text)
-        if data.get("format") != "llmchip-evalset/1":
+    data = _evalset(text)
+    if data is not None or path.suffix == ".json":
+        if data is None:
             raise ValueError(f"{path}: a .json prompt set must be an llmchip-evalset/1 file")
         cases = [PromptCase(f"p{i}", p) for i, p in enumerate(data["prompts"])]
         return PromptSet(cases, list(data.get("passages", [])), str(path))

@@ -4,7 +4,7 @@
 name = "llmchip-harness-python"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl", "llmchip-packager", "llmchip-vchip"]
+dependencies = ["llmchip-sdk", "llmchip-estimator", "llmchip-model", "llmchip-numeric", "llmchip-arch", "llmchip-rtl", "llmchip-packager", "llmchip-vchip", "llmchip-vchip-plugin"]
 
 [dependency-groups]
 dev = [
@@ -24,6 +24,7 @@ llmchip-arch = { workspace = true }
 llmchip-rtl = { workspace = true }
 llmchip-packager = { workspace = true }
 llmchip-vchip = { workspace = true }
+llmchip-vchip-plugin = { workspace = true }
 # CPU-only PyTorch, used by model-llama to compare recovered graphs with the official implementation.
 torch = { index = "pytorch-cpu" }
 
@@ -33,7 +34,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.workspace]
-members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager", "python/llmchip-vchip"]
+members = ["python/llmchip-sdk", "plugins/estimator", "plugins/model-llama", "plugins/numeric", "plugins/arch-taalas", "plugins/rtl-taalas", "plugins/packager", "python/llmchip-vchip", "plugins/vchip"]
 
 [tool.ruff]
 line-length = 120

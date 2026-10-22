@@ -1,6 +1,7 @@
 """Llama-family model intake and the L0 FP32 reference (requirements FR-MDL, §3.4.3).
 
-- `load_llama2c` reads llama2.c checkpoints (legacy v0 format, as `run.c` does).
+- `load_llama2c` reads llama2.c checkpoints (legacy v0 format, as `run.c` does); `save_llama2c`
+  writes one back from a Model IR.
 - `Tokenizer` is a port of `run.c`'s BPE tokenizer.
 - `Model.forward` is a NumPy float32 port of `run.c`'s `forward`; the L0 reference is
   validated against the vendored, compiled `run.c` (tests/test_model.py).
@@ -87,6 +88,29 @@ def save_ir(cfg: Config, weights: dict[str, np.ndarray]) -> bytes:
     arrays = {k: v for k, v in weights.items() if not (k == "wcls" and cfg.shared_classifier)}
     np.savez(buf, config=np.array(json.dumps({"format": IR_FORMAT, **asdict(cfg)})), **arrays)
     return buf.getvalue()
+
+
+def save_llama2c(cfg: Config, weights: dict[str, np.ndarray]) -> bytes:
+    """The llama2.c (v0) checkpoint of a Model IR, as `load_llama2c` reads it back (the unused
+    RoPE tables are written as zeros). Only for the format's fixed eps and RoPE base."""
+    if cfg.norm_eps != 1e-5 or cfg.rope_theta != 10000.0:
+        raise ValueError("a llama2.c checkpoint has eps 1e-5 and RoPE base 10000; this model differs")
+    L, d, h, kv = cfg.n_layers, cfg.dim, cfg.hidden_dim, cfg.kv_dim
+    shapes = {"token_embedding": (cfg.vocab_size, d), "rms_att": (L, d), "wq": (L, d, d), "wk": (L, kv, d)}
+    shapes |= {"wv": (L, kv, d), "wo": (L, d, d), "rms_ffn": (L, d), "w1": (L, h, d), "w2": (L, d, h)}
+    shapes |= {"w3": (L, h, d), "rms_final": (d,)}
+    tensors = []
+    for name, shape in shapes.items():
+        if tuple(weights[name].shape) != shape:
+            raise ValueError(f"tensor {name} has shape {weights[name].shape}, expected {shape}")
+        tensors.append(np.asarray(weights[name], "<f4"))
+    rope = np.zeros(cfg.seq_len * cfg.head_size // 2, "<f4")
+    tensors += [rope, rope]
+    if not cfg.shared_classifier:
+        tensors.append(np.asarray(weights["wcls"], "<f4"))
+    vocab = cfg.vocab_size if cfg.shared_classifier else -cfg.vocab_size
+    header = struct.pack("<7i", d, h, L, cfg.n_heads, cfg.n_kv_heads, vocab, cfg.seq_len)
+    return header + b"".join(t.tobytes() for t in tensors)
 
 
 def load_ir(path: str | Path) -> tuple[Config, dict[str, np.ndarray]]:

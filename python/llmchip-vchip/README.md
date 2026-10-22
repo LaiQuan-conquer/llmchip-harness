@@ -5,7 +5,7 @@ A model-independent host that loads any **virtual chip**, feeds it prompts, driv
 - A **virtual chip** is a model plus a backend that executes it **one step at a time**: given the token at a position, it returns the next token and the cycles the step took ([interface.py](src/llmchip_vchip/interface.py)).
 - The **harness** owns everything around the step: tokenizer, generation loop, stop rules, host protocol, metrics, policy and reports. Every backend is driven by the same loop, so reference, L2 and hardware chips are compared on the same terms.
 
-Design: `drafts/virtual_chip_workbench_design_zh.md` (owner draft). It is outside the kernel: it reads chip directories and writes run directories, and does not register artifacts or verdicts with harnessd.
+Design: `drafts/virtual_chip_workbench_design_zh.md` (owner draft). On its own (`vchip …`) it is outside the kernel: it reads chip directories, writes run directories and judges by each chip's policy. Inside the kernel it is the bundled plugin `vchip` (below): runs and reports are artifacts, and the flow's checks judge.
 
 ## Commands
 
@@ -47,6 +47,15 @@ The `rtl` backend builds the bundle's chip function (`design.json` `top` and `so
 Measurement is **trusted** only when the backend is one of the harness's testbench bridges, the manifest declares `measurement: {cycles: testbench, host_cycles: testbench, trusted: true}`, and every step was counted there; a chip that claims a testbench is not believed. The counted cycles are also compared with the design's own figure (`model.cycles_per_token`, from the generator): `cycles_match_design`.
 
 Measured on 2026-10-22 (WSL2, 16 threads), 5K proxy, 16 dividers, 8 MHz: Verilator build 8 s; `conform --quick` passes T-01–T-17 in about 2 min, `conform` passes T-01–T-19 (T-06 n/a: the proxy produced no stop token) in 12.8 min with no container left behind; `bench` on all 20 prompts to the end of the 64-token context: bit-exact with L2 (tokens, logits and every observation point of 761 generated and 2,560 compared positions), 1,327 cycles per token at every position (= the design), 753 host cycles, **3,846 tok/s**, measurement trusted, verdict pass, 10.6 min. Next-token agreement with the float reference is 0.73 (the proxy is untrained and ternary).
+
+## Through the kernel: the plugin `vchip` (L4)
+
+[plugins/vchip](../../plugins/vchip) runs the harness on a project's artifacts. A run builds its chips in its workspace (`chips_from_artifacts` in [build.py](src/llmchip_vchip/build.py)): the L2 golden from `numeric.spec` + `numeric.weights`, the float reference from `model.ir` when given, and, when an `rtl.bundle` of exactly that spec and those weights is given, the RTL chip, which is then the chip under test. Handlers:
+
+- `bench`: the evaluation set (`eval.set`) or typed-in `prompts`; outputs `vchip.report` (the report without policy and verdict, plus where the design's cycles and clock came from) and `vchip.outputs` (`outputs.jsonl`); metrics such as `bit_exact`, `tok_s`, `measurement_trusted`, `cycles_match_design`, `next_token_agreement`.
+- `conform`: T-01–T-19 (`quick` skips T-18/T-19); outputs `vchip.conformance`; metrics are counts (`checks_failed`, `checks_not_run`, …).
+
+A `chip.spec` (S3) of exactly that design gives the design's cycles and clock. The flow pack judges the runs: `vchip.l3` (RTL, 20 prompts × 64 tokens, bit-exact with L2, trusted cycles equal to the chip spec's, ≥ 1000 tok/s at the chip spec's clock) and `vchip.conformance` (at least 20 prompts; for an RTL chip, the acceptance part at that standard and clock). The Web UI page "Virtual chips" starts both and shows their reports. A cancelled run ends its simulators and removes their containers. A kernel input file has no suffix, so an evaluation set is recognized by its content (`format: llmchip-evalset/1`).
 
 ## A chip: `chip.json`
 
@@ -101,7 +110,7 @@ A timeout kills the chip's whole process group (the process runs in a session of
 
 ## Prompt sets
 
-JSONL, one `{"id", "prompt", "expected"?}` per line (`{"passage": "..."}` lines are held-out text for perplexity), or an `llmchip-evalset/1` JSON file (the bundled TinyStories-style and general sets that `vchip new` copies into a chip). A prompt the chip's tokenizer cannot represent (beyond a tiny vocabulary, or an unknown token) ends that prompt with `invalid_input`; it is not fed to the chip.
+JSONL, one `{"id", "prompt", "expected"?}` per line (`{"passage": "..."}` lines are held-out text for perplexity), or an `llmchip-evalset/1` JSON file, recognized by its content (the bundled TinyStories-style and general sets that `vchip new` copies into a chip). A prompt the chip's tokenizer cannot represent (beyond a tiny vocabulary, or an unknown token) ends that prompt with `invalid_input`; it is not fed to the chip.
 
 ## Generation
 
@@ -157,4 +166,4 @@ The harness's own tests ([tests/test_harness.py](tests/test_harness.py)) cover T
 - One RTL generator: `taalas-spatial/1`. `taalas-rom/1` gets an RTL chip once its generator exists. No gate-level backend yet (T-20, Icarus + SDF on the routed netlist: L3+), no perf backend.
 - `tests/test_rtl_vchip.py` runs the simulator only with the EDA image (skipped visibly otherwise) and benches 4 prompts; the full 20-prompt acceptance (T-18) runs with `LLMCHIP_VCHIP_L3=1`.
 - The reference and graph-L2 backends recompute the whole sequence each step (no KV cache): fine for small models, slow for long generations on large ones.
-- Not connected to the kernel: runs are not artifacts and verdicts are not gate evidence. No HTTP API, no Web UI page, no sampling.
+- Through the kernel, only chips of an `llmchip-numeric-spec/1` spec (S2 of a llama2.c model) and `taalas-spatial/1` bundles; the checks `vchip.l3` and `vchip.conformance` belong to no gate. No separate HTTP API (the kernel API is the API), no sampling.

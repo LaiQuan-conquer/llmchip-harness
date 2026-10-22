@@ -1,0 +1,14 @@
+[project]
+name = "llmchip-vchip-plugin"
+version = "0.1.0"
+description = "The virtual-chip test harness (llmchip-vchip) as a kernel plugin of llmchip-harness: runs and reports become artifacts, verdicts come from the flow's checks (design L4)"
+requires-python = ">=3.12"
+dependencies = ["llmchip-sdk", "llmchip-vchip"]
+
+[tool.uv.sources]
+llmchip-sdk = { workspace = true }
+llmchip-vchip = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"

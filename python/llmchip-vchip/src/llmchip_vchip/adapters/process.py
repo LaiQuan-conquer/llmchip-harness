@@ -29,11 +29,33 @@ import subprocess
 import sys
 import tempfile
 import time
+import weakref
 
 from ..interface import ERROR_CODES, BaseChip, ChipError, StepResult
 from ..manifest import Manifest
 
 PROTOCOL = "llmchip-vchip-process/1"
+
+# The chips with a process, so that a host being stopped can end them all (`kill_all`); once
+# it is stopping, no chip process starts any more (a step failing on the way out would else
+# start a new one with `reset`).
+_LIVE: weakref.WeakSet[ProcessChip] = weakref.WeakSet()
+_stopping = False
+
+
+def kill_all() -> None:
+    """Ends the process group of every open process chip (SIGTERM, so that a bridge removes
+    its container, then SIGKILL). For a host that is being stopped, such as a cancelled run:
+    every chip is signalled before any is waited for, so all start cleaning up at once."""
+    global _stopping
+    _stopping = True
+    chips = [c for c in list(_LIVE) if c.proc and c.proc.poll() is None]
+    for chip in chips:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(chip.proc.pid, signal.SIGTERM)
+    for chip in chips:
+        with contextlib.suppress(Exception):
+            chip._kill()
 
 
 class ProcessChip(BaseChip):
@@ -51,6 +73,8 @@ class ProcessChip(BaseChip):
     # -- process -------------------------------------------------------------------
 
     def _start(self) -> None:
+        if _stopping:
+            raise ChipError("crash", "the host is stopping; no chip process is started")
         self._stderr = tempfile.TemporaryFile()  # noqa: SIM115 (lives as long as the process)
         # A session of its own: a timeout kills the whole group, including a simulator
         # started by a shell or a container wrapper.
@@ -62,6 +86,7 @@ class ProcessChip(BaseChip):
             stderr=self._stderr,
             start_new_session=True,
         )
+        _LIVE.add(self)
         assert self.proc.stdin and self.proc.stdout
         os.set_blocking(self.proc.stdin.fileno(), False)
         self.starts += 1

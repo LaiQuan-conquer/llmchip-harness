@@ -261,3 +261,12 @@ pre.content { max-height: 60vh; }
 .s3-barcell { width: 40%; }
 .s3-barcell span { display: block; height: 10px; border-radius: 3px; background: var(--accent); min-width: 2px; }
 .s3-points td { vertical-align: middle; }
+
+/* Virtual chips */
+.vchip-chips { margin: 8px 0 12px; }
+.vchip-modes { margin: 4px 0; }
+.vchip-runs tbody tr { cursor: pointer; }
+.vchip-sample { margin: 8px 0; }
+.vchip-sample p { margin: 0 0 2px; }
+.vchip-continuation { color: #1f4fb8; margin-left: 2px; }
+.nowrap { white-space: nowrap; }

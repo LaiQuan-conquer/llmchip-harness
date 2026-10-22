@@ -45,6 +45,15 @@ FLAGS = [
 ]
 
 
+# Build containers running now, so that a host being stopped can remove them (`remove_builds`).
+_BUILDS: set[str] = set()
+
+
+def remove_builds() -> None:
+    for name in list(_BUILDS):
+        subprocess.run(["podman", "rm", "-f", "-t", "0", name], capture_output=True, timeout=60)
+
+
 def testbench_source() -> bytes:
     return (resources.files("llmchip_vchip.bridges") / "tb" / TESTBENCH).read_bytes()
 
@@ -141,12 +150,14 @@ def build(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> Path:
                 name=name,
             )
             cmd.insert(cmd.index(f"--entrypoint={TOOLS}/verilator"), "--workdir=/work/bundle")
+            _BUILDS.add(name)
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             except subprocess.TimeoutExpired as e:
                 raise ChipError("timeout", f"the Verilator build took more than {timeout:g} s") from e
             finally:
                 subprocess.run(["podman", "rm", "-f", "-t", "0", name], capture_output=True, timeout=60)
+                _BUILDS.discard(name)
             if proc.returncode != 0 or not (tmp / BINARY).is_file():
                 raise ChipError("crash", f"Verilator failed ({proc.returncode}): {(proc.stdout + proc.stderr)[-2000:]}")
             tmp.rename(out)

@@ -11,11 +11,12 @@ import { OverviewView } from './views/Overview.tsx'
 import { PlaygroundView } from './views/Playground.tsx'
 import { SettingsView } from './views/Settings.tsx'
 import { TrajectoryView } from './views/Trajectory.tsx'
+import { VChipView } from './views/VChip.tsx'
 import { activityLine, runNamesOf } from './views/activity.ts'
 import { timeOf } from './views/common.tsx'
 import { STEPS } from './views/flowSteps.ts'
 
-export type Page = 'flow' | 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
+export type Page = 'flow' | 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'vchip' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
 
 export interface Selection {
   project: string | null
@@ -32,7 +33,7 @@ interface Place {
   scroll: number
 }
 
-const PAGES: Page[] = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES: Page[] = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'approvals', 'incidents', 'artifacts', 'settings']
 
 /** Main layout (FR-UI-05): projects and tasks on the left, the work in the middle, context on the right. */
 export function App() {
@@ -126,6 +127,7 @@ export function App() {
         {page === 'trajectory' && <TrajectoryView {...props} />}
         {page === 'estimator' && <EstimatorView {...props} />}
         {page === 'playground' && <PlaygroundView {...props} />}
+        {page === 'vchip' && <VChipView {...props} />}
         {page === 'approvals' && <ApprovalsView {...props} />}
         {page === 'incidents' && <IncidentsView {...props} />}
         {page === 'artifacts' && <ArtifactsView {...props} />}

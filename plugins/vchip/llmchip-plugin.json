@@ -1,0 +1,65 @@
+{
+  "id": "vchip",
+  "version": "0.1.0",
+  "title": "Virtual-chip test harness: a project's L2 golden, float reference and RTL as virtual chips, benched and checked for conformance (design L4)",
+  "kinds": ["simulator"],
+  "runtime": "process",
+  "entry": { "command": ["${python}", "-m", "llmchip_vchip_plugin"] },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "bench",
+      "title": "Generation on a prompt set by the chip under test (the RTL under the pin-level testbench, else L2), against the L2 golden and the float reference: quality, trusted speed",
+      "inputs": [
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": false },
+        { "name": "rtl", "types": ["rtl.bundle"], "required": false },
+        { "name": "ir", "types": ["model.ir"], "required": false },
+        { "name": "chip", "types": ["chip.spec"], "required": false }
+      ],
+      "outputs": [
+        { "name": "report", "type": "vchip.report", "mediaType": "application/json" },
+        { "name": "outputs", "type": "vchip.outputs", "mediaType": "application/x-ndjson" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompts": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "maxItems": 20 },
+          "maxPrompts": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "maxTokens": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 64 },
+          "clockMHz": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+          "traces": { "type": "boolean", "default": false }
+        }
+      },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "conform",
+      "title": "Conformance of the chip under test (design T-01 to T-19): interface, host frames, trusted cycles, the host interface on the pins, the acceptance run",
+      "inputs": [
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "evalset", "types": ["eval.set"], "required": true },
+        { "name": "rtl", "types": ["rtl.bundle"], "required": false },
+        { "name": "ir", "types": ["model.ir"], "required": false },
+        { "name": "chip", "types": ["chip.spec"], "required": false }
+      ],
+      "outputs": [{ "name": "report", "type": "vchip.conformance", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "quick": { "type": "boolean", "default": false },
+          "maxPrompts": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "maxTokens": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 16 },
+          "clockMHz": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 }
+        }
+      },
+      "timeoutMs": 7200000
+    }
+  ]
+}

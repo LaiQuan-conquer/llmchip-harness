@@ -1,10 +1,11 @@
+import dataclasses
 import shutil
 import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
-from llmchip_model import Model, Tokenizer, load_ir, load_llama2c, save_ir, structure_report
+from llmchip_model import Model, Tokenizer, load_ir, load_llama2c, save_ir, save_llama2c, structure_report
 
 ROOT = Path(__file__).parents[3]
 FIXTURE = ROOT / "tests" / "fixtures" / "models" / "stories260K"
@@ -33,6 +34,25 @@ def test_ir_round_trip(stories, tmp_path):
     path.write_bytes(save_ir(cfg, w))
     cfg2, w2 = load_ir(path)
     assert cfg2 == cfg
+    for k in w:
+        np.testing.assert_array_equal(w2[k], w[k])
+
+
+def test_llama2c_round_trip(stories):
+    """A Model IR written back as a llama2.c checkpoint reads back to the same model."""
+    cfg, w, _ = stories
+    cfg2, w2 = load_llama2c(save_llama2c(cfg, w))
+    assert cfg2 == cfg
+    for k in w:
+        np.testing.assert_array_equal(w2[k], w[k])
+
+
+def test_llama2c_round_trip_with_its_own_classifier(stories):
+    cfg, w, _ = stories
+    unshared = dataclasses.replace(cfg, shared_classifier=False)
+    w = {**w, "wcls": np.random.default_rng(0).normal(size=w["token_embedding"].shape).astype(np.float32)}
+    cfg2, w2 = load_llama2c(save_llama2c(unshared, w))
+    assert cfg2 == unshared
     for k in w:
         np.testing.assert_array_equal(w2[k], w[k])
 

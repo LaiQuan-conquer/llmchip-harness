@@ -9,6 +9,7 @@ export const ARTIFACT_TYPES = [
   'model.weights.llama2c', 'model.tokenizer.llama2c', 'model.ir', 'model.structure', 'l0.outputs',
   'numeric.spec', 'numeric.weights', 'accuracy.report', 'l2.outputs', 'l2.trace', 'chip.spec', 'ppa.estimate', 'calibration.report',
   'rtl.bundle', 'storage.map', 'isa.check', 'lint.report', 'qualification.report', 'verification.plan', 'verification.report', 'waveform.vcd', 'l3.outputs',
+  'vchip.report', 'vchip.outputs', 'vchip.conformance',
   'timing.constraints', 'timing.exceptions', 'layout.bundle', 'layout.gds', 'layout.image', 'measurement.record', 'pad.list', 'timing.sdf',
   'drc.report', 'lvs.report', 'sta.report', 'gatesim.report', 'sdfsim.report', 'signoff.rules', 'package.template', 'tapeout.package', 'package.manifest',
   'package.integrity', 'tapeout.export', 'external.report', 'external.signoff', 'migration.report', 'run.log', 'agent.handoff', 'changeset.file',

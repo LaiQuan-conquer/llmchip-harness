@@ -360,6 +360,8 @@ export const CHECK_TITLES: Record<string, Key> = {
   'phy.sta': 'flow.check.sta',
   'phy.gatesim': 'flow.check.gatesim',
   'package.integrity': 'flow.check.package',
+  'vchip.l3': 'flow.check.vchipL3',
+  'vchip.conformance': 'flow.check.vchipConformance',
 }
 
 export const RUN_TITLES: Record<string, Key> = {
@@ -394,4 +396,6 @@ export const RUN_TITLES: Record<string, Key> = {
   'sim-verilator/gatesim': 'flow.run.gatesim',
   'packager/build': 'flow.run.build',
   'packager/check': 'flow.run.check',
+  'vchip/bench': 'flow.run.vchipBench',
+  'vchip/conform': 'flow.run.vchipConform',
 }

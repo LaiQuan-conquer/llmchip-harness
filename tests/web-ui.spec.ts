@@ -51,7 +51,7 @@ async function browser() {
 /** Every catalog key; none may appear verbatim in a rendered page. */
 const CATALOG_KEYS = Object.keys(CATALOGS.zh)
 
-const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'approvals', 'incidents', 'artifacts', 'settings']
 
 describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
   it('renders every page in both languages without errors or raw keys', { timeout: 240_000 }, async (ctx) => {
@@ -95,7 +95,12 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     const proxy = await call('model-llama', 'synthesize', {}, { dim: 16, hiddenDim: 32, layers: 2, heads: 2, kvHeads: 1, seqLen: 64, seed: 1 })
     const ir = hash(await call('model-llama', 'intake', { weights: hash(proxy, 'weights'), tokenizer: hash(proxy, 'tokenizer') }, { license: 'proxy (untrained)' }), 'ir')
     const evalset = data.find((d) => d.id === 'evalset-proxy')!.hash
-    await call('numeric', 'quantize', { ir, tokenizer: hash(proxy, 'tokenizer'), evalset }, { weightFormat: 'ternary', groupSize: 16, contextLength: 64 })
+    const q = await call('numeric', 'quantize', { ir, tokenizer: hash(proxy, 'tokenizer'), evalset }, { weightFormat: 'ternary', groupSize: 16, contextLength: 64 })
+    // Virtual-chip runs of its L2 (a generation judged by vchip.l3, a conformance check), for the vchip page.
+    const l2 = { tokenizer: hash(proxy, 'tokenizer'), spec: hash(q, 'spec'), weights: hash(q, 'weights'), evalset }
+    const vbench = await call('vchip', 'bench', { ...l2, ir }, { maxPrompts: 2, maxTokens: 8 })
+    await client.call('verdicts.evaluate', { project: 'sp', check: 'vchip.l3', run: vbench.id })
+    await call('vchip', 'conform', l2, { maxPrompts: 1, maxTokens: 4 })
     const point = { architecture: 'taalas-spatial/1' as const, dividers: 16, clockMHz: 8, die: { xMm: 5, yMm: 3 } }
     await pipeline.designArch(client, 'sp', point, false, () => {})
     await pipeline.exploreArch(client, 'sp', point, () => {})
@@ -187,6 +192,18 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
         expect(sp).toContain(lang === 'zh' ? '串行加法器' : 'Serial adders')
         expect(sp).toContain(lang === 'zh' ? 'KV 缓存（寄存器堆）' : 'KV cache (register file)')
         expect(sp).toContain('6,029')
+        // The virtual-chip page of the same project: its runs, a conformance report, a generation.
+        await page.click('button[data-page=vchip]')
+        await page.waitForSelector('.vchip-checks') // the newest run (conformance) is shown first
+        const vc = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => vc.includes(key)), `${lang}/vchip conform`).toEqual([])
+        expect(vc).toContain('T-17')
+        await page.click('.vchip-runs tbody tr:nth-child(2)')
+        await page.waitForSelector('.vchip-sample')
+        const vb = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => vb.includes(key)), `${lang}/vchip bench`).toEqual([])
+        expect(vb).toContain(lang === 'zh' ? '无法判定' : 'Indeterminate') // L2 is not hardware: vchip.l3 does not apply
+        expect(vb).toContain(lang === 'zh' ? '与浮点参照的下一 token 一致率' : 'Next-token agreement with the float reference')
         await page.click('li[data-project=ui] .side-project')
         await page.click('button[data-page=flow]')
         const nav = await page.innerText('.top nav')

@@ -6,7 +6,7 @@
 |---|---|
 | 文档版本 | v0.1 |
 | 日期 | 2026-10-21 |
-| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip` |
+| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.10 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -153,11 +153,11 @@ plugins/                   额外的插件搜索路径
 
 ### 2.4 内置插件
 
-在全新主目录上，`plugins.list` 列出以下插件。阶段与审批门来自 `flow-default`（流程版本 0.9.0；行覆盖率开始计入全部覆盖的文件，`rtl.equivalence` 因此升到版本 2；`arch.spec` 在设了周期目标时判定它，因此升到版本 3）。
+在全新主目录上，`plugins.list` 列出以下插件。阶段与审批门来自 `flow-default`（流程版本 0.10.0，新增虚拟芯片检查 `vchip.l3` 与 `vchip.conformance`；行覆盖率开始计入全部覆盖的文件，`rtl.equivalence` 因此升到版本 2；`arch.spec` 在设了周期目标时判定它，因此升到版本 3）。
 
 | 插件 | 运行方式 | 处理器 | 用于 | 单元测试 |
 |---|---|---|---|---|
-| `flow-default` | data | 流程包：S0–S9、G0–G4、20 项检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
+| `flow-default` | data | 流程包：S0–S9、G0–G4、22 项检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
 | `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`package-gf180mcu`；`signoff-gf180mcu` | S0、S3、S6–S8 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
@@ -167,6 +167,7 @@ plugins/                   额外的插件搜索路径
 | `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5/G3、S7、Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`、`constraints`、`implement`、`drc`、`lvs`、`sta` | M1.5、S6、S7 | `test_calibrate.py`、`test_physical.py` |
 | `packager` | process（Python） | `build`、`check`、`import_external` | S8/G4 | `test_packager.py` |
+| `vchip` | process（Python；仿真器在 Podman 中启动） | `bench`、`conform` | S2 之后（L2）、S4 之后（RTL）；Web UI 页面“虚拟芯片” | `test_plugin.py` |
 
 仅测试用的插件在 [tests/fixtures/plugins](../tests/fixtures/plugins)：
 
@@ -214,6 +215,7 @@ plugins/                   额外的插件搜索路径
   - 带焊盘环的物理实现（LibreLane Chip 流程）；
   - DRC、LVS，以及含约束完整性检查的 9 角 STA，每项检查只在它所判定的产物上运行。
 - **packager**：按工艺模板生成流片包，检查其完整性，并导入与 GDS 绑定的外部签核报告（FR-PKG、FR-SGN-06）。
+- **vchip**（负责人草案设计的 L4；[入口](../plugins/vchip/src/llmchip_vchip_plugin/__main__.py)）：在项目产物上运行虚拟芯片测试环境。每次运行在运行工作区里构建芯片（[build.py](../python/llmchip-vchip/src/llmchip_vchip/build.py) 的 `chips_from_artifacts`）：L2 黄金芯片来自 `numeric.spec` 与 `numeric.weights`；给了 `model.ir` 时构建浮点参照芯片（模型 IR 写回 llama2.c 检查点，`save_llama2c`）；给了 `rtl.bundle` 时构建 RTL 芯片，它就是被测芯片。bundle 必须正是由这份规格和这些权重生成的（看它的 `source` 哈希），且只有 `taalas-spatial/1` 能在引脚级 testbench 下运行。`chip.spec`（S3）必须由同一份规格和权重设计而来，有 RTL 时还必须描述同一个设计（架构、除法器数）；这时它的周期与时钟就是设计值。没有芯片规格时，周期取自 bundle，时钟取参数 `clockMHz` 或 8 MHz；指标写明来源（`design_cycles_source`、`clock_source`）。`bench` 使用 `eval.set` 或手输的 `prompts`；`conform` 运行 T-01–T-19（`quick` 使 T-18/T-19 为 `not_run`），并报告其验收部分所用的标准（`acceptance_tok_s_min`、`acceptance_bit_exact`、`acceptance_max_tokens`）。报告不含判定，由检查判定指标。`vchip.l3`：完整性为 RTL、≥ 20 个提示词、≥ 64 个 token、已与黄金芯片对比、设计周期与时钟取自芯片规格；判据为无错误、逐位一致、测量可信、周期等于设计、≥ 1000 tok/s。`vchip.conformance`：完整性为没有未运行的检查项、≥ 20 个提示词，RTL 芯片还要求验收部分按 L3 标准、以芯片规格的时钟进行；判据为没有失败的检查项。因此，运行不能靠自选时钟或删减提示词通过。运行测不到的指标不出现，需要它的检查因此判为 indeterminate。这两项检查不属于任何审批门（流程不变）；它们的判定只对该次运行的输入构成证据。被取消的运行（SIGTERM）在退出前结束芯片的仿真进程并移除其容器。
 
 ---
 
@@ -561,6 +563,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 新增内置后端：在 `llmchip_vchip/adapters/` 中加一个类并登记到 `registry.BACKENDS`，测试方式与参考、数值后端相同（`test_conformance_of_the_baseline_chips`）。
 
+经内核运行时，芯片不是目录：插件 `vchip` 从项目产物构建芯片（§2.4），因此 `chips_from_artifacts` 接受新生成器的架构后，它的 bundle 就能在那里运行。由 [plugins/vchip/tests/test_plugin.py](../plugins/vchip/tests/test_plugin.py) 与 [tests/vchip.spec.ts](../tests/vchip.spec.ts) 证明。
+
 速度必须可信的硬件芯片（设计中的 L3）则在测试环境自己的 testbench 桥下运行：真实示例是 `rtl`（[adapters/rtl.py](../python/llmchip-vchip/src/llmchip_vchip/adapters/rtl.py)、[bridges/rtl_bridge.py](../python/llmchip-vchip/src/llmchip_vchip/bridges/rtl_bridge.py)、[bridges/tb/vchip_tb.cpp](../python/llmchip-vchip/src/llmchip_vchip/bridges/tb/vchip_tb.cpp)），由 `vchip new rtl` 生成，由 [tests/test_rtl_vchip.py](../python/llmchip-vchip/tests/test_rtl_vchip.py) 证明。任何带有 bundle 的 `tb_top` 端口（clk、rst_n、主机 SPI 引脚、busy）并实现 START/STATUS/READ 协议的 RTL bundle 都能在它下面运行；新的生成器只需写出这样的 bundle。只有自己在引脚上计数周期的桥，才能加入 `metrics.TESTBENCH_BACKENDS`。
 
 ---
@@ -616,7 +620,9 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/spatial-flow.spec.ts` | 占位模型的空间引擎从 S2 到 S5：完成设计（周期取自固定时序表，≥ 1000 tok/s，晶粒按实测单元面积选取，`verify_spec` 重新计算周期，并判定周期目标）；生成电路，并从网表读回做往返检查；lint 无警告；`verification-plan-spatial` 的每一项都通过：观测点经主机接口读出，L3 与 L2 逐位一致，每个位置的忙碌周期相同，位串行单元有单元测试，行覆盖率 ≥ 90% | FR-ARC-04/05、FR-RTL-01/02/03、FR-VER-04 | 需 EDA 镜像（2026-10-21 用时 261 秒） |
 | `tests/arch-perf.spec.ts` | S3 的速度是精确的：占位模型在四种微架构选项下（SPI / SQI，缓冲 none / attention / all），RTL 每一步的忙碌周期逐位置等于芯片规格的预测，且 RTL 与 L2 一致 | FR-ARC-04/05、FR-EST-07 | 需 EDA 镜像（2026-10-20 用时 790 秒） |
 | `tests/numeric-schemes.spec.ts` | 任何已还原的计算图（小 Qwen3、从自身产物导入的占位模型）量化并评估 L2 对 L0，窄累加器确实溢出，判定 `numeric.accuracy`，向量引擎拒绝计算图规格；有 EDA 镜像时，把偶数舍入 / 回绕 / 24 位累加器方案从数值规格带到芯片规格，RTL 在指令级模拟器和 Verilator 中与 L2 一致，ALU 按这些模式测试 | FR-QNT、FR-RTL-01、FR-VER | 计算图部分总是运行；RTL 部分需 EDA 镜像（约 4 分钟） |
-| `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2、S3 详细视图，S3 也覆盖空间引擎项目（电路、面积模块、时序表、设计空间） | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
+| `plugins/vchip/tests/test_plugin.py` | 不经内核测试插件的处理器：从项目产物构建芯片（输入文件没有后缀，与内核交来的一样）；设计周期与时钟只取自正是这个设计的芯片规格（别的权重、没有哈希、别的除法器数或架构都被拒绝），作为参数给出的时钟会如实标明；L2 对照由模型 IR 构建的浮点参照，后者与由检查点构建的参照结果相同；报告不含策略和判定，测不到的指标不出现；由别的权重生成的 bundle 和向量引擎的 bundle 被拒绝；一致性检查以计数报告；有镜像时，RTL 与 L2 逐位一致，周期由 testbench 计数（1,327，等于设计，> 1000 tok/s），快速一致性检查使 T-18/T-19 未运行 | 设计 L4；ADR-010、AP-7 | 总是运行；RTL 部分需 EDA 镜像（缺失时可见地跳过） |
+| `tests/vchip.spec.ts` | 经内核运行插件：占位模型的 L2 在 `evalset-proxy` 的 20 个提示词上对照其浮点参照，报告是产物且不含判定，`vchip.l3` 对 L2 判为 indeterminate（不是硬件），`vchip.conformance` 在 20 个提示词上通过、在 3 个提示词上为 indeterminate，手输提示词；有镜像时，由 `rtl-taalas generate` 生成的空间引擎 RTL 与 L2 逐位一致，周期与时钟取自芯片规格，被取消的运行不留下仿真容器 | 设计 L4 | L2 部分总是运行（需 `.venv`）；RTL 部分需 EDA 镜像；`LLMCHIP_VCHIP_L3=1` 时跑全部 20 个提示词，`vchip.l3` 必须通过（2026-10-22：3 个测试通过，661 秒；本次改动后完整运行 `vchip conform spatial-5k`：T-01–T-19 通过，T-06 不适用，12.7 分钟，没有遗留容器） |
+| `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2、S3 详细视图，S3 也覆盖空间引擎项目（电路、面积模块、时序表、设计空间）；虚拟芯片页面上的一致性报告，以及被 `vchip.l3` 判为 indeterminate 的生成测试 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
 | `tests/containers.spec.ts` | 无网络、输入只读、取消时移除容器 | IF-3 | 需 `python:3.12-slim` 镜像 |
 | `tests/calibration.spec.ts` | 每个存储候选都得出可用或不可用；按视图的阶段准入 | AC-M15-01/02/03 | 需 EDA 镜像 |
 | `tests/m3-flow.spec.ts` | 验证计划、G3、注入缺陷的定位 | M3、AC-03/09 | 需 EDA 镜像 |
@@ -664,7 +670,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S8 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
 - **S3 的速度和面积**（参考模型的占位模型，三值，2 条通道，8 MHz，2026-10-20 实测）：旧公式给出 10.1 tok/s；旧设计（SPI、无缓冲）的精确周期是每 token 1,024,601，即 7.8 tok/s。四线 SPI 为 352,505 个周期、22.7 tok/s（2.9 倍）；加注意力缓冲 34.6 tok/s；全部缓冲 43.8 tok/s。即便用四线 SPI，仍有 77.7% 的周期在等片外存储。在 1.2 × 2 mm 晶粒上只有“四线 SPI、无缓冲”能放下：综合出的单元面积 287k µm²，核心区 497k µm²。布局已到极限，而且对密度设置不单调：同一网表在 70% 和 85% 时放下并满足时序（建立时间余量 +22 ns，约 9.7 MHz 也能满足），在 75% 和 80% 时详细布局失败；预流片取 70%（`PRERUN.placementDensityPct`）。旧的 SPI 设计在原来的 62% 时也已无法布线。加注意力缓冲（332k µm²）或全部缓冲（398k µm²）在试过的每个密度（62–85%）下详细布局都失败；把两条通道改成一条也无法布线。四线 SPI 的焊盘是双向 `bi_t` 单元，只在不驱动时打开输入（IE = ¬OE）：焊盘库只在 IE 为低时定义 A → PAD 的时序弧，IE 固定为高时输出方向不受时序约束，STA 报告这四个引脚未约束。门级仿真用的焊盘功能模型（`plugins/eda-gf180/sim/pads.v`）原先把 `bi_t` 的输入通路固定为 0，这只在没有双向引脚时成立；现在 IE 为高时它输出焊盘上的值。SDF 时序仿真的测试平台和流片包的测试计划按设计的实际引脚（SPI 或四线 SPI）描述片外存储。工艺库的面积估算看不出这一点：它的控制逻辑是 0.05 mm²（经验值），综合结果约 0.19 mm²；利用率取 0.7（经验值），实测 0.58 能放下、0.67 放不下。在用这些实现结果校准工艺库之前，`explore` 给出的“放得下”偏乐观；设计能否放下只能由 `eda-gf180 implement` 证明。
 - **数值分析结果**（int8、分组 32、四舍五入、饱和、逐层小数位、残差流 24 位；4 个提示 × 8 个 token、3 段文本；开发机，2026-10-19）：stories260K 困惑度 3.16 → 3.17，下一 token 一致率 98.6%，1 秒；SmolLM2-135M 12.64 → 12.76，94.3%，30 秒；Qwen3-0.6B 23.00 → 22.39，88.8%，136 秒；DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92，88.8%，584 秒。int4 时 SmolLM2 升到 22.6，Qwen3 升到 28.6。每类张量只用一个 16 位格式时 SmolLM2 会崩溃（困惑度约 290 万）：少数层的残差流值接近 20000。`numeric.accuracy` 要求下一 token 一致率 ≥ 0.9，Qwen3 和 DeepSeek 在 int8 时略差一点没有达到。
-- **虚拟芯片测试环境**（`llmchip-vchip`，负责人草案设计的 L1 与 L3）：后端为 `reference`、`numeric`、`process`、`rtl`。RTL 路径只覆盖一个生成器 `taalas-spatial/1`（5K 占位模型；受该生成器的形状限制）；`taalas-rom/1` 还没有 RTL 生成器。没有门级后端（设计 T-20，L3+），也没有性能模型后端。完整的 20 个提示词 L3 运行须显式开启（`LLMCHIP_VCHIP_L3=1`，约 11 分钟）；有镜像时默认测试只跑 4 个提示词。困惑度需要 `logits` 能力。未接入内核：运行不是产物；按芯片策略自行判定（ADR-010），判定不是审批门证据。没有 HTTP API、Web UI 页面和采样。
+- **虚拟芯片测试环境**（`llmchip-vchip`，负责人草案设计的 L1 与 L3）：后端为 `reference`、`numeric`、`process`、`rtl`。RTL 路径只覆盖一个生成器 `taalas-spatial/1`（5K 占位模型；受该生成器的形状限制）；`taalas-rom/1` 还没有 RTL 生成器。没有门级后端（设计 T-20，L3+），也没有性能模型后端。完整的 20 个提示词 L3 运行须显式开启（`LLMCHIP_VCHIP_L3=1`，约 11 分钟）；有镜像时默认测试只跑 4 个提示词。困惑度需要 `logits` 能力。独立运行（`vchip`）时，运行不是产物，按芯片策略自行判定（ADR-010）；经内核插件 `vchip`（L4）运行时，运行与报告是产物，由流程的检查判定，但这些检查不属于任何审批门。插件只从 `llmchip-numeric-spec/1` 规格构建芯片（llama2.c 模型的 S2；导入模型的计算图数值规格会被拒绝），也只运行 `taalas-spatial/1` 的 bundle。它的仿真器在自己的会话和容器中运行：运行被取消时会被移除，但内核崩溃后，内核的遗留进程清理只杀插件的进程组，仿真容器可能留下（`podman ps --filter name=llmchip-vchip`）。Web UI 页面发起运行并显示报告；没有单独的 HTTP API（内核 API 就是 API），也没有采样。
 - **分析检查不通过也会开事故单**，与所有不通过的检查一样（FR-VER-06），所以在 S2 试验台上尝试较差的方案会让事故列表变长。
 
 ### 7.3 代码与上游文档的冲突（未解决，已上报）

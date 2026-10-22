@@ -74,9 +74,9 @@ Current packages (responsibilities, entry points and allowed dependencies: imple
 - `client` — kernel API client for Node.js and browsers.
 - `cli` — the `llmchip` command-line client, including `llmchip mcp`.
 
-Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2); `python/llmchip-vchip`, the test harness for virtual chips (`vchip`: loads a chip from its `chip.json`, drives generation from prompts, measures quality and speed against reference and golden chips; outside the kernel, see its README).
+Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2); `python/llmchip-vchip`, the test harness for virtual chips (`vchip`: loads a chip from its `chip.json`, drives generation from prompts, measures quality and speed against reference and golden chips; standalone, see its README, and inside the kernel as the plugin `vchip`).
 
-Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `packager` (Python), and `sim-verilator`, `eda-gf180` (containers).
+Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `packager`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -182,6 +182,8 @@ The full recipe, with a worked example and the tests to copy, is in implementati
 2. Python plugins are uv workspace members: add `plugins/<id>` to `[tool.uv.workspace].members` and to the root dependencies in `pyproject.toml`, then run `uv lock` and `yarn setup:python`.
 3. Handlers return outputs, metrics and a parse status, never verdicts (AP-7). Judging is done by check definitions in a flow pack.
 4. Test the plugin directly (pytest or Vitest) and end to end through the kernel (`tests/`).
+5. Inputs reach a handler as files without a suffix (`in/<n>-<name>`): recognize formats by content, not by file name, and give the direct tests suffixless inputs too.
+6. A `process` plugin that starts processes in sessions of their own or containers must end them on SIGTERM, within the cancel grace period (`scheduler.cancelGraceMs`, 2 s by default); the kernel kills only the plugin's process group. Prove it with a cancellation test, as `tests/vchip.spec.ts` does.
 
 ### Generated hardware
 

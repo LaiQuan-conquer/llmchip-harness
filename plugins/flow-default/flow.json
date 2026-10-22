@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "stages": [
     {
       "id": "S0",
@@ -853,6 +853,143 @@
           "metric": "max_rel_logit_diff",
           "op": "<=",
           "value": 0.001
+        }
+      ]
+    },
+    {
+      "id": "vchip.l3",
+      "version": "1",
+      "title": "The RTL as a virtual chip under the pin-level testbench (design L3 acceptance): bit-exact with the L2 golden on 20 prompts to 64 tokens, cycles counted by the testbench and equal to the S3 chip spec, at least 1000 tok/s at the chip spec's clock",
+      "plugin": "vchip",
+      "handler": "bench",
+      "completeness": [
+        {
+          "metric": "chip_backend",
+          "op": "==",
+          "value": "rtl"
+        },
+        {
+          "metric": "prompts",
+          "op": ">=",
+          "value": 20
+        },
+        {
+          "metric": "max_tokens",
+          "op": ">=",
+          "value": 64
+        },
+        {
+          "metric": "golden_compared",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "comparison_errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "design_cycles_source",
+          "op": "==",
+          "value": "chip.spec"
+        },
+        {
+          "metric": "clock_source",
+          "op": "==",
+          "value": "chip.spec"
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "errors",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "bit_exact",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "measurement_trusted",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "cycles_match_design",
+          "op": "==",
+          "value": true
+        },
+        {
+          "metric": "tok_s",
+          "op": ">=",
+          "value": 1000
+        }
+      ]
+    },
+    {
+      "id": "vchip.conformance",
+      "version": "1",
+      "title": "Conformance of a virtual chip (design T-01 to T-19) on at least 20 prompts: no check fails, none left unrun; for an RTL chip, the acceptance part (T-18, T-19) at the L3 standard and the chip spec's clock",
+      "plugin": "vchip",
+      "handler": "conform",
+      "completeness": [
+        {
+          "metric": "checks_not_run",
+          "op": "==",
+          "value": 0
+        },
+        {
+          "metric": "prompts",
+          "op": ">=",
+          "value": 20
+        },
+        {
+          "metric": "acceptance_bit_exact",
+          "op": "==",
+          "value": true,
+          "when": {
+            "metric": "chip_backend",
+            "op": "==",
+            "value": "rtl"
+          }
+        },
+        {
+          "metric": "acceptance_tok_s_min",
+          "op": ">=",
+          "value": 1000,
+          "when": {
+            "metric": "chip_backend",
+            "op": "==",
+            "value": "rtl"
+          }
+        },
+        {
+          "metric": "acceptance_max_tokens",
+          "op": ">=",
+          "value": 64,
+          "when": {
+            "metric": "chip_backend",
+            "op": "==",
+            "value": "rtl"
+          }
+        },
+        {
+          "metric": "clock_source",
+          "op": "==",
+          "value": "chip.spec",
+          "when": {
+            "metric": "chip_backend",
+            "op": "==",
+            "value": "rtl"
+          }
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "checks_failed",
+          "op": "==",
+          "value": 0
         }
       ]
     }

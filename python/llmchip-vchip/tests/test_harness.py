@@ -398,3 +398,19 @@ def test_timeout_kills_the_whole_process_group(tmp_path: Path, make_process):
     time.sleep(0.2)
     left = subprocess.run(["pgrep", "-f", tag.split()[1]], capture_output=True, text=True).stdout.split()
     assert left == [], f"orphaned simulator processes: {left}"
+
+
+def test_a_stopping_host_ends_its_chips_and_starts_no_new_one(tmp_path, make_process):
+    """kill_all (a cancelled kernel run): every chip process ends, and none starts afterwards."""
+    from llmchip_vchip.adapters import process
+
+    make_process(tmp_path, "toy-stop")
+    m = Registry([tmp_path]).get("toy-stop").manifest
+    chip = process.ProcessChip(m)
+    try:
+        process.kill_all()
+        assert chip.proc.poll() is not None
+        with pytest.raises(ChipError, match="stopping"):
+            process.ProcessChip(m)
+    finally:
+        process._stopping = False
