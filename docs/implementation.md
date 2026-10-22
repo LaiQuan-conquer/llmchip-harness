@@ -580,6 +580,8 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 
 `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` runs the physical tools. Run it after any change to `rtl-taalas`, `eda-gf180`, `packager` or the signoff checks. Result on 2026-10-20, on the quad-SPI design: passed (1 test, 2132 s, about 36 min, with Podman 3.4 on WSL2).
 
+After any change to the spatial generator (`llmchip_rtl/spatial/`) or to the test harness's RTL bridge (`llmchip_vchip/bridges/`), run the full L3 conformance once (hard constraint, owner decision 2026-10-22; AGENTS.md, "Containers"): `yarn vchip new rtl --proxy --id spatial-5k` and `yarn vchip conform spatial-5k` without `--quick`, or `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py`. Results on 2026-10-22: see the `vchip` rows of §6.1.
+
 ---
 
 ## 7. Current limitations

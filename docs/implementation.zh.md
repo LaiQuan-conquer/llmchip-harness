@@ -627,6 +627,8 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` 会运行物理工具。修改 `rtl-taalas`、`eda-gf180`、`packager` 或签核检查后都要运行它。2026-10-20 在四线 SPI 设计上的结果：通过（1 个测试，2132 秒，约 36 分钟；WSL2 上的 Podman 3.4）。
 
+修改空间引擎生成器（`llmchip_rtl/spatial/`）或测试环境通往 RTL 的桥（`llmchip_vchip/bridges/`）之后，必须运行一次完整的 L3 一致性检查（硬约束，负责人 2026-10-22 决定；见 AGENTS.md “Containers”）：先 `yarn vchip new rtl --proxy --id spatial-5k`，再不带 `--quick` 运行 `yarn vchip conform spatial-5k`；或运行 `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py`。2026-10-22 的结果见 §6.1 中 `vchip` 的各行。
+
 ---
 
 ## 7. 当前限制
