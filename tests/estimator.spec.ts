@@ -44,6 +44,15 @@ describe('estimator (AC-M1-10)', () => {
     expect(new Set(plan.missing.map((m: { ref: string }) => m.ref))).toEqual(
       new Set(['slot:model', 'slot:benchmark-data', 'slot:calibration-data']),
     )
+    // The RTL stage is wired: its pipeline needs the SPEC step's artifacts.
+    const rtl = await client.call('pipelines.plan', { project: 'six', stage: 'RTL', kind: 'develop' })
+    expect(new Set(rtl.missing.map((m: { ref: string }) => m.ref))).toEqual(
+      new Set(['slot:numeric-spec', 'slot:l2-weights', 'slot:slice-definition']),
+    )
+    expect(rtl.nodes).toBeGreaterThanOrEqual(2)
+    const rtlTests = await client.call('pipelines.plan', { project: 'six', stage: 'RTL', kind: 'test' })
+    expect(new Set(rtlTests.missing.map((m: { ref: string }) => m.ref))).toEqual(new Set(['slot:rtl-bundle']))
+    expect(checks).toEqual(expect.arrayContaining(['rtl.tile.lint', 'rtl.tile.rom.views']))
   })
 
   it('estimates stories260K, 0.5B and 8B on the 180nm target with a full breakdown', { timeout: 60_000 }, async () => {
