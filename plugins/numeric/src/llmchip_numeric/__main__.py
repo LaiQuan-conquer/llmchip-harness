@@ -186,6 +186,129 @@ def quantize_graph(ctx: InvokeContext) -> Result:
     )
 
 
+def diagnose(ctx: InvokeContext) -> Result:
+    """Why L2 answers differently: the first divergent token and the layer it comes from (FR-QNT-09)."""
+    from transformers import AutoTokenizer
+
+    from . import bench as bench_module
+    from . import diagnose as diagnosis
+    from .l2_torch import TorchL2
+
+    l0 = bench_module.load(ctx.input("l0").path)
+    l2 = bench_module.load(ctx.input("l2").path)
+    comparison, _ = bench_module.compare(l0, l2)
+    wanted: list[tuple[str, str]] = []
+    for name, entry in comparison["benchmarks"].items():
+        items = {item["id"]: item for item in l0["benchmarks"][name]["items"]}
+        wanted.extend((qid, items[qid]["prompt"]) for qid in entry["l0OnlyCorrect"] if qid in items)
+    p = ctx.params
+    wanted = wanted[: p.get("maxQuestions", 3)]
+    m = LoadedModel(ctx)
+    spec = json.loads(Path(ctx.input("spec").path).read_text())
+    with np.load(ctx.input("weights").path, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files if k != "meta"}
+    ref = graph_l2.GraphL2(m.graph, spec, arrays)
+    tokenizer = AutoTokenizer.from_pretrained(str(_model_dir(ctx)))
+    report = diagnosis.diagnose(m.graph, m.weights.get, TorchL2(ref), tokenizer, wanted, p.get("steps", 32))
+    report["model"] = {"family": m.graph["family"], "name": m.bundle.get("name")}
+    Path(ctx.out_dir, "diagnosis.json").write_text(json.dumps(report, indent=1, ensure_ascii=False))
+    return Result(
+        outputs=[Output("report", "diagnosis.json", "diagnosis.report", "application/json")],
+        metrics={
+            "questions": report["questions"],
+            "diverged": report["diverged"],
+            "undiagnosed": report["questions"] - report["diverged"],
+            "l0_only_correct": len(wanted),
+        },
+        parse={"status": "complete", "parser": "llmchip-numeric/diagnose"},
+    )
+
+
+def calibration_data(ctx: InvokeContext) -> Result:
+    """Packs the calibration text of this machine (WikiText-2) into one artifact (GPTQ, FR-QNT-01)."""
+    from .calibrate import load_calibration
+
+    source = Path(ctx.params["path"]).expanduser()
+    if not source.exists():
+        raise ValueError(f"{source} does not exist on this machine")
+    texts = load_calibration(source)
+    Path(ctx.out_dir, "calibration.json").write_text(
+        json.dumps({"format": "llmchip-calibration-text/1", "source": str(source), "texts": texts}, ensure_ascii=False)
+    )
+    return Result(
+        outputs=[Output("calibration", "calibration.json", "calibration.data", "application/json")],
+        metrics={"texts": len(texts), "characters": sum(len(t) for t in texts)},
+        parse={"status": "complete", "parser": "llmchip-numeric/calibration-data"},
+    )
+
+
+def calibrate_graph(ctx: InvokeContext) -> Result:
+    """Calibrated (GPTQ) quantization of a recovered graph: graph numeric spec and integer weights."""
+    import torch
+    from transformers import AutoTokenizer
+
+    from . import gptq
+    from .calibrate import sequences
+
+    m = LoadedModel(ctx)
+    p = ctx.params
+    context = p.get("contextLength", 2048)
+    texts = json.loads(Path(ctx.input("calibration").path).read_text())["texts"]
+    tokenizer = AutoTokenizer.from_pretrained(str(_model_dir(ctx)))
+    windows = sequences(tokenizer, texts, context, p.get("sequences", 64))
+    fmt, group = p.get("weightFormat", "int4"), p.get("groupSize", 128)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ctx.progress(0.02, f"GPTQ on {len(windows)} windows of {context} tokens ({device})")
+    quantized, stats = gptq.calibrate(
+        m.graph,
+        m.weights.get,
+        windows,
+        fmt,
+        group,
+        p.get("overrides", {}),
+        device=device,
+        batch=p.get("batchSize", 8),
+        progress=lambda message: (ctx.check_cancelled(), ctx.log("info", message)),
+    )
+    m.weights.release()
+    spec, arrays = graph_l2.build(
+        m.graph,
+        m.weights.peek,
+        weight_format=fmt,
+        group_size=group,
+        context=context,
+        per_layer=True,
+        residual_bits=24,
+        graph_hash=ctx.input("graph").hash,
+        stats=stats,
+        quantized=quantized,
+        progress=lambda message: (ctx.check_cancelled(), ctx.log("info", message)),
+    )
+    out = Path(ctx.out_dir)
+    (out / "numeric-spec.json").write_text(json.dumps(spec, indent=2))
+    np.savez(out / "l2-weights.npz", meta=np.array(json.dumps({"format": graph_l2.GRAPH_WEIGHTS_FORMAT})), **arrays)
+    bits = graph_l2.storage_bits(spec, arrays)
+    metrics: dict = {f"storage_bits.{k}": v for k, v in bits.items()}
+    formats = spec["weights"]["formats"]
+    metrics |= {
+        "weight_bits": spec["weights"]["storageBits"],
+        "group_size": group,
+        "context": context,
+        "windows": len(windows),
+        "calibrated_matrices": len(formats),
+        "mixed_precision": sum(1 for f in formats.values() if f != fmt),
+        "family": m.graph["family"],
+    }
+    return Result(
+        outputs=[
+            Output("spec", "numeric-spec.json", "numeric.spec", "application/json"),
+            Output("weights", "l2-weights.npz", "numeric.weights", "application/x-npz"),
+        ],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "llmchip-numeric/calibrate-graph"},
+    )
+
+
 def evaluate_graph(ctx: InvokeContext) -> Result:
     """Accuracy of a recovered graph's L2 against L0, on prompts and passages."""
     m = LoadedModel(ctx)
@@ -402,10 +525,13 @@ if __name__ == "__main__":
             "infer": infer,
             "evaluate": handle_evaluate,
             "quantize_graph": quantize_graph,
+            "calibrate_graph": calibrate_graph,
+            "calibration_data": calibration_data,
             "evaluate_graph": evaluate_graph,
             "benchmark_data": benchmark_data,
             "benchmark": benchmark,
             "benchmark_compare": benchmark_compare,
+            "diagnose": diagnose,
             "l2_fast_check": l2_fast_check,
         },
     )

@@ -185,6 +185,7 @@ def build(
     stats: dict[str, float] | None = None,
     frac: dict[str, int] | None = None,
     logits_frac: int | None = None,
+    quantized: dict[str, tuple[np.ndarray, np.ndarray, int, str]] | None = None,
     progress: Callable[[str], None] = lambda message: None,
 ) -> tuple[dict, dict[str, np.ndarray]]:
     """Quantizes a recovered graph: (graph numeric spec, arrays). `stats` comes from `calibrate`;
@@ -221,24 +222,31 @@ def build(
     arrays: dict[str, np.ndarray] = {}
     exponents: dict[str, int] = {}
     norms: dict[str, np.ndarray] = {}
-    quantized: dict[str, str] = {}  # weight tensor -> array key (a tied output reuses the embedding)
+    seen: dict[str, str] = {}  # weight tensor -> array key (a tied output reuses the embedding)
+    formats: dict[str, str] = {}
     example = None
     for node, layer in _nodes(graph):
         key = _key(node, layer)
         if node["op"] in ("embedding", "linear"):
             name = _name(node, "weight", layer)
-            if name in quantized:
+            if name in seen:
                 continue
             progress(f"quantize {name}")
             w = peek(name)
-            q, m, e = quantize_matrix_chunked(w, weight_format, group_size)
+            if quantized is not None and name in quantized:
+                # Calibrated (GPTQ) levels, mantissas and exponent; the format is that matrix's.
+                q, m, e, fmt_of_matrix = quantized[name]
+            else:
+                q, m, e = quantize_matrix_chunked(w, weight_format, group_size)
+                fmt_of_matrix = weight_format
             if example is None and node["op"] == "linear":
                 example = weight_example(name, w[0], q[0], m[0], e, group_size)
             del w
-            arrays[f"{key}.q"] = q.astype(np.int8)
-            arrays[f"{key}.m"] = m.astype(np.int16)
-            exponents[key] = e
-            quantized[name] = key
+            arrays[f"{key}.q"] = np.asarray(q).astype(np.int8)
+            arrays[f"{key}.m"] = np.asarray(m).astype(np.int16)
+            exponents[key] = int(e)
+            formats[key] = fmt_of_matrix
+            seen[name] = key
             if node.get("bias"):
                 kind = KIND_OF[node["id"]]
                 fo = layer_frac[layer][kind] if layer_frac and layer is not None and kind != "x" else frac[kind]
@@ -281,6 +289,7 @@ def build(
                 "exponent": "one per matrix",
             },
             "exponents": exponents,
+            "formats": formats,
             "classifier": "shared with the embedding table" if lm_head.get("tiedTo") else "separate matrix",
             "biases": "int32 at the fraction bits of the output",
         },
@@ -320,10 +329,12 @@ def build(
 def storage_bits(spec: dict, arrays: dict[str, np.ndarray]) -> dict[str, int]:
     """Bits a chip would store: quantized weights, scale mantissas, biases, norm weights and tables."""
     wbits = spec["weights"]["storageBits"]
+    formats = spec["weights"].get("formats", {})
     out = {"weights": 0, "scales": 0, "biases": 0, "norms": 0, "luts": 0}
     for name, a in arrays.items():
         if name.endswith(".q"):
-            out["weights"] += a.size * wbits
+            fmt = formats.get(name[:-2])
+            out["weights"] += a.size * (WEIGHT_FORMATS[fmt]["bits"] if fmt else wbits)
         elif name.endswith(".m"):
             out["scales"] += a.size * 15
         elif name.endswith(".b"):

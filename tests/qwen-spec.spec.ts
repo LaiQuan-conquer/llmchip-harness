@@ -73,8 +73,10 @@ describe.skipIf(!ready)('Qwen2.5-0.5B-Instruct: the SPEC step', () => {
     const imported = await run(client, 'model-llama', 'import', { path: MODEL, archive: true })
     const data = await run(client, 'numeric', 'benchmark_data', { path: TOOLS })
     expect(data.metrics).toMatchObject({ quick_total: 900, 'questions.mmlu': 14042, 'questions.humaneval': 164 })
+    const calibration = await run(client, 'numeric', 'calibration_data', { path: TOOLS })
     await client.call('projects.bind', { project: 'qwen', slot: 'model', hash: output(imported, 'model') })
     await client.call('projects.bind', { project: 'qwen', slot: 'benchmark-data', hash: output(data, 'data') })
+    await client.call('projects.bind', { project: 'qwen', slot: 'calibration-data', hash: output(calibration, 'calibration') })
 
     const develop = await finished(client, (await client.call('pipelines.start', { project: 'qwen', stage: 'SPEC', kind: 'develop' })).id, 3_000_000)
     const verdicts = Object.fromEntries(develop.nodes.flatMap((n) => n.verdicts.map((v) => [v.check, v.verdict])))
@@ -91,8 +93,8 @@ describe.skipIf(!ready)('Qwen2.5-0.5B-Instruct: the SPEC step', () => {
     // The required tests judge the development runs again (nothing reruns).
     const tests = await finished(client, (await client.call('pipelines.start', { project: 'qwen', stage: 'SPEC', kind: 'test' })).id, 600_000)
     for (const n of tests.nodes) expect(n.reused, n.id).toBeTruthy()
-    expect(tests.summary.nodes).toBe(9)
-    expect(tests.summary.pass + tests.summary.fail + tests.summary.indeterminate).toBe(9)
+    expect(tests.summary.nodes).toBe(10)
+    expect(tests.summary.pass + tests.summary.fail + tests.summary.indeterminate).toBe(10)
     const accuracy = tests.nodes.find((n) => n.id === 'SPEC/spec.accuracy.quick.mmlu')!
     const comparison = await client.call('runs.get', { run: accuracy.reused! })
     // The numbers, for the implementation guide (vitest does not show the console of a passing test).

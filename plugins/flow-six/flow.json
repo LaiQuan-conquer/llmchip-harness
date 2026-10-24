@@ -32,11 +32,11 @@
             "judge": ["model.upstream"]
           },
           {
-            "id": "quantize",
+            "id": "calibrate",
             "plugin": "numeric",
-            "handler": "quantize_graph",
-            "params": { "weightFormat": "int4", "groupSize": 128, "contextLength": 2048, "perLayer": true, "residualBits": 24 },
-            "inputs": { "graph": "node:recover.graph", "model": "slot:model" },
+            "handler": "calibrate_graph",
+            "params": { "weightFormat": "int4", "groupSize": 128, "contextLength": 2048, "sequences": 64 },
+            "inputs": { "graph": "node:recover.graph", "calibration": "slot:calibration-data", "model": "slot:model" },
             "bind": { "spec": "numeric-spec", "weights": "l2-weights" }
           },
           {
@@ -46,8 +46,8 @@
             "inputs": {
               "data": "slot:benchmark-data",
               "graph": "node:recover.graph",
-              "spec": "node:quantize.spec",
-              "weights": "node:quantize.weights",
+              "spec": "node:calibrate.spec",
+              "weights": "node:calibrate.weights",
               "model": "slot:model"
             },
             "judge": ["spec.l2.fast"]
@@ -68,8 +68,8 @@
             "inputs": {
               "data": "slot:benchmark-data",
               "graph": "node:recover.graph",
-              "spec": "node:quantize.spec",
-              "weights": "node:quantize.weights",
+              "spec": "node:calibrate.spec",
+              "weights": "node:calibrate.weights",
               "model": "slot:model"
             },
             "bind": { "report": "benchmark-l2-quick" }
@@ -88,6 +88,21 @@
               "spec.accuracy.quick.humaneval",
               "spec.accuracy.quick.mbpp"
             ]
+          },
+          {
+            "id": "diagnose",
+            "plugin": "numeric",
+            "handler": "diagnose",
+            "params": { "maxQuestions": 3, "steps": 32 },
+            "inputs": {
+              "l0": "node:bench-l0.report",
+              "l2": "node:bench-l2.report",
+              "model": "slot:model",
+              "graph": "node:recover.graph",
+              "spec": "node:calibrate.spec",
+              "weights": "node:calibrate.weights"
+            },
+            "judge": ["spec.diagnosis"]
           }
         ]
       },
@@ -109,7 +124,18 @@
         { "check": "spec.accuracy.quick.gsm8k", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
         { "check": "spec.accuracy.quick.ifeval", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
         { "check": "spec.accuracy.quick.humaneval", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
-        { "check": "spec.accuracy.quick.mbpp", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } }
+        { "check": "spec.accuracy.quick.mbpp", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        {
+          "check": "spec.diagnosis",
+          "inputs": {
+            "l0": "slot:benchmark-l0-quick",
+            "l2": "slot:benchmark-l2-quick",
+            "model": "slot:model",
+            "graph": "slot:model-graph",
+            "spec": "slot:numeric-spec",
+            "weights": "slot:l2-weights"
+          }
+        }
       ]
     }
   ],
@@ -258,6 +284,15 @@
         { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
       ],
       "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.diagnosis",
+      "version": "1",
+      "title": "Every question L0 answers correctly and L2 wrongly is diagnosed at its first divergent token",
+      "plugin": "numeric",
+      "handler": "diagnose",
+      "completeness": [{ "metric": "questions", "op": ">=", "value": 1 }],
+      "criteria": [{ "metric": "undiagnosed", "op": "==", "value": 0 }]
     },
     {
       "id": "spec.accuracy.mmlu",

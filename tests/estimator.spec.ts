@@ -39,7 +39,9 @@ describe('estimator (AC-M1-10)', () => {
     await client.call('projects.create', { id: 'six', title: 'Six steps', flow: 'six' })
     const plan = await client.call('pipelines.plan', { project: 'six', stage: 'SPEC', kind: 'develop' })
     expect(plan.nodes).toBeGreaterThanOrEqual(8)
-    expect(new Set(plan.missing.map((m: { ref: string }) => m.ref))).toEqual(new Set(['slot:model', 'slot:benchmark-data']))
+    expect(new Set(plan.missing.map((m: { ref: string }) => m.ref))).toEqual(
+      new Set(['slot:model', 'slot:benchmark-data', 'slot:calibration-data']),
+    )
   })
 
   it('estimates stories260K, 0.5B and 8B on the 180nm target with a full breakdown', { timeout: 60_000 }, async () => {

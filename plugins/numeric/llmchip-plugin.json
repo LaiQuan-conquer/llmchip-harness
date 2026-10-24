@@ -99,6 +99,73 @@
       "timeoutMs": 3600000
     },
     {
+      "name": "diagnose",
+      "title": "Why L2 answers differently from L0: first divergent token, per-layer deviation, its layer",
+      "inputs": [
+        { "name": "l0", "types": ["benchmark.report"], "required": true },
+        { "name": "l2", "types": ["benchmark.report"], "required": true },
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file"], "required": false, "multiple": true }
+      ],
+      "outputs": [{ "name": "report", "type": "diagnosis.report", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxQuestions": { "type": "integer", "minimum": 1, "maximum": 32, "default": 3 },
+          "steps": { "type": "integer", "minimum": 1, "maximum": 256, "default": 32 }
+        }
+      },
+      "resources": { "cpu": 4, "memGb": 8, "gpu": 1 },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "calibration_data",
+      "title": "Pack the calibration text of this machine (WikiText-2) into one artifact (GPTQ)",
+      "inputs": [],
+      "outputs": [{ "name": "calibration", "type": "calibration.data", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": { "path": { "type": "string", "minLength": 1 } }
+      },
+      "timeoutMs": 1800000
+    },
+    {
+      "name": "calibrate_graph",
+      "title": "Calibrated (GPTQ) quantization of a recovered graph: numeric spec and integer weights",
+      "inputs": [
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "calibration", "types": ["calibration.data"], "required": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": false, "multiple": true }
+      ],
+      "outputs": [
+        { "name": "spec", "type": "numeric.spec", "mediaType": "application/json" },
+        { "name": "weights", "type": "numeric.weights", "mediaType": "application/x-npz" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weightFormat": { "enum": ["int8", "int4", "int3", "ternary"], "default": "int4" },
+          "groupSize": { "type": "integer", "minimum": 4, "maximum": 256, "default": 128 },
+          "contextLength": { "type": "integer", "minimum": 16, "maximum": 4096, "default": 2048 },
+          "sequences": { "type": "integer", "minimum": 1, "maximum": 512, "default": 64 },
+          "batchSize": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+          "overrides": { "type": "object", "additionalProperties": { "enum": ["int8", "int4", "int3", "ternary"] } }
+        }
+      },
+      "resources": { "cpu": 4, "memGb": 16, "gpu": 1 },
+      "timeoutMs": 10800000
+    },
+    {
       "name": "evaluate_graph",
       "title": "Accuracy of a recovered graph's L2 against L0 (analysis)",
       "inputs": [
