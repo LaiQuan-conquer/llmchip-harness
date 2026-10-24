@@ -438,6 +438,25 @@
         }
       },
       "timeoutMs": 600000
+    },
+    {
+      "name": "tlm",
+      "title": "Transaction-level trace of the tile: the schedule's phases, the L2 observation points, the cycles",
+      "inputs": [
+        { "name": "chip", "types": ["chip.spec"], "required": true },
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true }
+      ],
+      "outputs": [{ "name": "trace", "type": "arch.tlm", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tokens": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 1, "maxItems": 64 }
+        }
+      },
+      "timeoutMs": 1800000
     }
   ]
 }

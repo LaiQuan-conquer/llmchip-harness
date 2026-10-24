@@ -7,7 +7,7 @@ import numpy as np
 from llmchip_numeric import L2Model, graph_l2, storage_bits
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
-from . import design, explore, spatial, tile, verify
+from . import design, explore, spatial, tile, tlm, verify
 from .slicing import slice_spec
 
 
@@ -95,6 +95,31 @@ def handle_verify(ctx: InvokeContext) -> Result:
     )
 
 
+def handle_tlm(ctx: InvokeContext) -> Result:
+    """The transaction-level trace of the tile on a token sequence: phases, points, cycles (FR-ARC)."""
+    chip = json.loads(Path(ctx.input("chip").path).read_text())
+    graph = json.loads(Path(ctx.input("graph").path).read_text())
+    spec = json.loads(Path(ctx.input("spec").path).read_text())
+    with np.load(ctx.input("weights").path, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files if k != "meta"}
+    tokens = ctx.params.get("tokens") or list(range(1, 9))
+    report = tlm.trace(chip, graph, spec, arrays, [int(t) for t in tokens])
+    Path(ctx.out_dir, "tlm.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    return Result(
+        outputs=[Output("trace", "tlm.json", "arch.tlm", "application/json")],
+        metrics={
+            "tokens": report["tokens"],
+            "phases": report["phases"],
+            "points": report["pointCount"],
+            "mismatches": report["mismatches"],
+            "cycles": report["cycles"],
+            "cycles_agree": int(report["cyclesAgree"]),
+            "deterministic": int(report["deterministic"]),
+        },
+        parse={"status": "complete", "parser": "llmchip-arch/tlm"},
+    )
+
+
 def handle_slice(ctx: InvokeContext) -> Result:
     """The slice of layer 0 at a level of the plan: its matrices, their alignment and its points."""
     graph = json.loads(Path(ctx.input("graph").path).read_text())
@@ -176,5 +201,6 @@ if __name__ == "__main__":
             "verify_spec": handle_verify,
             "explore": handle_explore,
             "slice": handle_slice,
+            "tlm": handle_tlm,
         },
     )

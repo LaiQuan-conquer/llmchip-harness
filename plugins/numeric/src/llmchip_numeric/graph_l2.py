@@ -511,6 +511,7 @@ class GraphL2:
         hidden: list[np.ndarray] | None = None,
         cache: KVCache | None = None,
         rows: list[int] | None = None,
+        observe: Callable[[dict, int | None, dict], None] | None = None,
     ) -> np.ndarray:
         """Integer logits (int32 values, fraction bits `logits.frac`) of the positions of `tokens`:
         all of them (T, vocab), or only the given `rows` (indices into `tokens`).
@@ -594,6 +595,8 @@ class GraphL2:
                     hidden.append(env["x"])
                 elif node["id"] == "final_norm":
                     hidden.append(env[outs[0]])
+            if observe is not None:
+                observe(node, layer, env)
         if cache is not None:
             cache.length = p0 + len(tokens)
         return env["logits"]
