@@ -49,7 +49,6 @@ Commands:
   project bind ID SLOT HASH [--branch B]
   project branch ID NAME [--from B] [--at SEQ]
   stage enter ID STAGE [--branch B]
-  gate snapshot|release ID GATE [--branch B]
   verdict evaluate CHECK RUN [--project ID]
   task create --project P --goal ID --title T --provider ID [--role R] [--scope GLOB]...
   task run TASK [--steps N]
@@ -59,7 +58,7 @@ Commands:
   incident close ID --cause TEXT --action TEXT
   ui [--no-open]                       Open the Web UI in the browser (prints its URL)
   mcp                                  Serve MCP on stdio for an external agent (read-only plus starting work)
-  call METHOD [JSON]                   Any kernel API method, e.g. approvals.decide
+  call METHOD [JSON]                   Any kernel API method, e.g. migration.apply
 
 Global options:
   --home DIR   Workbench home (default: $LLMCHIP_HOME or ~/.llmchip)
@@ -360,17 +359,6 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         await client.call('stages.enter', { project: arg, stage: arg2, ...compact({ branch: values.branch }) })
         io.out(`entered stage ${arg2}\n`)
         return 0
-      case 'gate snapshot':
-      case 'gate release': {
-        if (!arg || !arg2) return usage(io, `gate ${action} needs ID and GATE`)
-        const params = { project: arg, gate: arg2, ...compact({ branch: values.branch }) }
-        if (action === 'snapshot') print(await client.call('gates.snapshot', params))
-        else {
-          const release = await client.call('gates.release', params)
-          print(release, () => `${release.gate}: ${release.status}${release.released ? ' (released)' : ''}\n${release.reasons.map((r) => `  ${r.code} ${JSON.stringify(r.params ?? {})}\n`).join('')}`)
-        }
-        return 0
-      }
       case 'verdict evaluate': {
         if (!arg || !arg2) return usage(io, 'verdict evaluate needs CHECK and RUN')
         const verdict = await client.call('verdicts.evaluate', { check: arg, run: arg2, project: values.project ?? '' })

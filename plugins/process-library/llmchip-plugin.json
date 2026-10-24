@@ -4,7 +4,6 @@
   "title": "Process profiles and implementation library (empirical values)",
   "kinds": [
     "implementation-library",
-    "package-template",
     "process-profile",
     "signoff-check"
   ],
@@ -25,12 +24,6 @@
       "id": "library-180nm",
       "type": "implementation.library",
       "path": "data/library-180nm.json"
-    },
-    {
-      "id": "package-gf180mcu",
-      "type": "package.template",
-      "path": "data/package-gf180mcu.json",
-      "label": "public"
     },
     {
       "id": "signoff-gf180mcu",

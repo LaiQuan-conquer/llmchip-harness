@@ -1,6 +1,6 @@
 {
   "id": "default",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "stages": [
     {
       "id": "S0",
@@ -8,38 +8,20 @@
     },
     {
       "id": "S1",
-      "title": "Model intake",
-      "entry": {
-        "gates": [
-          "G0"
-        ]
-      }
+      "title": "Model intake"
     },
     {
       "id": "S2",
-      "title": "Numeric co-design",
-      "entry": {
-        "gates": [
-          "G0"
-        ]
-      }
+      "title": "Numeric co-design"
     },
     {
       "id": "S3",
-      "title": "Architecture design and exploration",
-      "entry": {
-        "gates": [
-          "G1"
-        ]
-      }
+      "title": "Architecture design and exploration"
     },
     {
       "id": "S4",
       "title": "Hardware generation",
       "entry": {
-        "gates": [
-          "G2"
-        ],
         "checks": [
           {
             "check": "impl.views.S4",
@@ -50,20 +32,12 @@
     },
     {
       "id": "S5",
-      "title": "Functional verification",
-      "entry": {
-        "gates": [
-          "G2"
-        ]
-      }
+      "title": "Functional verification"
     },
     {
       "id": "S6",
       "title": "Physical implementation",
       "entry": {
-        "gates": [
-          "G3"
-        ],
         "checks": [
           {
             "check": "impl.views.S6",
@@ -76,9 +50,6 @@
       "id": "S7",
       "title": "Signoff",
       "entry": {
-        "gates": [
-          "G3"
-        ],
         "checks": [
           {
             "check": "impl.views.S7",
@@ -86,109 +57,6 @@
           }
         ]
       }
-    },
-    {
-      "id": "S8",
-      "title": "Tapeout package",
-      "entry": {
-        "gates": [
-          "G3"
-        ]
-      }
-    },
-    {
-      "id": "S9",
-      "title": "Post-silicon test",
-      "entry": {
-        "gates": [
-          "G4"
-        ]
-      }
-    }
-  ],
-  "gates": [
-    {
-      "id": "G0",
-      "title": "Project initiation",
-      "after": "S0",
-      "members": [
-        "charter",
-        "estimate-request",
-        "process-profile",
-        "impl-library"
-      ],
-      "checks": [
-        "estimate.feasibility"
-      ]
-    },
-    {
-      "id": "G1",
-      "title": "Accuracy signoff",
-      "after": "S2",
-      "members": [
-        "model-ir",
-        "tokenizer",
-        "eval-set",
-        "numeric-spec",
-        "l2-weights"
-      ],
-      "checks": [
-        "accuracy.budget"
-      ]
-    },
-    {
-      "id": "G2",
-      "title": "Architecture freeze",
-      "after": "S3",
-      "members": [
-        "numeric-spec",
-        "l2-weights",
-        "chip-spec",
-        "ppa-estimate"
-      ],
-      "checks": [
-        "arch.spec"
-      ]
-    },
-    {
-      "id": "G3",
-      "title": "RTL freeze",
-      "after": "S5",
-      "members": [
-        "numeric-spec",
-        "rtl",
-        "l2-trace",
-        "verification-plan"
-      ],
-      "checks": [
-        "rtl.lint",
-        "rtl.equivalence"
-      ]
-    },
-    {
-      "id": "G4",
-      "title": "Tapeout signoff",
-      "after": "S8",
-      "members": [
-        "numeric-spec",
-        "rtl",
-        "l2-trace",
-        "chip-spec",
-        "constraints",
-        "timing-exceptions",
-        "signoff-rules",
-        "layout",
-        "gds",
-        "package-template",
-        "tapeout-package"
-      ],
-      "checks": [
-        "phy.drc",
-        "phy.lvs",
-        "phy.sta",
-        "phy.gatesim",
-        "package.integrity"
-      ]
     }
   ],
   "checks": [
@@ -272,8 +140,8 @@
     },
     {
       "id": "accuracy.budget",
-      "version": "1",
-      "title": "L2 accuracy against L0 within the budget (G1)",
+      "version": "2",
+      "title": "L2 accuracy against L0 within the budget (S2)",
       "plugin": "numeric",
       "handler": "evaluate",
       "completeness": [
@@ -299,8 +167,7 @@
           "op": "<=",
           "value": 20
         }
-      ],
-      "waiver": "risk_acceptance"
+      ]
     },
     {
       "id": "numeric.accuracy",
@@ -336,7 +203,7 @@
     {
       "id": "arch.spec",
       "version": "3",
-      "title": "Chip spec follows the frozen numeric spec, covers every observation point, fits the area and, when a cycle target is set, meets it (G2)",
+      "title": "Chip spec follows the frozen numeric spec, covers every observation point, fits the area and, when a cycle target is set, meets it (S3)",
       "plugin": "arch-taalas",
       "handler": "verify_spec",
       "criteria": [
@@ -394,7 +261,7 @@
     {
       "id": "rtl.equivalence",
       "version": "2",
-      "title": "Every item of the verification plan executed; L3 equals L2 bit for bit; coverage reaches the threshold (G3, AC-03)",
+      "title": "Every item of the verification plan executed; L3 equals L2 bit for bit; coverage reaches the threshold (S5, AC-03)",
       "plugin": "sim-verilator",
       "handler": "verify",
       "requiredCapability": "rtl-functional-sim",
@@ -454,7 +321,7 @@
     },
     {
       "id": "phy.drc",
-      "version": "1",
+      "version": "2",
       "title": "DRC (KLayout and Magic), antenna and density clean on the GDS (FR-SGN-01, AC-05)",
       "plugin": "eda-gf180",
       "handler": "drc",
@@ -511,8 +378,7 @@
           "op": "==",
           "value": 0
         }
-      ],
-      "waiver": "foundry_waiver"
+      ]
     },
     {
       "id": "phy.lvs",
@@ -656,67 +522,6 @@
           "value": 0
         }
       ]
-    },
-    {
-      "id": "package.integrity",
-      "version": "1",
-      "title": "Tapeout package complete and consistent with the snapshot (FR-PKG-03)",
-      "plugin": "packager",
-      "handler": "check",
-      "criteria": [
-        {
-          "metric": "missing_files",
-          "op": "==",
-          "value": 0
-        },
-        {
-          "metric": "hash_mismatches",
-          "op": "==",
-          "value": 0
-        },
-        {
-          "metric": "gds_matches_snapshot",
-          "op": "==",
-          "value": true
-        },
-        {
-          "metric": "top_cell_present",
-          "op": "==",
-          "value": true
-        },
-        {
-          "metric": "reports_bound_to_gds",
-          "op": "==",
-          "value": true
-        }
-      ]
-    },
-    {
-      "id": "external.signoff",
-      "version": "1",
-      "title": "Imported external signoff result bound to the current design (FR-SGN-06, AC-11)",
-      "plugin": "packager",
-      "handler": "import_external",
-      "completeness": [
-        {
-          "metric": "binding_complete",
-          "op": "==",
-          "value": true
-        }
-      ],
-      "criteria": [
-        {
-          "metric": "matches_current_design",
-          "op": "==",
-          "value": true
-        },
-        {
-          "metric": "violations",
-          "op": "==",
-          "value": 0
-        }
-      ],
-      "waiver": "foundry_waiver"
     },
     {
       "id": "sdf.timing",

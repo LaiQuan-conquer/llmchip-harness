@@ -8,48 +8,11 @@
     },
     {
       "id": "B",
-      "title": "Signoff",
-      "entry": {
-        "gates": [
-          "GA"
-        ]
-      }
+      "title": "Signoff"
     },
     {
       "id": "C",
-      "title": "Package",
-      "entry": {
-        "gates": [
-          "GB"
-        ]
-      }
-    }
-  ],
-  "gates": [
-    {
-      "id": "GA",
-      "title": "Design freeze",
-      "after": "A",
-      "members": [
-        "design",
-        "spec"
-      ],
-      "checks": [
-        "stub.drc"
-      ]
-    },
-    {
-      "id": "GB",
-      "title": "Tapeout signoff",
-      "after": "B",
-      "members": [
-        "design",
-        "registry",
-        "package"
-      ],
-      "checks": [
-        "stub.drc"
-      ]
+      "title": "Package"
     }
   ],
   "checks": [
@@ -72,8 +35,7 @@
           "op": "==",
           "value": 0
         }
-      ],
-      "waiver": "risk_acceptance"
+      ]
     },
     {
       "id": "stub.mfg",
@@ -87,8 +49,7 @@
           "op": "==",
           "value": 0
         }
-      ],
-      "waiver": "foundry_waiver"
+      ]
     },
     {
       "id": "stub.timing",

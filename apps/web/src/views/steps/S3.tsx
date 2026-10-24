@@ -72,7 +72,7 @@ export function S3Detail({ project, onBack, onProject }: { project: string; onBa
   const { data: state } = useQuery((c) => c.call('projects.get', { project }), [project])
   const { data: verdicts } = useQuery((c) => c.call('verdicts.list', { limit: 1000 }), [])
   const runs = runsData?.runs ?? []
-  // The design shown: the latest; whether it is the one bound to G2 is said next to it.
+  // The design shown: the latest; whether it is the one bound to the project is said next to it.
   const design = latest(runs, 'arch-taalas', 'design')
   const bound = !!design && out(design, 'chip') === state?.slots['chip-spec']
   const explored = latest(runs, 'arch-taalas', 'explore')
@@ -94,7 +94,6 @@ export function S3Detail({ project, onBack, onProject }: { project: string; onBa
   const hasChipSpec = runs.some((r) => r.plugin === 'numeric' && r.handler === 'quantize' && r.execution === 'exited_zero')
   const hasGraphSpec = runs.some((r) => r.plugin === 'numeric' && r.handler === 'quantize_graph' && r.execution === 'exited_zero')
   const analysis = !hasChipSpec && hasGraphSpec
-  const g1 = state?.gates.find((g) => g.gate === 'G1')
   // The spatial engine (taalas-spatial/1) has its own views: circuits instead of a program.
   const spatial = chip?.architecture === SPATIAL
   const spatialSpace = exploration?.architecture === SPATIAL
@@ -117,7 +116,6 @@ export function S3Detail({ project, onBack, onProject }: { project: string; onBa
           ))}
         </div>
         <p className="muted">{t(hasChipSpec ? 's3.pathChip' : hasGraphSpec ? 's3.pathGraph' : 's3.pathNone')}</p>
-        {hasChipSpec && g1 && !g1.released && <p className="flow-note">{t('s3.g1Open', { status: t(`status.${g1.status}` as Key) })}</p>}
         {chip && ppa && !analysis && !spatial && <Answer chip={chip} ppa={ppa} verify={verify} bound={bound} />}
         {chip && ppa && !analysis && spatial && <SpatialAnswer chip={chip} ppa={ppa} verify={verify} bound={bound} />}
         {chip && ppa && !analysis && !spatial && !ppa.microarchitecture && <p className="flow-note">{t('s3.oldDesign')}</p>}
@@ -172,7 +170,7 @@ function Answer({ chip, ppa, verify, bound }: { chip: Json; ppa: Json; verify: R
   return (
     <div className={`s0-answer ${die && limit && die.typ > limit ? 'infeasible' : ''}`}>
       <span>
-        <span className="pill">{t(bound ? 's3.boundG2' : 's3.notBound')}</span>{' '}
+        <span className="pill">{t(bound ? 's3.bound' : 's3.notBound')}</span>{' '}
         {t('s3.answer', { tps: f.tps(p.tokensPerSecond), clock: chip.targets.clockMHz, cycles: f.int(p.cyclesPerToken), die: f.mm2(die?.typ), limit: f.mm2(limit) })}
       </span>
       <small>
@@ -214,7 +212,7 @@ function Progress({ progress }: { progress: Record<string, { state: StepState; d
   )
 }
 
-/** Choose a point: explore around it, or design it (and make it the G2 design). */
+/** Choose a point: explore around it, or design it (and make it the project's design). */
 function Bench({ project, chipPath, current }: { project: string; chipPath: boolean; current: Json }) {
   const { t } = useI18n()
   const { client } = useKernel()

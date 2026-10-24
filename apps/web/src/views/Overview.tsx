@@ -61,20 +61,6 @@ export function OverviewView({ selection, select }: { selection: Selection; sele
               </span>
             ))}
           </div>
-          <h3>{t('context.gates')}</h3>
-          <table>
-            <tbody>
-              {state.gates.map((g) => (
-                <tr key={g.gate}>
-                  <td>
-                    <span className={g.released ? 'pill ok' : 'pill'}>{g.gate}</span>
-                  </td>
-                  <td>{t(`status.${g.status}` as Key)}</td>
-                  <td className="muted">{g.reasons.map(message).join('; ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
           <h3>{t('overview.slots')}</h3>
           <table>
             <tbody>

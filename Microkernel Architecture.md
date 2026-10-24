@@ -4,11 +4,12 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.10 (draft) |
-| Date | 2026-10-22 |
+| Document version | v0.11 (draft) |
+| Date | 2026-10-24 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
-| Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.6) |
+| Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.7) |
 | Chinese version | [Microkernel Architecture.zh.md](<Microkernel Architecture.zh.md>) |
+| This revision | v0.11 (2026-10-24): records the owner's decision (ADR-011): approval gates, design snapshots, approvals, conditional approval, the release check, export and waivers are removed, and K7 with them; flow packs no longer define gates, and stage entry has only checks; the tapeout package plugin is removed. Adds the planned (R1) pipelines (K3), resource-aware scheduling (K4) and run checkpoints (IF-2) |
 
 This document answers **"how llmchip-harness is organized and extended"**. "What must be built, and to what extent" is answered by the requirements document. Per the rules of §0.3 of the requirements document: this document must not modify requirements or acceptance criteria; when the two conflict, agents must escalate and must not choose on their own.
 
@@ -41,7 +42,7 @@ This document uses the terminology of §0.2 of the requirements document, with t
 | In-kernel plugin | A TypeScript plugin running inside the harnessd process; used only for reviewed system plugins shipped with the product |
 | Out-of-process plugin | A plugin running in a separate process or container; can be written in any language and communicates with the kernel via the plugin protocol (IF-2) |
 | Run workspace | A directory created temporarily for a single run (Run); inputs are mounted read-only and outputs are collected from a fixed directory |
-| Flow pack | A plugin that defines stages, gates, stage entry conditions, and rollback rules. S0–S9 are provided by the default flow pack |
+| Flow pack | A plugin that defines stages, stage entry checks, check definitions, and rollback rules. S0–S7 are provided by the default flow pack. There are no approval gates (ADR-011) |
 | Projection | A read-only view derived from the event log, e.g. project state, golden chain state; can be discarded and rebuilt at any time |
 | PEP / PDP | Policy Enforcement Point / Policy Decision Point |
 | TCB | Trusted Computing Base, i.e. the minimal set of code on which the system's security depends |
@@ -60,7 +61,7 @@ The architecture is driven by the following requirements. Each corresponds to a 
 | Agents are safe and controllable | FR-AGT-18~23, AC-M1-07 | All side effects pass through a single policy enforcement point (AP-4) |
 | NDA data never leaves the machine | FR-SEC-01~09, AC-M1-08 | Labels are computed and propagated by the kernel; all outbound traffic passes through the single egress gateway |
 | Running is not passing; not checked is not the same as no problem | DP-8, DP-10, §3.9 | Plugins only produce metrics; verdicts are made by the kernel's verdict engine (AP-7) |
-| Approvals are bound to a definite version of the design | DP-9, §3.7 | A snapshot is a manifest of artifact hashes; approvals, evidence, and invalidation propagation are all based on hashes |
+| Evidence is bound to a definite object | DP-9 | Every verdict is bound to the hashes of the objects it checked (the verdict's subjects); when an object changes, the old verdict does not judge the new object |
 | Every capability is pluggable | DP-5, FR-INT-01, NFR-09 | Microkernel: the kernel only provides mechanisms; all domain knowledge lives in plugins and flow packs (AP-1, AP-2) |
 | Lightweight, out of the box | NFR-01, NFR-13 | Tauri shell; a single kernel process + SQLite; a dedicated WSL distro with the entire runtime environment preinstalled |
 | Can later move to a server and multi-user use | NFR-08 | Clients and kernel communicate via a network-style API from the start (IF-1) |
@@ -71,10 +72,10 @@ The architecture is driven by the following requirements. Each corresponds to a 
 
 | ID | Principle | Meaning |
 |---|---|---|
-| AP-1 | Minimal kernel | The kernel contains only generic mechanisms: events, artifacts, workflow, scheduling, policy, verdicts, snapshots, labels, plugin host. **No** chip, model, or EDA domain knowledge **appears** in the kernel |
-| AP-2 | Separate mechanism from policy | The kernel provides "how to execute"; plugins and configuration provide "what to execute and by what standard". For example, gate definitions, signoff checklists, and coverage completeness conditions all come from flow packs and the charter, not hard-coded in the kernel |
+| AP-1 | Minimal kernel | The kernel contains only generic mechanisms: events, artifacts, workflow, scheduling, policy, verdicts, labels, plugin host. **No** chip, model, or EDA domain knowledge **appears** in the kernel |
+| AP-2 | Separate mechanism from policy | The kernel provides "how to execute"; plugins and configuration provide "what to execute and by what standard". For example, stage and check definitions, signoff checklists, and coverage completeness conditions all come from flow packs and the charter, not hard-coded in the kernel |
 | AP-3 | Single write path | Every state change is expressed as an event appended to the event log. Project state, golden chain state, etc. are all projections of events |
-| AP-4 | Single enforcement point | All side effects, such as file writes, tool runs, network egress, and approvals, must pass through the kernel's capability broker (PEP), be decided by the policy engine (PDP), and be recorded |
+| AP-4 | Single enforcement point | All side effects, such as file writes, tool runs, network egress, and hard-constraint changes, must pass through the kernel's capability broker (PEP), be decided by the policy engine (PDP), and be recorded |
 | AP-5 | Out-of-process execution | Heavy computation, EDA tools, third-party plugins, and untrusted code all run outside the kernel process. The kernel's event loop only does I/O and coordination |
 | AP-6 | Contract before implementation | The kernel API, plugin protocol, and artifact types are all defined with language-independent schemas (JSON Schema) and carry version numbers. TypeScript types are generated from the schemas and do not depend on any framework types |
 | AP-7 | Do not trust plugin conclusions | Plugins can only produce artifacts and metrics; they cannot directly write "pass". Verdicts are made by the verdict engine based on check definitions, metrics, evidence binding, and coverage completeness conditions |
@@ -94,7 +95,7 @@ The architecture is driven by the following requirements. Each corresponds to a 
 │                                                                                                            │
 │  Microkernel                                                                                               │
 │   K1 Event Store    K2 Artifact Store   K3 Workflow Engine      K4 Scheduler & Process Supervisor          │
-│   K5 Policy Engine  K6 Verdict Engine   K7 Snapshot & Approval  K8 Labels & Egress Gateway                 │
+│   K5 Policy Engine  K6 Verdict Engine   K7 (removed)            K8 Labels & Egress Gateway                 │
 │   K9 Plugin Host    K10 Config & Secrets                                                                   │
 │                                                                                                            │
 │  In-kernel system plugins (shipped with the product, reviewed)                                             │
@@ -145,7 +146,7 @@ A typical work process is as follows:
   | prev_hash / hash | Hash chain, used to detect tampering or corruption |
 
 - **Large data does not go into events**: logs, reports, and files are stored in the artifact store; events only reference hashes.
-- **Projections**: project state, golden chain, incident list, pending approvals list, etc. are all projections and can be discarded and rebuilt from events at any time. Projection updates are done in the same transaction as the event write, or caught up at startup.
+- **Projections**: project state, golden chain, incident list, verdict list, etc. are all projections and can be discarded and rebuilt from events at any time. Projection updates are done in the same transaction as the event write, or caught up at startup.
 - **Real-time notification**: after an event is committed, it is pushed to subscribers (UI, Agent runtime) via an in-process bus. Lost pushes do not affect correctness; subscribers can catch up by seq.
 
 ### 4.2 K2 Artifact Store
@@ -155,24 +156,26 @@ A typical work process is as follows:
 - **Content addressing**: files are stored by SHA-256 under `store/objects/` and set to read-only after writing. Directory artifacts (e.g. an RTL directory, a PDK) are represented by a Merkle manifest, and the manifest itself is also an artifact.
 - **Metadata** (stored in SQLite): type, media type, label, the run that produced it, input artifacts, tool image digest, creator, the requirements document version it is based on.
 - **Lineage graph**: composed of "run inputs → run → run outputs". Trace queries (AC-08) are performed directly on this graph.
-- **Deletion**: agents and plugins can only emit "mark deleted" events. Actual cleanup can only be initiated by a human and is performed by garbage collection after a retention period. Artifacts referenced by any valid snapshot, approval, or tapeout package cannot be collected.
+- **Deletion**: agents and plugins can only emit "mark deleted" events. Actual cleanup can only be initiated by a human and is performed by garbage collection after a retention period. Artifacts referenced by any project slot or verdict cannot be collected.
 - **External large files**: model weights and PDKs are imported only once. On import, the hash is computed, labels are applied (an NDA PDK is automatically NDA), and a fingerprint index is built (K8).
 
 ### 4.3 K3 Workflow Engine
 
 **Responsibility**: Advances project → stage → task → run in a recoverable way. Satisfies FR-TRC-03/04/05, FR-PHY-08, FR-MIG-03.
 
-- **Persistent state machines**: projects, stages, tasks, and runs are all event-driven state machines; the current state is a projection of events. The kernel only knows generic states, e.g. pending, running, pending approval, completed, invalidated.
-- **The flow is defined by the flow pack**: stages S0–S9, gates G0–G4, transitions between stages, rollback rules, and **stage entry conditions** (e.g. the integration views check of FR-PHY-08, "approval valid") are all declared by the flow pack. The kernel executes them; the verdict engine and policy engine evaluate the conditions. A future multi-chip flow can be added as another flow pack.
-- **Atomic commit of runs**: a run's outputs are registered as artifacts all at once only after the run ends successfully. On a crash midway, partial results stay in the run workspace and do not enter the artifact store, so there is no such thing as a "half-written artifact".
-- **Invalidation propagation**: the kernel maintains three kinds of dependency edges: artifact → derived artifact, evidence → checked object, approval → snapshot. When any object gets a new version, the affected set is computed along the dependency edges and invalidation events are emitted. The rollback starting point given by the migration impact assessment (FR-MIG) is also executed via the same mechanism.
+- **Persistent state machines**: projects, stages, tasks, and runs are all event-driven state machines; the current state is a projection of events. The kernel only knows generic states, e.g. pending, running, completed, failed.
+- **The flow is defined by the flow pack**: stages S0–S7, transitions between stages, rollback rules, and **stage entry checks** (e.g. the integration views check of FR-PHY-08) are all declared by the flow pack. The kernel executes them; the verdict engine and policy engine evaluate the conditions. A future multi-chip flow can be added as another flow pack.
+- **No approval gates (ADR-011)**: entering a stage only requires the latest verdict of each of its entry checks on the bound artifact to be "Pass". A failed check does not lock the flow and cannot be waived: the failure is recorded as it is and opens an incident; once the cause is fixed, the work and its tests run again.
+- **Atomic commit of runs**: a run's outputs are registered as artifacts only after the run ends successfully. On a crash midway, partial results stay in the run workspace and do not enter the artifact store, so there is no such thing as a "half-written artifact". **Planned (R1, approved by the owner)**: a plugin can register run checkpoints with the IF-2 `checkpoint` notification (§9.2); a checkpoint is registered as an artifact as soon as the notification arrives, for retries and resumption. The rule then becomes: checkpoints are registered at once during the run, all other outputs still only after the run ends successfully (implementation guide §7.3, C6, is then handled by the new rule).
+- **The objects of evidence, and invalidation**: the kernel maintains two kinds of dependency edges: artifact → derived artifact, and verdict → checked object (the verdict's subjects). When an object gets a new version, the old verdicts do not judge the new object, and the checks concerned must run again on it. When a migration impact assessment (FR-MIG) is confirmed, the kernel records the earliest stage to restart (event `migration.applied`); the work from that stage on must run again on the new process; restarting at S3 or earlier needs a human (FR-MIG-03/04).
+- **Pipelines (planned, R1, approved by the owner)**: the flow pack declares for every step a development pipeline `develop` (handler runs with their dependencies, outputs bound to slots) and a list of required tests `tests` (check ids). K3 gains a pipelines component with the methods `pipelines.start` (one step or all steps, kind develop or test), `pipelines.get`, `pipelines.list`, `pipelines.cancel` and `pipelines.resume`; its state is all events (`pipeline.*`), summed up by a projection; after a kernel restart, unfinished pipelines continue once K4 has recovered. The two entries of every step in the UI, "run the development" and "run all tests", are implemented by it.
 - **Branching and rollback**: a project branch is a named pointer to a set of stage states. Rolling back to a historical checkpoint = creating a new branch from that checkpoint (FR-TRC-04, FR-PRJ-04); history is not modified.
 
 ### 4.4 K4 Scheduler & Process Supervisor
 
 **Responsibility**: Executes runs, manages the lifecycle of all child processes and containers, and ensures the kernel is not dragged down. Satisfies NFR-02, NFR-03, FR-AGT-22/23.
 
-- **Task queue**: stored in SQLite, not lost after a kernel restart. Queued by resource class (CPU, memory, future EDA licenses) and quota.
+- **Task queue**: stored in SQLite, not lost after a kernel restart. Queued by resource class (CPU, memory, future EDA licenses) and quota. **Planned (R1, approved by the owner)**: handler manifests declare `resources: {cpu, memGb, gpu}`; beyond the concurrency limit, the scheduler allocates by the configured limits of this machine's CPUs, memory and GPUs and queues what does not fit; only one run that uses the GPU is scheduled at a time.
 - **Three executors**:
 
   | Executor | Purpose | Isolation |
@@ -194,7 +197,7 @@ A typical work process is as follows:
 - **Capability model**:
   - Each role and each task receives a set of capability grants, including available tools, writable scope (path patterns in the project working directory), and quotas.
   - The tools of a managed agent are all kernel-defined operations, e.g. reading artifacts, submitting changesets, starting runs. **There is no raw shell**; "executing commands" can only be done in containers via declared tool adapters.
-  - External clients use a separate capability profile: read-only by default, plus initiating tasks, and cannot approve (FR-AGT-02).
+  - External clients use a separate capability profile: read-only by default, plus initiating tasks, and cannot change constraints or policy (FR-AGT-02).
 - **Constraint registry**: every constraint in the charter is registered with a category (hard / soft), classified per the minimum classification criteria of §3.2 of the requirements document; **when undeterminable, it is a hard constraint**. Modification requests for hard constraints are always converted into human approvals.
 - **Lowered-standard detection**: when the check definition of a check changes, and at the same time its verdict changes from "fail" to "pass" while the hash of the checked object has not changed, an incident is automatically generated and handed to a human for review (AC-M1-13).
 - **Dangerous operation list**: the operations listed in FR-AGT-21 always require human approval. NDA egress is not among the approvable items (handled by K8).
@@ -208,27 +211,21 @@ A typical work process is as follows:
   1. The run record (layer ① execution status, written by K4);
   2. The output of the parser plugin (layer ② parse status, metrics, parser version);
   3. The check definition: verdict criteria, required tool capabilities, coverage completeness conditions; comes from the flow pack, signoff checklist, or charter, and is a hard constraint;
-  4. The hash of the checked object in the current snapshot.
-- **Output**: a verdict record (layer ③), with value Pass / Fail / Waived / Indeterminate, with a reason, and bound to the object hash, check definition version, and requirements document version. The stage conclusion (layer ④) is aggregated from verdicts and combined with approvals from K7.
+  4. The hash of the checked object among the run's inputs.
+- **Output**: a verdict record (layer ③), with value Pass / Fail / Indeterminate, with a reason, and bound to the object hash, check definition version, and requirements document version. There are no waivers (ADR-011); `Waived` appears only in historical verdicts recorded before waivers were removed. The stage conclusion (layer ④) is aggregated from the stage's verdicts.
 - **Rules**:
   - Plugins cannot write verdict records; they can only produce metrics (AP-7).
   - If any input is missing, parsing is incomplete, coverage completeness conditions are not met, or tool capabilities do not match, the verdict is "Indeterminate".
   - **Tool capability qualification**: every capability declared by a backend (e.g. "SDF timing simulation") must come with a qualification test. The capability is recognized only after the qualification test passes on that tool image. The qualification test is itself a check, with the id `<plugin>.qualify.<capability>`; its passing verdict is the qualification evidence. For example, the qualification test for the SDF capability deliberately introduces a timing violation and checks whether the simulation can detect it.
 
-### 4.7 K7 Snapshot & Approval
+### 4.7 K7 (Removed)
 
-**Responsibility**: Turns "which version of the design was approved" into a machine-checkable fact. Satisfies §3.7, FR-PKG-04, FR-SGN-05/06, AC-10, AC-11, AC-M1-05/06.
+K7 Snapshot & Approval is removed by ADR-011: there are no approval gates, design snapshots, evidence manifests, approvals, conditional approvals, release check, waivers or package export. The number K7 is kept and not reused.
 
-- **Snapshot**: member artifacts are selected according to the gate definition (from the flow pack), producing a sorted hash manifest; the hash of the manifest is the snapshot hash.
-- **Evidence manifest**: the set of verdict records the approval is based on, likewise identified by hash.
-- **Approval state machine**: Approved / Conditionally approved · conditions pending / Conditionally approved · all conditions closed / Rejected / Invalidated; rules are in §3.7.3 of the requirements document. When a condition is closed, it is validated that: the closure evidence has received a "Pass" verdict, and the snapshot hash has not changed.
-- **Release check**: `can_release(gate, snapshot)` is the single check function before advancing the flow and exporting the tapeout package. It simultaneously checks the approval state, whether the snapshot hash matches exactly, and whether any unclosed blocking conditions exist.
-- **Waivers**: internal risk acceptance and manufacturing-rule waivers are two different record types. A manufacturing-rule waiver must reference a "foundry written acceptance" artifact, and that artifact is bound to the GDS hash, rule deck version, violation type, and location.
-- **External reports**: an imported external signoff report is a kind of artifact; on import, the object hash it claims to have checked, the rule version, tool version, and check conditions are registered. The verdict engine uses it only when this information exactly matches the current snapshot (FR-SGN-06).
-- **M4 implementation**:
-  - A flow pack may declare **hard-constraint slots** (`hardConstraintSlots`; in the default flow the timing constraints, the timing exception registry and the signoff rules). Only a human may bind them; an agent's attempt is refused and opens a `hard_constraint_change` incident (requirements §3.2, FR-SGN-02b).
-  - `packages.export`: exports only when the release check passes and the package is the member of the approved snapshot. The archive holds the package, the lineage manifest (every artifact up to the weights: hash, type, label, producing run, plugin version and image, verdicts) and the approval; its label is the highest label in the lineage (FR-PKG-02/04/05).
-  - `migration.apply`: confirming a migration impact assessment invalidates every gate after its earliest restart stage, and the evidence those gates recorded before the confirmation no longer counts; restarting at S3 or earlier needs a human (FR-MIG-03/04).
+- **Mechanisms that remain, now carried by K3**: a flow pack may declare **hard-constraint slots** (`hardConstraintSlots`; in the default flow the timing constraints, the timing exception registry and the signoff rules). Only a human may bind them; an agent's attempt is refused and opens a `hard_constraint_change` incident (requirements §3.2, FR-SGN-02b).
+- **`migration.apply`**: only records the confirmed migration impact assessment and the earliest stage to restart (event `migration.applied`, result `{restartStage}`); see §4.3.
+- **Historical data**: the event kinds `approval.recorded`, `approval.condition_closed`, `approval.invalidated`, `waiver.recorded` and `package.exported` stay registered in the schema only so that older event logs can be read and verified; the kernel no longer writes them. The verdict record's `waiver` field and the verdict value `waived` likewise exist only for history. The workflow projection is at version 3, without approval and waiver tables.
+- **Import of external signoff reports** (FR-SGN-06) is removed together with the `packager` plugin.
 
 ### 4.8 K8 Data Labels & Egress Gateway
 
@@ -294,7 +291,7 @@ A typical work process is as follows:
 1. Cordis is used **only** as a tool inside harnessd for assembling kernel components and in-kernel system plugins.
 2. **Kernel interfaces do not depend on Cordis**: the kernel API, plugin protocol, and artifact types are all defined in a separate `kernel-api` package (AP-6), in which no Cordis types appear. Out-of-process plugins are completely unaware of Cordis's existence.
 3. Based on the already-patched Cordis fork in the local `deepseek-harness` project (MIT license), copied as source into `vendor/`, **with the version locked**, and recording its origin and the list of local modifications.
-4. Critical paths do not depend on Cordis's event mechanism: event writes, verdicts, and approvals call kernel components directly. The reason is that in Cordis's synchronous event dispatch, after one listener throws an exception, subsequent listeners are not executed.
+4. Critical paths do not depend on Cordis's event mechanism: event writes and verdicts call kernel components directly. The reason is that in Cordis's synchronous event dispatch, after one listener throws an exception, subsequent listeners are not executed.
 5. **Unload order is managed explicitly**: the kernel shutdown order is fixed as: stop accepting new requests → the scheduler stops dispatching and waits for or aborts runs → stop the Agent runtime → flush the event store → close the database. It does not rely on Cordis's concurrent unloading.
 6. **Plugin host guards** (Cordis behaviors found in the M1a prototype validation, handled by `PluginHost`):
    - Cordis waits for a plugin's setup to settle before disposing it, so a hung plugin would block shutdown forever. Loading and cleanup therefore have timeouts; a timeout is recorded as `plugin.failed`.
@@ -377,7 +374,7 @@ Every plugin type is defined by a contract of "input artifact types → output a
 
 | Plugin type | Input → Output | Default execution mode | MVP implementation |
 |---|---|---|---|
-| Flow pack | — → stages, gates, entry conditions, snapshot member definitions | In-kernel (declarative data) | Default flow S0–S9, G0–G4 |
+| Flow pack | — → stages, entry checks, check definitions, hard-constraint slots, and (planned, R1) each step's development pipeline and required tests | In-kernel (declarative data) | Default flow S0–S7 |
 | Model loader | Weight files, tokenizer → Model IR, structure report | Out-of-process (Python) | llama2.c, safetensors, PyTorch |
 | Quantizer / numeric spec | Model IR → numeric spec, L2 bit-exact model, accuracy report | Out-of-process (Python) | RTN quantization + fixed-point numeric spec |
 | Small model training | Dataset, size → model weights | Out-of-process (Python) | Based on the llama2.c training flow |
@@ -389,14 +386,12 @@ Every plugin type is defined by a contract of "input artifact types → output a
 | Parser | Tool reports → metrics (including parse completeness) | Out-of-process | Paired with each EDA adapter |
 | PDK / process profile / implementation library | — → process data, implementation entries, integration views, signoff checklist | Data plugin | GF180MCU, Sephonchitech (十方尺) (pricing and size rules) |
 | Signoff check | — → check definitions (criteria, capability requirements, coverage completeness conditions) | Data plugin | DRC, LVS, STA, antenna, density, storage contents consistency |
-| Tapeout package template | Snapshot → tapeout package manifest | Data plugin | GF180 rehearsal template |
-| Post-silicon testing | Specification → firmware, host PC program, test vectors; test results → comparison | Out-of-process | RP2040-class host controller |
 | LLM provider | Request → streaming response (sent via K8) | In-kernel | DeepSeek, Claude, GPT, OpenAI-compatible interfaces |
 | UI panel | Projection → view | Front end | Estimator, golden chain, layout viewer, etc. |
 
 ### 7.2 Core Artifact Types
 
-Artifact types are managed by a schema registry (AP-6), and plugins can register new types. The core types of the MVP include: Model IR, numeric spec, L2 model, accuracy report, chip specification, mapping rule, RTL tree, netlist, layout (GDS), constraint set, timing exception list, verification plan, tool report, metrics, verdict record, snapshot manifest, evidence manifest, approval record, waiver record, external report, implementation library entry, migration impact assessment report, tapeout package, handoff pack.
+Artifact types are managed by a schema registry (AP-6), and plugins can register new types. The core types of the MVP include: Model IR, numeric spec, L2 model, accuracy report, chip specification, mapping rule, RTL tree, netlist, layout (GDS), constraint set, timing exception list, verification plan, tool report, metrics, verdict record, implementation library entry, migration impact assessment report, handoff pack.
 
 ### 7.3 Where the Golden Chain Lands in the Architecture
 
@@ -404,7 +399,7 @@ Artifact types are managed by a schema registry (AP-6), and plugins can register
 - The golden chain state is a projection: computed from the latest verdict records and invalidation states of each link.
 - For divergence localization (FR-VER-06), the comparison check plugin produces a "first divergence point" metric, which the UI uses to jump to the corresponding waveform and tensor.
 - **M3 implementation (L2 ≡ L3)**: the RTL generator (`rtl-taalas`) compiles the numeric spec into a microcoded vector engine: weights go into ROMs by a versioned mapping rule (`lanes-interleaved/1`, reversible, round-trip checked at generation), the program ROM holds the microcode, and the RTL bundle ships its own instruction-level simulator `isa.py`. The comparison has two parts: the generator checks "microcode on the instruction-level simulator ≡ L2" (compiler verification); the simulation plugin (`sim-verilator`, in the pinned EDA image) checks "RTL ≡ instruction-level simulator / L2". The simulation plugin executes every item of the verification plan (artifact `verification.plan`) and produces metrics such as `items_*`, `*_mismatches` and `coverage_line_pct`; on a divergence it reruns up to the divergent position with the debug program (which traces the output of every operation) and produces `divergence_*` metrics (operation, element, cycle) and a waveform window around that operation (`waveform.vcd`). The qualification test of the `rtl-functional-sim` capability runs a known design and a variant with a seeded defect on both Verilator and Icarus. When a verdict is fail or indeterminate, K6 opens a `check_failed` incident automatically and carries the `divergence_*` metrics into its summary (AC-09).
-- **M4 implementation (L3 → L4/L5 → package)**: the chip-level RTL keeps activations, the KV cache and the observation buffers in an external SPI SRAM; on chip remain the weight, constant and program ROMs and one set of shared arithmetic units, with widths the generator proves from the numeric spec. `eda-gf180` generates the constraints from the chip spec's interface timing (every port delay has a source) and runs LibreLane for the pad ring, place and route and parasitic extraction; each signoff check reads only what it judges: DRC (KLayout decks from the `signoff.rules` artifact, a hard constraint), LVS, STA at 9 corners (also proving the constraints complete and counting unregistered timing exceptions), zero-delay gate-level simulation (L4, against L2; on Icarus Verilog with the PDK cell models, because Verilator races on the sequential UDPs behind the clock tree buffers) and SDF timing simulation (supplementary; incomplete annotation never passes). `packager` assembles the package from the process's template and checks its integrity.
+- **M4 implementation (L3 → L4/L5)**: the chip-level RTL keeps activations, the KV cache and the observation buffers in an external SPI SRAM; on chip remain the weight, constant and program ROMs and one set of shared arithmetic units, with widths the generator proves from the numeric spec. `eda-gf180` generates the constraints from the chip spec's interface timing (every port delay has a source) and runs LibreLane for the pad ring, place and route and parasitic extraction; each signoff check reads only what it judges: DRC (KLayout decks from the `signoff.rules` artifact, a hard constraint), LVS, STA at 9 corners (also proving the constraints complete and counting unregistered timing exceptions), zero-delay gate-level simulation (L4, against L2; on Icarus Verilog with the PDK cell models, because Verilator races on the sequential UDPs behind the clock tree buffers) and SDF timing simulation (supplementary; incomplete annotation never passes). The tapeout package and the `packager` plugin are removed by ADR-011.
 
 ---
 
@@ -447,6 +442,7 @@ In the dedicated WSL distro, the workbench's home directory structure is as foll
 - **Data passing**: large data is passed via files in the run workspace, not transmitted inline in the protocol.
 - **SDK**: a Python SDK (`python/llmchip-sdk`) and a TypeScript SDK (`packages/plugin-sdk`) are provided, encapsulating protocol details; the SDKs redirect a handler's standard output to stderr so that the protocol stream cannot be corrupted. Other languages can implement it according to the protocol documentation.
 - **Results**: `invoke` returns only output files, metrics and the parse status, never verdicts (AP-7). Outputs must lie in the run workspace's `out/` and match the types declared in the manifest; otherwise the run fails and no output is registered.
+- **Checkpoints (planned, R1, approved by the owner)**: long runs (every step of physical design, long simulations in segments) can send a `checkpoint` notification to register a checkpoint file in the run workspace's `out/` as an artifact, which the kernel registers at once (event `run.checkpointed`). On a retry or `pipelines.resume`, the kernel hands the latest checkpoint to the handler as the input `resume`, and the handler continues from there.
 
 ### 9.3 IF-3 Tool Runs
 
@@ -543,7 +539,7 @@ Deploy harnessd and `~/.llmchip/` on a private server, with clients on multiple 
 
 | Zone | Trust level | Notes |
 |---|---|---|
-| Human (local UI) | Trusted | Approvals and policy changes can only be initiated by humans |
+| Human (local UI) | Trusted | Changes of hard constraints and policy can only be initiated by humans |
 | Kernel (K1–K10) | TCB | Kept minimal; the fundamental basis of security |
 | In-kernel system plugins | Trusted (reviewed) | Limited to plugins shipped with the product |
 | Out-of-process plugins | Semi-trusted | Separate process, no network, can only access the kernel via IF-2 |
@@ -567,7 +563,7 @@ External coding agents launched under management run in containers, and the cont
 | Requirement area | Main architectural parts responsible |
 |---|---|
 | §3.4 Golden chain, FR-VER | §7.3, K6, simulation and verification backend plugins |
-| §3.7 Approvals, snapshots, waivers; FR-PKG-04 | K7, K3 (invalidation propagation) |
+| DP-9 evidence bound to objects; FR-TRC-05 | K6 (the verdict's subjects), K3 (the objects of evidence, and invalidation) |
 | §3.8 Implementation library and integration views; FR-PHY-08 | Implementation library data plugins, K3 (stage entry), K6 |
 | §3.9 Verdict layers; DP-8, DP-10 | K6, K4 (execution status), parser plugins |
 | FR-EST | Estimator plugin, implementation library data plugins |
@@ -606,7 +602,7 @@ llmchip-harness/
     llmchip-sdk/       Python plugin SDK
   plugins/             Domain plugins: flow-default, model-loader, quant, estimator,
                        arch-taalas, rtl-gen, sim-verilator, sim-icarus, eda-yosys,
-                       eda-openroad, eda-klayout, pdk-gf180mcu, silicon-test ……
+                       eda-openroad, eda-klayout, pdk-gf180mcu ……
   images/              Build definitions for tool containers and the WSL distro
   vendor/              Vendored Cordis and companion library sources (ADR-001 item 3, manifest in vendor/README.md)
   docs/
@@ -628,6 +624,7 @@ llmchip-harness/
 | ADR-008 | Single egress gateway: LLM provider plugins do not hold network connections directly | Accepted (M1c) |
 | ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Accepted (M1b) |
 | ADR-010 | The virtual-chip test harness (`llmchip-vchip`, a standalone tool outside the kernel) may judge pass / fail / incomplete itself, by each chip's own policy. ADR-009 and AP-7 bind kernel plugins and gate evidence; the harness's verdicts are not gate evidence unless they are later brought in through the kernel's verdict engine | Accepted (owner decision, 2026-10-22) |
+| ADR-011 | Remove approval gates: there are no design snapshots, evidence manifests, approvals, conditional approvals, release check, package export or waivers, and K7 is removed with them. Stages have only entry checks; a failed check is recorded as it is and opens an incident, and once the cause is fixed the work and its tests run again. The tapeout package and post-silicon testing are out of scope; the `packager` plugin is removed. Approval, waiver and export events in older event logs are kept as history only. The text of ADR-010 stays as it was; its "gate evidence" now reads "kernel verdicts". The product side is specified in requirements v0.7 | Accepted (owner decision, 2026-10-24) |
 
 The full record of each ADR (context, alternatives, rationale, consequences) will be placed under `docs/adr/` after development starts.
 

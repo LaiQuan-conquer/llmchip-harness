@@ -1,6 +1,6 @@
 // M1.5 acceptance (AC-M15-01..03): storage implementation calibration on
 // GF180MCU with real tools in the pinned image, admission checks on integration
-// views, and the calibrated estimate behind the G0 reference-model decision.
+// views, and the calibrated estimate behind the owner's reference-model decision (2026-10-18).
 // Skipped, visibly, where the tool image is not installed.
 
 import { execFileSync } from 'node:child_process'
@@ -79,10 +79,11 @@ describe.skipIf(!available(IMAGE))('storage calibration on GF180MCU', () => {
     ])
     expect(blocked.message).toMatch(/impl\.views\.S4 on storage-impl \(fail; verilog\)/)
     await client.call('projects.bind', { project: 'prerun', slot: 'storage-impl', hash: stdcell.outputs[0]!.hash })
-    const now = await client.call('stages.enter', { project: 'prerun', stage: 'S4' }).catch((error) => error)
-    expect(now.params.checks).toEqual([]) // Only the gate G2 still blocks.
+    // With the views present, S4 is entered (there are no approval gates).
+    await client.call('stages.enter', { project: 'prerun', stage: 'S4' })
+    expect((await client.call('projects.get', { project: 'prerun' })).stages.find((s) => s.id === 'S4')).toEqual({ id: 'S4', entered: true })
 
-    // AC-M15-02 (input to the owner's G0 decision): the estimate uses calibrated values.
+    // AC-M15-02 (input to the owner's reference-model decision): the estimate uses calibrated values.
     const estimate = await run(client, 'estimator', 'estimate', { model: { preset: 'stories260K' }, weightStorage: 'gf180mcu.stdcell-rom' }, [
       { name: 'profile', hash: await dataHash(client, 'gf180mcu') },
       { name: 'library', hash: await dataHash(client, 'library-180nm') },

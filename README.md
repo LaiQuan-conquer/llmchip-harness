@@ -1,8 +1,8 @@
 # llmchip-harness
 
-A private-deployment workbench between open-source LLMs and the foundry: it takes a model's weights and produces a foundry-ready tapeout package for a chip with those weights hardwired into silicon. Research and development inside the workbench is done by AI agents, with humans approving at key gates.
+A private-deployment workbench for chips with an open-source LLM's weights hardwired into silicon: it takes a model's weights through the six steps before tapeout (specification, RTL, verification, synthesis, physical design and signoff) on open-source PDKs. Research and development inside the workbench is done by AI agents; each step's checks judge its results, and a failed check stays failed until the cause is fixed and the work runs again.
 
-Status: the kernel, the plugin protocol, managed agents, the Web UI and the flow from S0 to S8 on GF180MCU work, with an untrained proxy model as the design subject. Not built yet: the desktop shell, the installer and S9 (post-silicon). Details are in the [implementation guide](docs/implementation.md#1-current-implementation-scope).
+Status: the kernel, the plugin protocol, managed agents, the Web UI and the flow from S0 to S7 on GF180MCU work, with an untrained proxy model as the design subject. Not built yet: the desktop shell and the installer; the design subject Qwen2.5-0.5B-Instruct and the six-step flow on all open-source PDKs are the next phases. Details are in the [implementation guide](docs/implementation.md#1-current-implementation-scope).
 
 ## Documents
 
@@ -28,7 +28,7 @@ yarn build              # vendored Cordis and the Web UI are used from their bui
 yarn harnessd serve &                       # start the kernel (home: $LLMCHIP_HOME or ~/.llmchip)
 yarn llmchip estimate --model stories260K   # feasibility, area and cost estimate
 yarn llmchip run list                       # the run behind it, with its outputs
-yarn demo                                   # run the demo project through the whole flow (S0-S8)
+yarn demo                                   # run the demo project through the whole flow (S0-S7)
 yarn demo --arch spatial                    # the same with the spatial engine (the model as circuits)
 yarn demo --model /path/to/Qwen3-0.6B       # import a downloaded model: census, estimate, graph recovery (S0-S1), int8 analysis (S2)
 yarn ui                                     # open the Web UI; the Flow page shows every stage
@@ -43,4 +43,4 @@ yarn llmchip kernel stop
 yarn verify             # workspace and generated-file checks, Python checks, typecheck, build, tests
 ```
 
-`yarn verify` must pass before every commit. The full S0–S8 flow test is opt-in: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. See [implementation guide §6](docs/implementation.md#6-verification) for what each test proves and when it runs, and [AGENTS.md](AGENTS.md#engineering) for the repository layout and all commands.
+`yarn verify` must pass before every commit. The full S0–S7 flow test is opt-in: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. See [implementation guide §6](docs/implementation.md#6-verification) for what each test proves and when it runs, and [AGENTS.md](AGENTS.md#engineering) for the repository layout and all commands.

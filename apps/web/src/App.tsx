@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useKernel, useQuery } from './api.ts'
 import { useI18n, type Key } from './i18n.ts'
-import { ApprovalsView } from './views/Approvals.tsx'
 import { AgentsView } from './views/Agents.tsx'
 import { ArtifactsView } from './views/Artifacts.tsx'
 import { EstimatorView } from './views/Estimator.tsx'
@@ -16,7 +15,7 @@ import { activityLine, runNamesOf } from './views/activity.ts'
 import { timeOf } from './views/common.tsx'
 import { STEPS } from './views/flowSteps.ts'
 
-export type Page = 'flow' | 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'vchip' | 'approvals' | 'incidents' | 'artifacts' | 'settings'
+export type Page = 'flow' | 'overview' | 'agents' | 'trajectory' | 'estimator' | 'playground' | 'vchip' | 'incidents' | 'artifacts' | 'settings'
 
 export interface Selection {
   project: string | null
@@ -33,7 +32,7 @@ interface Place {
   scroll: number
 }
 
-const PAGES: Page[] = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES: Page[] = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'incidents', 'artifacts', 'settings']
 
 /** Main layout (FR-UI-05): projects and tasks on the left, the work in the middle, context on the right. */
 export function App() {
@@ -128,7 +127,6 @@ export function App() {
         {page === 'estimator' && <EstimatorView {...props} />}
         {page === 'playground' && <PlaygroundView {...props} />}
         {page === 'vchip' && <VChipView {...props} />}
-        {page === 'approvals' && <ApprovalsView {...props} />}
         {page === 'incidents' && <IncidentsView {...props} />}
         {page === 'artifacts' && <ArtifactsView {...props} />}
         {page === 'settings' && <SettingsView />}
@@ -224,13 +222,15 @@ function ContextPanel({ selection }: { selection: Selection }) {
       <h3>{t('context.title')}</h3>
       {state && (
         <>
-          <h4>{t('context.gates')}</h4>
+          <h4>{t('context.stages')}</h4>
           <ul className="list compact">
-            {state.gates.map((g) => (
-              <li key={g.gate} title={g.reasons.map(message).join('\n')}>
-                <span className={g.released ? 'pill ok' : 'pill'}>{g.gate}</span> {t(`status.${g.status}` as Key)}
-              </li>
-            ))}
+            <li>
+              {state.stages.map((s) => (
+                <span key={s.id} className={s.entered ? 'pill ok' : 'pill'} title={s.entered ? t('overview.entered') : t('overview.notEntered')}>
+                  {s.id}
+                </span>
+              ))}
+            </li>
           </ul>
         </>
       )}

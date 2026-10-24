@@ -4,10 +4,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.1 |
-| 日期 | 2026-10-21 |
-| 对应代码 | 提交 `9cc76a0`（M4），以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
-| 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.6、[微内核架构](<../Microkernel Architecture.zh.md>) v0.10 |
+| 文档版本 | v0.2 |
+| 日期 | 2026-10-24 |
+| 对应代码 | R0（负责人决定，2026-10-24）：取消审批门、豁免、导出与 `packager`，流程为 S0–S7；在此之前的提交 `9434f86`：M4 的 `9cc76a0`，以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
+| 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.7、[微内核架构](<../Microkernel Architecture.zh.md>) v0.11 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
 
@@ -30,11 +30,11 @@
 | M1c 智能体与安全 | `427d16e` | 完成；智能体只在内核内运行 | `tests/agents.spec.ts`、`tests/mcp.spec.ts`、`tests/providers.spec.ts` |
 | M1d Web UI 部分 | `851590d` | 只有浏览器 UI；没有 Tauri 外壳、安装器和首次启动引导 | `tests/web-ui.spec.ts`、`tests/ui-latency.spec.ts` |
 | M1.5 存储标定 | `3691b26` | 标准单元 ROM 与 SRAM 512×8 完成；OpenRAM 的结论为不可用 | `tests/calibration.spec.ts`（需 EDA 镜像） |
-| M2 模型到规格（S1–S3，G0–G2） | `9284a99` | 在 stories260K 与占位模型上完成；没有训练好的参考模型 | `tests/m2-flow.spec.ts` |
-| M3 RTL 与验证（S4–S5，G3） | `3842361` | 在占位模型上完成 | `tests/m3-flow.spec.ts`（需 EDA 镜像） |
-| M4 物理实现、签核、流片包（S6–S8，G4） | `9cc76a0` | 在占位模型上完成，芯片 1.2×2 mm | `tests/m4-flow.spec.ts`（须显式开启，实测 39 分钟） |
-| M5 迁移到流片工艺 | — | 只有评估与失效机制（FR-MIG）；没有 NDA PDK | `tests/m4-kernel.spec.ts`、`plugins/estimator/tests/test_migration.py` |
-| M6 回片测试（S9） | — | 未开始 | — |
+| M2 模型到规格（S1–S3） | `9284a99` | 在 stories260K 与占位模型上完成；没有训练好的参考模型 | `tests/m2-flow.spec.ts` |
+| M3 RTL 与验证（S4–S5） | `3842361` | 在占位模型上完成 | `tests/m3-flow.spec.ts`（需 EDA 镜像） |
+| M4 物理实现与签核（S6–S7） | `9cc76a0` | 在占位模型上完成，芯片 1.2×2 mm；当时的 S8 流片包已随 R0 删除 | `tests/m4-flow.spec.ts`（须显式开启，实测 39 分钟） |
+| M5 迁移到流片工艺、M6 回片测试 | — | 已删除（负责人决定，2026-10-24：不流片）。迁移影响评估（FR-MIG）仍可用 | `tests/m4-kernel.spec.ts`、`plugins/estimator/tests/test_migration.py` |
+| R0 取消审批门与豁免 | 本提交 | 完成：没有审批门、快照、审批、放行、豁免与导出；删除 `packager`；需求 v0.7、架构 v0.11 | `tests/workflow.spec.ts`、`tests/m4-kernel.spec.ts`、各流程测试 |
 
 因此 M1 整体**未**通过验收：缺少 AC-M1-01（安装器）和桌面外壳，见 §7。
 
@@ -45,7 +45,7 @@
 | 内核守护进程 | 启动、单实例锁、恢复、有序关闭 | `harnessd serve`、[kernel.ts](../packages/kernel/src/kernel.ts) `Kernel.start` |
 | K1 事件库 | 追加式 SQLite 日志、哈希链、投影、重放 | [events/store.ts](../packages/kernel/src/events/store.ts) |
 | K2 产物库 | 内容寻址、只读对象、血缘、标签传播 | [artifacts/store.ts](../packages/kernel/src/artifacts/store.ts) |
-| K3/K6/K7 工作流 | 项目、槽位、分支、阶段、判定、快照、审批、条件、豁免、放行、导出、迁移 | [workflow/engine.ts](../packages/kernel/src/workflow/engine.ts) |
+| K3/K6 工作流 | 项目、槽位、分支、阶段（只有准入检查）、判定、迁移记录 | [workflow/engine.ts](../packages/kernel/src/workflow/engine.ts) |
 | K4 调度器 | 持久队列、进程与容器执行、超时、取消、重试、暂停 | [runs/scheduler.ts](../packages/kernel/src/runs/scheduler.ts) |
 | K5 API 策略 | 区分所有者令牌与外部令牌；方法白名单 | [security/policy.ts](../packages/kernel/src/security/policy.ts) |
 | K8 出口网关 | 标签、目的地上限、NDA 指纹、去密规则、审计 | [security/egress.ts](../packages/kernel/src/security/egress.ts) |
@@ -56,21 +56,20 @@
 | IF-2 插件协议 | stdio 上的 JSON-RPC 2.0，每行一条消息 | [plugins/process.ts](../packages/kernel/src/plugins/process.ts)、两个 SDK |
 | IF-3 工具容器 | Podman，无网络，输入与插件目录只读 | `Scheduler.containerCommand` |
 | CLI 与 MCP | `llmchip` 命令、通用 `call`、stdio 上的 MCP | [cli/src/main.ts](../packages/cli/src/main.ts)、[cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
-| Web UI | 十个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S9 路径、结果、检查和审批门 | [apps/web/src](../apps/web/src) |
-| 领域流程 | 内置插件跑通 S0–S8 与 G0–G4（见 §2.4 的表） | [plugins/](../plugins) |
+| Web UI | 九个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S7 路径、结果和检查 | [apps/web/src](../apps/web/src) |
+| 领域流程 | 内置插件跑通 S0–S7，每个阶段由其检查判定（见 §2.4 的表） | [plugins/](../plugins) |
 | 真实模型导入与图还原 | 按本机路径导入已下载的模型目录（safetensors + config.json + tokenizer.json，或 llama2.c），从文件头做张量普查并估算，还原计算图（Llama 家族：Llama、Mistral、SmolLM、Qwen2、Qwen3、llama2.c），执行为 L0，并与 transformers / run.c 移植逐项测试：权重逐位、结构参数、参数总量、每层中间结果、每个提示的 logits、top-1 与贪心生成、单 token 与长序列边界用例。项目自带的 llama2.c 权重（如占位模型）直接从产物导入。S1 页面可选择任一已导入模型或新路径，填写自定义提示，并展示每个测试项 | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
 ### 1.3 只有接口（已声明，无行为）
 
-- `PluginKind` 中的 `silicon-test`、`ui-panel`、`llm-provider` 和 `parser`（[kernel.schema.json](../packages/kernel-api/schemas/kernel.schema.json)）。没有插件声明它们。LLM 提供方是内核代码，不是插件。
-- [flow-default/flow.json](../plugins/flow-default/flow.json) 中的阶段 S9。它有入口审批门（G4），但没有处理器，也没有检查。
-- 默认流程中的检查 `sdf.timing` 和 `external.signoff`。它们已定义，但没有审批门使用。`sdf.timing` 要求能力 `sdf-timing-sim`，而没有插件声明该能力，所以它只会判为 `indeterminate`。
+- `PluginKind` 中的 `ui-panel`、`llm-provider` 和 `parser`（[kernel.schema.json](../packages/kernel-api/schemas/kernel.schema.json)）。没有插件声明它们。LLM 提供方是内核代码，不是插件。
+- 默认流程中的检查 `sdf.timing`。它已定义，但没有流程步骤使用它。它要求能力 `sdf-timing-sim`，而没有插件声明该能力，所以它只会判为 `indeterminate`。
 - 验证报告（sim-verilator `verify`）中的 `formal` 字段，始终为空（FR-VER-07）。
 - 内核内 Cordis 插件的宿主 `PluginHost`（[plugin-host.ts](../packages/kernel/src/plugin-host.ts)）。它能工作，也有测试，但只有 `KernelOptions.plugins` 会向它加载插件，而只有测试会传入这个选项。没有产品插件在内核内运行（见 §7.3 的 C5）。
 
 ### 1.4 未实现
 
-Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自动拉取镜像。此外还有：CHARTER.md 生成、示例项目、项目导出与导入、项目 git 工作目录（架构 §6.3）、S9、模型训练（FR-QNT-05）、Llama 家族以外和 GGUF 的图还原、`images/` 和 `docs/adr/`。§7.1 按需求编号列出。
+Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自动拉取镜像。此外还有：CHARTER.md 生成、示例项目、项目导出与导入、项目 git 工作目录（架构 §6.3）、模型训练（FR-QNT-05，P2）、Llama 家族以外和 GGUF 的图还原、`images/` 和 `docs/adr/`。§7.1 按需求编号列出。
 
 ---
 
@@ -129,7 +128,7 @@ Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自
 | 9 | 事故 | `Incidents`（[security/incidents.ts](../packages/kernel/src/security/incidents.ts)） | `incidents` 投影 | 事件 |
 | 10 | K8 网关 | `EgressGateway` | 指纹与去密规则投影 | 事件、产物、事故 |
 | 11 | K5 策略 | `Policy` | 外部方法白名单 | 事故、网关 |
-| 12 | K3/K6/K7 | `Workflow` | 流程包、检查定义、`workflow` 投影 | 事件、产物、注册表、调度器、事故 |
+| 12 | K3/K6 | `Workflow` | 流程包、检查定义、`workflow` 投影 | 事件、产物、注册表、调度器、事故 |
 | 13 | 智能体运行时 | `AgentRuntime` | `agents` 投影、活动会话 | 事件、产物、调度器、工作流、网关、事故、日志、密钥（不经过 API 策略） |
 | 14 | K9 内核内宿主 | `PluginHost` | Cordis 根上下文 | 事件、产物、日志 |
 | 15 | IF-1 服务，在 `Kernel.start` 中创建 | `KernelServer`（[server.ts](../packages/kernel/src/server.ts)） | 连接；`run/harnessd.json` 由 `Kernel.start` 写入 | 策略、处理函数、事件（订阅）、产物（HTTP） |
@@ -153,20 +152,19 @@ plugins/                   额外的插件搜索路径
 
 ### 2.4 内置插件
 
-在全新主目录上，`plugins.list` 列出以下插件。阶段与审批门来自 `flow-default`（流程版本 0.10.0，新增虚拟芯片检查 `vchip.l3` 与 `vchip.conformance`；行覆盖率开始计入全部覆盖的文件，`rtl.equivalence` 因此升到版本 2；`arch.spec` 在设了周期目标时判定它，因此升到版本 3）。
+在全新主目录上，`plugins.list` 列出以下插件。阶段与检查来自 `flow-default`（流程版本 0.11.0：R0 删除审批门、阶段 S8 与 S9、检查 `package.integrity` 与 `external.signoff`，以及检查定义中的 `waiver` 字段；`accuracy.budget` 与 `phy.drc` 原先允许豁免，因此升到版本 2。0.10.0 新增虚拟芯片检查 `vchip.l3` 与 `vchip.conformance`；行覆盖率开始计入全部覆盖的文件，`rtl.equivalence` 因此升到版本 2；`arch.spec` 在设了周期目标时判定它，因此升到版本 3）。
 
 | 插件 | 运行方式 | 处理器 | 用于 | 单元测试 |
 |---|---|---|---|---|
-| `flow-default` | data | 流程包：S0–S9、G0–G4、22 项检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
-| `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`package-gf180mcu`；`signoff-gf180mcu` | S0、S3、S6–S8 | 经由估算器与流程测试 |
-| `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0/G0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
+| `flow-default` | data | 流程包：S0–S7、20 项检查、阶段准入检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
+| `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`signoff-gf180mcu` | S0、S3、S6–S7 | 经由估算器与流程测试 |
+| `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
-| `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2/G1 | `test_numeric.py`、`test_graph_l2.py` |
-| `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3/G2 | `test_arch.py`、`test_spatial.py` |
+| `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2 | `test_numeric.py`、`test_graph_l2.py` |
+| `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3 | `test_arch.py`、`test_spatial.py` |
 | `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py`、`test_spatial.py` |
-| `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5/G3、S7、Playground | `test_simlib.py` |
+| `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5、S7、Playground | `test_simlib.py` |
 | `eda-gf180` | container | `calibrate`、`constraints`、`implement`、`drc`、`lvs`、`sta` | M1.5、S6、S7 | `test_calibrate.py`、`test_physical.py` |
-| `packager` | process（Python） | `build`、`check`、`import_external` | S8/G4 | `test_packager.py` |
 | `vchip` | process（Python；仿真器在 Podman 中启动） | `bench`、`conform` | S2 之后（L2）、S4 之后（RTL）；Web UI 页面“虚拟芯片” | `test_plugin.py` |
 
 仅测试用的插件在 [tests/fixtures/plugins](../tests/fixtures/plugins)：
@@ -178,15 +176,15 @@ plugins/                   额外的插件搜索路径
 各领域插件产出什么：
 
 - **estimator**：可行性、面积、成本与性能估算（FR-EST），给出下限/典型/上限值、每项的来源与置信度，以及缺失的参数。`check_views` 按阶段报告已标定存储实现具备哪些集成视图。`migrate` 依据设计对工艺能力的依赖评估迁移影响（FR-MIG）。
-- **process-library**：工艺档案（含迁移所需的工艺数据）、实现库、GF180 封装模板与签核规则。每个数值都记录来源与置信度，经验值在标定前始终是经验值。
-- **flow-default**：阶段 S0–S9，审批门 G0–G4 及其成员槽位和检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。
+- **process-library**：工艺档案（含迁移所需的工艺数据）、实现库与 GF180 签核规则。每个数值都记录来源与置信度，经验值在标定前始终是经验值。
+- **flow-default**：阶段 S0–S7 及其检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。没有审批门（负责人决定，2026-10-24）。
 - **model-llama**：
   - 模型导入与图还原（见下文）。
-  - 把 llama2.c 检查点与分词器导入为 S2–S8 使用的 llama2.c 模型 IR。
+  - 把 llama2.c 检查点与分词器导入为 S2–S7 使用的 llama2.c 模型 IR。
   - 生成占位模型：采用某个规划模型的结构，固定种子，未训练，附带 `evalset-proxy`。
   - 提供 L0 FP32 参考，即 `run.c` 的 NumPy 移植。它与 `plugins/model-llama/upstream/` 中随仓库提供并编译的 `run.c` 对照检查。
-- **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（G1 证据），并附带评估集。舍入（`half-up`、`half-even`、`truncate`）、溢出处理（`saturate`、`wrap`）和累加器位宽（已证明不溢出的位宽，或更窄的位宽）是规格中的结构化字段，统一定义在 [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)；默认值得到的 L2 与引入这些选项之前逐位相同。`quantize_graph` / `evaluate_graph` 对任何已还原的计算图做同样的事（[graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py)，规格格式 `llmchip-numeric-graph-spec/1`）：这是对向量引擎无法实现的模型的分析，默认逐层确定小数位、残差流 24 位，由 `numeric.accuracy` 判定。在 llama2.c 计算图上，它与芯片 L2 逐位相同。
-- **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（G2 证据）。它的速度不是公式：它编译出引擎的微码（`Compiled`），再用 [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py) 数周期。这是核心状态机和存储端口的逐状态模型，其忙碌周期与 RTL 仿真逐步相等（[performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py)；`verify_spec` 会重新计算，所以芯片规格不能声称另一个速度）。芯片规格的微架构选项有：通道数、`memoryInterface`（`spi`，或 `sqi`：四根双向线的四线 SPI）、`operandBuffers`（`none`；`attention`：注意力头的 q 和输出累加器，用循环移位寄存器实现；`all`：再加一个供矩阵乘和 RMSNorm 用的向量缓冲）。`explore` 计算所有组合（精确周期、估算面积、能否放下、帕累托前沿），也能按形状分析导入模型的计算图数值规格。
+- **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（S2 的证据），并附带评估集。舍入（`half-up`、`half-even`、`truncate`）、溢出处理（`saturate`、`wrap`）和累加器位宽（已证明不溢出的位宽，或更窄的位宽）是规格中的结构化字段，统一定义在 [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)；默认值得到的 L2 与引入这些选项之前逐位相同。`quantize_graph` / `evaluate_graph` 对任何已还原的计算图做同样的事（[graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py)，规格格式 `llmchip-numeric-graph-spec/1`）：这是对向量引擎无法实现的模型的分析，默认逐层确定小数位、残差流 24 位，由 `numeric.accuracy` 判定。在 llama2.c 计算图上，它与芯片 L2 逐位相同。
+- **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（S3 的检查 `arch.spec`）。它的速度不是公式：它编译出引擎的微码（`Compiled`），再用 [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py) 数周期。这是核心状态机和存储端口的逐状态模型，其忙碌周期与 RTL 仿真逐步相等（[performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py)；`verify_spec` 会重新计算，所以芯片规格不能声称另一个速度）。芯片规格的微架构选项有：通道数、`memoryInterface`（`spi`，或 `sqi`：四根双向线的四线 SPI）、`operandBuffers`（`none`；`attention`：注意力头的 q 和输出累加器，用循环移位寄存器实现；`all`：再加一个供矩阵乘和 RMSNorm 用的向量缓冲）。`explore` 计算所有组合（精确周期、估算面积、能否放下、帕累托前沿），也能按形状分析导入模型的计算图数值规格。
 - **rtl-taalas**：把数值规格编译成微码化向量引擎，产出一个确定性的 `rtl.bundle`。其中包含：
   - Verilog 核心（数据放在片外 SPI 或四线 SPI SRAM，可选片上操作数缓冲），以及 SPI 主机接口；
   - 生成为 case 表的 ROM，以及微码；
@@ -214,8 +212,7 @@ plugins/                   额外的插件搜索路径
   - 由芯片规格生成约束；
   - 带焊盘环的物理实现（LibreLane Chip 流程）；
   - DRC、LVS，以及含约束完整性检查的 9 角 STA，每项检查只在它所判定的产物上运行。
-- **packager**：按工艺模板生成流片包，检查其完整性，并导入与 GDS 绑定的外部签核报告（FR-PKG、FR-SGN-06）。
-- **vchip**（负责人草案设计的 L4；[入口](../plugins/vchip/src/llmchip_vchip_plugin/__main__.py)）：在项目产物上运行虚拟芯片测试环境。每次运行在运行工作区里构建芯片（[build.py](../python/llmchip-vchip/src/llmchip_vchip/build.py) 的 `chips_from_artifacts`）：L2 黄金芯片来自 `numeric.spec` 与 `numeric.weights`；给了 `model.ir` 时构建浮点参照芯片（模型 IR 写回 llama2.c 检查点，`save_llama2c`）；给了 `rtl.bundle` 时构建 RTL 芯片，它就是被测芯片。bundle 必须正是由这份规格和这些权重生成的（看它的 `source` 哈希），且只有 `taalas-spatial/1` 能在引脚级 testbench 下运行。`chip.spec`（S3）必须由同一份规格和权重设计而来，有 RTL 时还必须描述同一个设计（架构、除法器数）；这时它的周期与时钟就是设计值。没有芯片规格时，周期取自 bundle，时钟取参数 `clockMHz` 或 8 MHz；指标写明来源（`design_cycles_source`、`clock_source`）。`bench` 使用 `eval.set` 或手输的 `prompts`；`conform` 运行 T-01–T-19（`quick` 使 T-18/T-19 为 `not_run`），并报告其验收部分所用的标准（`acceptance_tok_s_min`、`acceptance_bit_exact`、`acceptance_max_tokens`）。报告不含判定，由检查判定指标。`vchip.l3`：完整性为 RTL、≥ 20 个提示词、≥ 64 个 token、已与黄金芯片对比、设计周期与时钟取自芯片规格；判据为无错误、逐位一致、测量可信、周期等于设计、≥ 1000 tok/s。`vchip.conformance`：完整性为没有未运行的检查项、≥ 20 个提示词，RTL 芯片还要求验收部分按 L3 标准、以芯片规格的时钟进行；判据为没有失败的检查项。因此，运行不能靠自选时钟或删减提示词通过。运行测不到的指标不出现，需要它的检查因此判为 indeterminate。这两项检查不属于任何审批门（流程不变）；它们的判定只对该次运行的输入构成证据。被取消的运行（SIGTERM）在退出前结束芯片的仿真进程并移除其容器。
+- **vchip**（负责人草案设计的 L4；[入口](../plugins/vchip/src/llmchip_vchip_plugin/__main__.py)）：在项目产物上运行虚拟芯片测试环境。每次运行在运行工作区里构建芯片（[build.py](../python/llmchip-vchip/src/llmchip_vchip/build.py) 的 `chips_from_artifacts`）：L2 黄金芯片来自 `numeric.spec` 与 `numeric.weights`；给了 `model.ir` 时构建浮点参照芯片（模型 IR 写回 llama2.c 检查点，`save_llama2c`）；给了 `rtl.bundle` 时构建 RTL 芯片，它就是被测芯片。bundle 必须正是由这份规格和这些权重生成的（看它的 `source` 哈希），且只有 `taalas-spatial/1` 能在引脚级 testbench 下运行。`chip.spec`（S3）必须由同一份规格和权重设计而来，有 RTL 时还必须描述同一个设计（架构、除法器数）；这时它的周期与时钟就是设计值。没有芯片规格时，周期取自 bundle，时钟取参数 `clockMHz` 或 8 MHz；指标写明来源（`design_cycles_source`、`clock_source`）。`bench` 使用 `eval.set` 或手输的 `prompts`；`conform` 运行 T-01–T-19（`quick` 使 T-18/T-19 为 `not_run`），并报告其验收部分所用的标准（`acceptance_tok_s_min`、`acceptance_bit_exact`、`acceptance_max_tokens`）。报告不含判定，由检查判定指标。`vchip.l3`：完整性为 RTL、≥ 20 个提示词、≥ 64 个 token、已与黄金芯片对比、设计周期与时钟取自芯片规格；判据为无错误、逐位一致、测量可信、周期等于设计、≥ 1000 tok/s。`vchip.conformance`：完整性为没有未运行的检查项、≥ 20 个提示词，RTL 芯片还要求验收部分按 L3 标准、以芯片规格的时钟进行；判据为没有失败的检查项。因此，运行不能靠自选时钟或删减提示词通过。运行测不到的指标不出现，需要它的检查因此判为 indeterminate。这两项检查不是任何阶段的准入检查（流程不变）；它们的判定只对该次运行的输入构成证据。被取消的运行（SIGTERM）在退出前结束芯片的仿真进程并移除其容器。
 
 ---
 
@@ -237,7 +234,7 @@ yarn llmchip events list                     # 记录了什么
 1. 构造函数获取 `run/harnessd.lock`，加载配置与密钥，打开事件库。它校验最后 `events.verifyTailOnStart`（1000）条哈希；哈希链断裂则拒绝启动（`EVENT_LOG_CORRUPT`）。然后清空 `store/tmp/`。
 2. 事件 1 为 `kernel.started`。
 3. `PluginRegistry.scan` 依次搜索 `plugins/`（`plugins.bundled` 为真时搜索内置插件）、`<home>/plugins`、`plugins.searchPaths`。配置分层只做浅合并，所以 `--plugins` 会替换 `config.json` 中的 `searchPaths`。它按 `PluginManifest` 和 `kernelApi` 范围校验每个 `llmchip-plugin.json`，并把每个 `data` 文件导入为产物：事件 2–10 都是 `artifact.created`，执行者都是 `plugin:*`。有问题的插件被拒绝并记录，但不中断启动。
-4. `Workflow.loadFlows` 读取每个 `flow.pack` 产物，汇总检查定义。对同一检查 id 有冲突定义的流程包会被拒绝，记为 `FLOW_INVALID` 问题。
+4. `Workflow.loadFlows` 读取每个 `flow.pack` 产物，汇总检查定义。对同一检查 id 有冲突定义的流程包，以及不符合 schema 的流程包（例如仍声明审批门），都会被拒绝，记为 `FLOW_INVALID` 问题并写入内核日志。项目创建时所用的流程包按原样保存在产物库中：读取 R0 之前的项目时，其中只属于历史的字段（`gates`、阶段入口的 `gates`、检查的 `waiver`）被忽略。
 5. `Scheduler.recover` 把仍记为 `running` 的运行结束为 `interrupted`。它杀掉该运行遗留的进程组（仅当 `/proc/<pid>/environ` 含 `LLMCHIP_RUN=<id>` 时）及其容器，还有剩余次数时就重试，然后清空 `runs/`。接着加载 `KernelOptions.plugins` 中的内核内插件（只有测试会传入）。
 6. `KernelServer.listen` 监听 `127.0.0.1:<随机端口>`，然后写入 `run/harnessd.json`，内含 URL 与两个新令牌。最后调用 `Scheduler.pump`。
 
@@ -293,41 +290,37 @@ yarn llmchip events list                     # 记录了什么
 | 超时或 `runs.cancel` | `Scheduler.abort` | `timed_out` / `cancelled` | 发送 `cancel` 通知和 SIGTERM，`cancelGraceMs` 后 SIGKILL，并执行 `podman kill` |
 | 运行中内核被杀 | 下一次 `Kernel.start` | `interrupted`；仅当 `maxAttempts` > 1（默认为 1）时重试 | `Scheduler.recover`（AC-M1-04） |
 
-### 3.2 路径 B：从运行到审批门放行（S0 → G0 → S1）
+### 3.2 路径 B：从运行到判定与阶段（S0 → S1）
 
-单独的估算运行还不是证据。判定只有在其运行的输入全部属于审批门已绑定的成员时，才算作该审批门的证据。以下命令按顺序实际执行过：
+没有审批门（负责人决定，2026-10-24）。判定绑定其运行的输入哈希：它只是这些产物的证据。阶段只有准入检查（`entry.checks`）会阻止进入；检查失败不锁住流程，但失败一直记录在案，直到原因改正、重新运行并通过。以下命令于 2026-10-24 在全新主目录上按顺序实际执行过：
 
 ```sh
-yarn llmchip project create chip --title demo                    # project.created（流程 "default"）
+yarn llmchip project create chip --title demo                    # created project chip（流程 "default"）
 yarn llmchip artifact put req.json --type estimate.request --media-type application/json
 yarn llmchip artifact put charter.md --type project.charter
 yarn llmchip project bind chip charter <hash>                    # 另有 estimate-request、process-profile、impl-library
-yarn llmchip stage enter chip S1                                 # STAGE_ENTRY_BLOCKED: needs released gates: G0
 yarn llmchip run start estimator estimate --input request=<req> --input profile=<p> --input library=<l> --wait
-yarn llmchip verdict evaluate estimate.feasibility <run> --project chip   # pass
-yarn llmchip gate snapshot chip G0                               # 4 个成员、1 条证据、无缺失
-yarn llmchip call approvals.decide '{"project":"chip","gate":"G0","decision":"approved"}'
-yarn llmchip gate release chip G0                                # approved (released)
-yarn llmchip stage enter chip S1                                 # stage.entered
-yarn llmchip project bind chip charter <new hash>                # approval.invalidated（由 kernel:workflow 写入）
-yarn llmchip gate release chip G0                                # invalidated；再次进入 S2 被阻止
+yarn llmchip verdict evaluate estimate.feasibility <run> --project chip   # estimate.feasibility: pass
+yarn llmchip stage enter chip S1                                 # entered stage S1
+yarn llmchip stage enter chip S2                                 # entered stage S2
+yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown method gates.release
 ```
 
 [workflow/engine.ts](../packages/kernel/src/workflow/engine.ts) 内部发生了什么：
 
 - **`Workflow.evaluate`**（K6）先确认运行属于检查所指定的插件和处理器，再由 `judge` 按顺序应用检查。
   - 判 `indeterminate` 的情形：执行状态不被接受；解析不是 `complete`；`requiredCapability` 未认证；`completeness` 条件不成立；缺少指标。
-  - `criteria` 不满足判 `fail`。若存在检查所允许种类的适用豁免，`fail` 改为 `waived`。
+  - `criteria` 不满足判 `fail`。没有豁免：失败就是失败。
   - 判定的 `subjects` 是运行的输入哈希。引擎追加 `verdict.recorded`。
   - `fail` 或 `indeterminate` 会打开 `check_failed` 事故；运行报告了 `divergence_*` 指标时，事故会带上它们。
   - 若旧版本检查未通过、新版本检查却通过，会打开 `standard_lowered` 事故（AC-M1-13）。
-- **`Workflow.snapshot`**（K7）包含两部分。成员是审批门已绑定的槽位，其哈希即快照哈希。证据是每项审批门检查的最新判定，且该判定的 subjects 非空并全部落在成员之内。已确认的迁移涉及该审批门时，迁移之前记录的判定不再计入。
-- **`Workflow.decide`** 只允许人类调用。它要求快照完整；决定不是 `rejected` 时，还要求每项审批门检查都已通过或已豁免。审批与快照哈希和证据哈希绑定。
-- **`Workflow.release`** 是唯一的放行检查，用于阶段进入与导出。最新审批必须与当前快照哈希一致，未被作废，不是拒绝，且所有条件都已关闭。
-- **`Workflow.bind`** 追加 `project.slot_bound`，并在同一事务中，对快照发生变化的每个审批门追加 `approval.invalidated`。`hardConstraintSlots` 中的槽位只能由人类绑定；其他人绑定会打开 `hard_constraint_change` 事故。
-- **`Workflow.enterStage`** 要求每个入口审批门都已放行，并且每项入口检查（`{check, slot}`）在已绑定产物上的最新判定为通过。否则以 `STAGE_ENTRY_BLOCKED` 失败并给出原因，包括 `views.<stage>.missing` 指标（FR-PHY-08）。
+- **`Workflow.bind`** 追加 `project.slot_bound`。`hardConstraintSlots` 中的槽位只能由人类绑定；其他人绑定会打开 `hard_constraint_change` 事故。
+- **`Workflow.enterStage`** 要求每项入口检查（`{check, slot}`）在已绑定产物上的最新判定为通过。否则以 `STAGE_ENTRY_BLOCKED` 失败并给出原因，包括 `views.<stage>.missing` 指标（FR-PHY-08）。
+- **`Workflow.applyMigration`** 记录已确认的迁移评估与重新开始的阶段（`migration.applied`）；从 S3 或更早重新开始须由人类确认（FR-MIG-04）。
 
-`tests/flow-helpers.ts` 的 `throughG2` 和 `throughG3Proxy` 用真实插件把同一路径走到 G2 和 G3。`tests/m4-flow.spec.ts` 再继续到 G4 导出。
+旧事件日志中的 `approval.*`、`waiver.recorded` 与 `package.exported` 仍可读取并校验哈希链：这些事件种类只作为历史保留在 schema 中，没有写入者；`workflow` 投影（版本 3）忽略它们。判定结果 `waived` 与 `VerdictRecord.waiver` 同样只出现在历史记录中。
+
+`tests/flow-helpers.ts` 的 `throughS3` 和 `throughS5Proxy` 用真实插件把同一路径走到 S3 和 S5。`tests/m4-flow.spec.ts` 再继续到 S7，并从 GDS 追溯到模型权重。
 
 ---
 
@@ -346,7 +339,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 | 上传（`PUT /v1/artifacts`） | `KernelServer`，仅限所有者令牌 | — | 外部令牌被拒绝并记事故 |
 | 运行工作区 `runs/<id>/` | `Scheduler.execute` 创建并删除 | 插件（`in/` 只读） | 每次运行后删除；启动时清空整个 `runs/` |
 | 插件进程与容器 | `PluginProcess`（独立进程组）、`podman run --rm --name=llmchip-run-<id>` | — | 结束、取消、超时或内核停止时杀掉；遗留进程在下次启动时杀掉 |
-| 判定、审批、豁免、约束、项目 | `Workflow` | API | 都是事件；审批只会被作废，从不删除 |
+| 判定、约束、项目、迁移记录 | `Workflow` | API | 都是事件；判定从不删除，失败的判定一直保留 |
 | 事故 | `Incidents.open` / `close`，由 `Policy`、`Workflow`、`EgressGateway`、`AgentRuntime` 调用 | UI、API | 关闭时必须给出原因和措施（FR-AGT-27） |
 | 出口决定 | `EgressGateway.check`，在每次 LLM 请求和每次 MCP 下载之前 | 审计 | 每个请求一条 `egress.decided` |
 | 切换到其他提供方时的接手包 | `AgentRuntime.switchProvider` 自行比较接手包的标签与提供方上限 | API | 接手包存为 `agent.handoff`；切换被拒时打开 `handoff_blocked` 事故，不产生 `egress.decided` |
@@ -361,7 +354,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 - ArtifactStore：`artifact.*`
 - SecretStore：`secret.changed`
 - PluginHost：`plugin.*`
-- Workflow：`verdict.*`、`project.*`、`stage.*`、`approval.*`、`waiver.*`、`constraint.*`、`migration.*`、`package.*`
+- Workflow：`verdict.*`、`project.*`、`stage.*`、`constraint.*`、`migration.*`（`approval.*`、`waiver.recorded`、`package.exported` 只是历史，没有写入者）
 - Incidents：`incident.*`
 - EgressGateway：`egress.*`、`declass.*`
 - AgentRuntime：`task.*`、`agent.step`、`changeset.*`
@@ -415,24 +408,23 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 已手工验证：先运行 `yarn harnessd serve --plugins tests/fixtures/plugins`，再依次用 `violations` 为 0、`violations` 为 3、`truncate` 执行 `run start stub-tool report --input design=<hash>`。`verdict evaluate stub.drc <run>` 分别得到 `pass`、`fail`（`CRITERION_FAILED`）和 `indeterminate`（`PARSE_INCOMPLETE`）。
 
-### 5.2 检查、审批门成员或阶段准入检查
+### 5.2 检查或阶段准入检查
 
-示例：阶段准入检查 `impl.views.S4`。它在 [flow-default/flow.json](../plugins/flow-default/flow.json) 中定义，判定 `estimator/check_views` 的运行，并以 `entry.checks: [{check: "impl.views.S4", slot: "storage-impl"}]` 挂在阶段 S4 上。另一个示例是 G0 检查 `estimate.feasibility`。
+示例：阶段准入检查 `impl.views.S4`。它在 [flow-default/flow.json](../plugins/flow-default/flow.json) 中定义，判定 `estimator/check_views` 的运行，并以 `entry.checks: [{check: "impl.views.S4", slot: "storage-impl"}]` 挂在阶段 S4 上。另一个示例是 S0 的检查 `estimate.feasibility`。
 
 1. 让处理器报告检查需要的指标，不做任何判定。
 2. 在流程包的 `checks` 中加入检查：
    - `id`、`version`、`plugin`、`handler`。
    - `completeness`：结果有意义的前提，不满足即判 `indeterminate`。
    - `criteria`：决定通过或失败。带 `when`（对另一个指标的条件）的判据只在条件成立时适用；条件不成立时，判定记录 `CRITERION_NOT_APPLIED`；条件指标缺失时，判定为 `indeterminate`。处理器要显式报告条件（示例：`arch.spec` 在 `cycles_target_set` 为真时判定 `cycles_within_target`；`test-flow` 中的 `stub.limit`）。
-   - `waiver`：`none`、`risk_acceptance` 或 `foundry_waiver`。
    - 可选的 `requiredCapability`、`requireParse` 和 `acceptExitCodes`。
 
    标准一旦改变就修改 `version`，这是检测降低标准的依据（AC-M1-13）。
-3. 在审批门的 `checks` 中引用它，或在阶段的 `entry.checks` 中引用。前者要求审批门 `members` 槽位中的产物就是运行的输入，否则判定永远不会算作该审批门的证据。
-4. 多个流程包可以定义同一检查 id，但所有定义必须完全相同。否则冲突的流程包不会被加载，`plugins list` 会显示一个指明该检查的 `FLOW_INVALID` 问题。
+3. 若它要阻止进入某个阶段，就在该阶段的 `entry.checks` 中引用它，并指定判定所针对的槽位；运行的输入必须就是绑定在该槽位的产物，否则判定不针对它。没有审批门，也没有豁免：检查失败就一直是失败，直到改正后重新运行。
+4. 多个流程包可以定义同一检查 id，但所有定义必须完全相同。否则冲突的流程包不会被加载，内核日志会记录一个指明该检查的 `FLOW_INVALID` 问题（`plugins list` 不显示流程包的问题）。
 5. 测试：
-   - [tests/workflow.spec.ts](../tests/workflow.spec.ts) 用 `test-flow` 验证判定语义。
-   - [tests/estimator.spec.ts](../tests/estimator.spec.ts) 覆盖缺数据时的 G0 检查。
+   - [tests/workflow.spec.ts](../tests/workflow.spec.ts) 用 `test-flow` 验证判定语义，以及失败不会被豁免。
+   - [tests/estimator.spec.ts](../tests/estimator.spec.ts) 覆盖缺数据时的 S0 检查。
    - [tests/calibration.spec.ts](../tests/calibration.spec.ts) 覆盖按视图的阶段准入（需 EDA 镜像）。
 
 新的流程包是带 `flow.pack` 数据文件的 `data` 插件，参见 [test-flow](../tests/fixtures/plugins/test-flow)。项目用 `projects.create {flow}` 选择流程包。
@@ -542,7 +534,7 @@ yarn llmchip gate release chip G0                                # invalidated�
 
 示例：S6 的“核心区面积”和“布局布线后时序”读取 `eda-gf180/implement` 的 `core_area_um2` 和 `flow_setup_violations`。
 
-阶段还可以有详细演示视图，从卡片上的“详细演示”按钮打开。把它写成 `views/steps/<阶段>.tsx`，并在 `Flow.tsx` 的 `DETAILS` 中注册；打开的详细视图记在 `selection.stage` 中，因此左侧栏会在选中的项目下列出它，返回栏（以及浏览器的后退按钮）能回到它，就像回到之前访问过的任何页面和产物一样。示例：[views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) 读取该阶段的 `estimate.report`，依次展示问题与回答、输入、面积与速度的计算、反推能放下的模型、检查与审批门，以及一个在项目之外重新运行估算器的表单。说明文字要由结构化字段生成，不要直接用插件的自由文本，这样两种语言读起来都自然。`tests/web-ui.spec.ts` 会以两种语言从流程页和左侧栏打开 S0、S1、S2 视图，并用返回栏返回。[views/steps/S2.tsx](../apps/web/src/views/steps/S2.tsx) 逐节解释数值规格，通过 `modelPipeline.ts` 的 `runScheme` 运行方案，对比所有评估过的方案，并用 `adoptScheme` 把芯片路径的方案设为正式规格（绑定 G1 的槽位、判定 `accuracy.budget`、运行 `infer`）。
+阶段还可以有详细演示视图，从卡片上的“详细演示”按钮打开。把它写成 `views/steps/<阶段>.tsx`，并在 `Flow.tsx` 的 `DETAILS` 中注册；打开的详细视图记在 `selection.stage` 中，因此左侧栏会在选中的项目下列出它，返回栏（以及浏览器的后退按钮）能回到它，就像回到之前访问过的任何页面和产物一样。示例：[views/steps/S0.tsx](../apps/web/src/views/steps/S0.tsx) 读取该阶段的 `estimate.report`，依次展示问题与回答、输入、面积与速度的计算、反推能放下的模型、检查结论，以及一个在项目之外重新运行估算器的表单。说明文字要由结构化字段生成，不要直接用插件的自由文本，这样两种语言读起来都自然。`tests/web-ui.spec.ts` 会以两种语言从流程页和左侧栏打开 S0、S1、S2 视图，并用返回栏返回。[views/steps/S2.tsx](../apps/web/src/views/steps/S2.tsx) 逐节解释数值规格，通过 `modelPipeline.ts` 的 `runScheme` 运行方案，对比所有评估过的方案，并用 `adoptScheme` 把芯片路径的方案设为正式规格（绑定 `numeric-spec` 与 `l2-weights` 槽位、判定 `accuracy.budget`、运行 `infer`）。
 
 ### 5.9 内核内系统插件（Cordis）
 
@@ -579,16 +571,16 @@ yarn llmchip gate release chip G0                                # invalidated�
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 158 passed、1 skipped，有 EDA 镜像时 4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 164 passed、1 skipped，有 EDA 镜像时 6 分 42 秒（2026-10-24，R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
-| `yarn test` | 全部 Vitest 用例（见下表） | 24 个文件通过、1 个跳过（m4-flow）；93 个测试通过、1 个跳过 |
-| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0，镜像齐全时约 12 分钟 |
-| `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S8、G4 与导出 | 见 §6.3 |
+| `yarn test` | 全部 Vitest 用例（见下表） | 29 个文件通过、1 个跳过（m4-flow）；103 个测试通过、1 个跳过（2026-10-24） |
+| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 6 分 42 秒、Vitest 732 秒 |
+| `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S7，以及从 GDS 到权重的血缘 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | 用测试环境测一颗芯片：在提示词集上生成，质量与速度，按芯片策略判定，写出运行目录 | stories260K 的数值（int8）芯片对照其参考芯片，20 个提示词生成到 64 token 上下文结束：下一 token 一致率 0.992，生成完全相同 0.65，困惑度 3.167（参考 3.159），11 秒（2026-10-22）。`vchip conform` 在 stories260K 的参考与数值芯片、tiny Qwen3 的参考芯片上均通过 |
 | 先 `yarn vchip new rtl --proxy --id spatial-5k`，再 `vchip conform` / `vchip bench spatial-5k` | 设计中的 L3：5K 占位模型的 `taalas-spatial/1` RTL 在引脚级 testbench 下运行，对照其 L2 黄金芯片与浮点参考芯片 | Verilator 构建 8 秒；`conform` T-01–T-19 全部通过（T-06 不适用），12.8 分钟，`--quick`（不含 T-18/T-19）约 2 分钟；`bench` 20 个提示词生成到 64 token 上下文结束：与 L2 逐位一致（token、logits、全部观测点），每个位置都是 1,327 周期/token，主机 753 周期，8 MHz 下 3,846 tok/s，测量可信，判定通过，10.6 分钟（2026-10-22） |
-| `yarn demo [--until G0..G4] [--arch spatial]` | 在运行中的内核上，把项目 `demo` 按完整流程的正向路径跑一遍，供“演示流程”页面展示 | S0–G4 全部通过并导出，2241 秒（约 37 分钟），容器配置 16 CPU / 12 GB |
+| `yarn demo [--until S0..S7] [--arch spatial]` | 在运行中的内核上，把项目 `demo` 按完整流程的正向路径跑一遍，到给定阶段为止，供“演示流程”页面展示 | R0 之前（含 S8 与审批）S0–G4 全部通过，2241 秒（约 37 分钟），容器配置 16 CPU / 12 GB；R0 之后尚未重新完整运行 |
 | `yarn demo --model PATH [--bits N] [--process ID]` | 从已下载的模型建立项目：S0（导入、普查、估算）与 S1（图还原、L0、对拍） | 普查、图还原、对拍检查全部通过：SmolLM2-135M 11 秒、Qwen3-0.6B 46 秒、DeepSeek-R1-Distill-Qwen-1.5B 89 秒、stories260K 1 秒；logit 最大相对误差 6.8e-6，贪心 token 完全一致；在 2.4 mm² 的 GF180 芯片上均不可行 |
 
 没有容器镜像时，`calibration`、`m3-flow`、`ui-latency`、`containers` 会可见地跳过。这时 `yarn verify` 快得多，但证明的东西也少得多。跳过不等于通过（DP-10），报告时要说明跳过了哪些测试。
@@ -606,12 +598,12 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/kernel-api.spec.ts` | 令牌、参数校验、上传、无缝订阅、日志中无密钥、每个主目录只有一个内核 | IF-1 | 总是 |
 | `tests/runs.spec.ts` | 入队检查、崩溃、无效输出、超时、取消、暂停、遗留进程清理与重试 | K4、AC-M1-04 | 总是 |
 | `tests/recovery.spec.ts` | 已确认的写入在反复 SIGKILL 后仍然存在 | NFR-04 | 总是 |
-| `tests/workflow.spec.ts` | 解析不完整、崩溃或能力未认证时判 indeterminate；豁免；审批、作废、条件、分支 | AC-M1-03/05/06 | 总是 |
+| `tests/workflow.spec.ts` | 解析不完整、崩溃或能力未认证时判 indeterminate；没有豁免：失败保持失败并打开事故，改正后的新设计才通过，历史保留；没有审批门时进入阶段、旧方法不存在；R0 之前写下的主目录（旧流程包上的项目、审批/豁免/导出事件、`waived` 判定、带 `gates` 的迁移事件）仍能打开、重放并通过哈希链校验；新注册的流程包若仍声明审批门则被拒绝；分支 | AC-M1-03、架构 ADR-011 | 总是 |
 | `tests/agents.spec.ts` | 变更集上的迭代循环、权限、死循环与预算停止、假 PDK 出口拦截、接手、降低标准 | AC-M1-02/07/08/09/13 | 总是 |
 | `tests/mcp.spec.ts`、`tests/providers.spec.ts` | MCP 边界；OpenAI 兼容与 Anthropic 适配器（对模拟服务器测试） | FR-INT-05/06 | 总是 |
-| `tests/estimator.spec.ts` | 三个模型的完整分项；缺数据时结论为“数据不足”，G0 判 indeterminate | AC-M1-10 | 总是；没有 `.venv` 时**失败**（不会跳过） |
-| `tests/m2-flow.spec.ts` | stories260K 上 S0 → G2；新数值规格使 G1/G2 作废 | M2、AC-04 | 总是；没有 `.venv` 时**失败** |
-| `tests/m4-kernel.spec.ts` | 导出已放行快照及其血缘、硬约束槽位、迁移导致的作废 | FR-PKG-04、AC-08/10/13 | 总是 |
+| `tests/estimator.spec.ts` | 三个模型的完整分项；缺数据时结论为“数据不足”，S0 的检查判 indeterminate | AC-M1-10 | 总是；没有 `.venv` 时**失败**（不会跳过） |
+| `tests/m2-flow.spec.ts` | stories260K 上 S0 → S3 各阶段由其检查判定；旧判定不针对新数值规格，旧芯片规格对新数值规格判 fail | M2、AC-04 | 总是；没有 `.venv` 时**失败** |
+| `tests/m4-kernel.spec.ts` | 硬约束槽位只能由人类绑定；迁移记录重新开始的阶段，拒绝未知阶段 | FR-SGN-02b、FR-MIG-03 | 总是 |
 | `tests/model-import.spec.ts` | 导入真实 Hugging Face 布局的小 Qwen3，普查、按普查估算、图还原、L0、与 transformers 的全量测试；llama2.c 与 run.c 移植对拍；项目自带的占位模型权重；没有 config.json 的模型如实报告而不猜测 | FR-MDL-01/03/05/06 | 总是；需要 `.venv` |
 | `plugins/model-llama/tests/test_graph.py` | Llama（共享/不共享输出层）、带滑动窗口的 Mistral、Qwen2、Qwen3 与 transformers 对拍；llama2.c 与 run.c 移植对拍；重复存储的共享输出层；截断的文件；不支持的模型 | FR-MDL | 总是 |
 | `python/llmchip-vchip/tests/test_harness.py` | 虚拟芯片测试环境：无效清单标为不可用并给出原因；分词往返，无法表示的文本被拒绝；参考芯片与 run.c 移植结果一致；prefill 与 step 一致；上下文边界与非法输入；停止 token；SPI 帧周期与 tok/s；确定性；经进程芯片与数值黄金芯片逐位一致；策略判定；崩溃、挂起、乱码被记录且不中断运行；超时会杀掉芯片的整个进程组；不报告周期的芯片不给出速度；没有可用提示词时一致性检查为 incomplete 而不是通过；两个模型家族 | 设计 T-01–T-14（负责人草案）；FR-VER-04/05 | 总是运行（`yarn check:python`） |
@@ -625,13 +617,13 @@ yarn llmchip gate release chip G0                                # invalidated�
 | `tests/web-ui.spec.ts` | 语言目录一致；在浏览器中以两种语言渲染每个页面；S0、S1、S2、S3 详细视图，S3 也覆盖空间引擎项目（电路、面积模块、时序表、设计空间）；虚拟芯片页面上的一致性报告，以及被 `vchip.l3` 判为 indeterminate 的生成测试 | AC-M1-12 | 浏览器部分需 `apps/web/dist` 与 Chromium |
 | `tests/containers.spec.ts` | 无网络、输入只读、取消时移除容器 | IF-3 | 需 `python:3.12-slim` 镜像 |
 | `tests/calibration.spec.ts` | 每个存储候选都得出可用或不可用；按视图的阶段准入 | AC-M15-01/02/03 | 需 EDA 镜像 |
-| `tests/m3-flow.spec.ts` | 验证计划、G3、注入缺陷的定位 | M3、AC-03/09 | 需 EDA 镜像 |
+| `tests/m3-flow.spec.ts` | 验证计划、注入缺陷的定位（判定只针对有缺陷的 bundle） | M3、AC-03/09 | 需 EDA 镜像 |
 | `tests/ui-latency.spec.ts` | EDA 运行期间 UI 查询 p95 < 200 ms | NFR-03（内核侧） | 需 EDA 镜像 |
-| `tests/m4-flow.spec.ts` | S0–S8、DRC/LVS/STA、时序与 SDF 反例、G4、导出 | M4、AC-02/05/06/11/12/14 | 须同时满足 `LLMCHIP_FULL_FLOW=1` **和** EDA 镜像 |
+| `tests/m4-flow.spec.ts` | S0–S7、DRC/LVS/STA、时序与 SDF 反例、从 GDS 到权重的血缘、迁移评估 | M4、AC-02/05/06/08/12/14 | 须同时满足 `LLMCHIP_FULL_FLOW=1` **和** EDA 镜像 |
 
 ### 6.3 须显式开启的完整流程
 
-`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` 会运行物理工具。修改 `rtl-taalas`、`eda-gf180`、`packager` 或签核检查后都要运行它。2026-10-20 在四线 SPI 设计上的结果：通过（1 个测试，2132 秒，约 36 分钟；WSL2 上的 Podman 3.4）。
+`LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` 会运行物理工具。修改 `rtl-taalas`、`eda-gf180` 或签核检查后都要运行它。2026-10-20 在四线 SPI 设计上的结果（R0 之前，含 S8 与 G4）：通过（1 个测试，2132 秒，约 36 分钟；WSL2 上的 Podman 3.4）。R0 之后（S0–S7，无审批门，血缘含工具版本与判定）于 2026-10-24 重新运行：通过（1 个测试，2070 秒，约 34.5 分钟）。
 
 修改空间引擎生成器（`llmchip_rtl/spatial/`）或测试环境通往 RTL 的桥（`llmchip_vchip/bridges/`）之后，必须运行一次完整的 L3 一致性检查（硬约束，负责人 2026-10-22 决定；见 AGENTS.md “Containers”）：先 `yarn vchip new rtl --proxy --id spatial-5k`，再不带 `--quick` 运行 `yarn vchip conform spatial-5k`；或运行 `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py`。2026-10-22 的结果见 §6.1 中 `vchip` 的各行。
 
@@ -646,7 +638,6 @@ yarn llmchip gate release chip G0                                # invalidated�
 | Tauri 桌面外壳、Windows 安装器、专用 WSL 发行版、首次启动引导、自动拉取镜像 | FR-UI-01、FR-UI-03、NFR-08、NFR-13、AC-M1-01、AC-01、ADR-002、ADR-005 |
 | CHARTER.md 生成与历史、阶段手册、示例项目 | FR-PRJ-02、FR-PRJ-06、FR-AGT-11 |
 | 项目 git 工作目录；合并变更集只记录状态 | FR-TRC-09、架构 §6.2–6.3 |
-| S9 回片测试：固件、上位机程序、Playground 中的 L7 | FR-SIL-*、M6 |
 | 训练参考模型（负责人推迟；暂以占位模型替代） | FR-QNT-05、需求 §11.1 |
 | Llama 家族以外（GPT-2、MoE 等）、GGUF（只做普查）以及带 RoPE 缩放（如 Llama 3.1/3.2）的图还原；在工作台内从 Hugging Face 下载 | FR-MDL-01、FR-MDL-02、FR-MDL-03 |
 | 项目导出与导入、复现命令、审计导出 | FR-PRJ-05、FR-TRC-07、FR-TRC-08 |
@@ -662,15 +653,17 @@ yarn llmchip gate release chip G0                                # invalidated�
 - **存储内容检查**（FR-SGN-07）：映射可逆，生成时做往返检查。由于设计使用标准单元 ROM，没有比较宏内容的签核检查。
 - **物理实现**：芯片为 1.2×2 mm，不是 2 mm²（负责人决定，需求 v0.6）。设计对象是未训练的占位模型。空间引擎放不进这个晶粒，按实测单元面积需要 5.0 × 3 mm（负责人决定，2026-10-20：晶粒按需加大；布局确认尺寸后再更新需求文档 §11.1）。它还没有做物理实现。
 - **空间引擎**（2026-10-21 实测，占位模型，8 MHz）：每个 token 1,327 周期（6,029 tok/s）；加上主机的 START 与 STATUS 帧为 2,059 周期（约 3,900 tok/s）。综合后单元面积 5.96 mm²：KV 环形缓存 2.09，矩阵电路 1.94（串行加法器 0.80、行输出 0.75、延迟线 0.39），核心逻辑 0.97 及其 16 个 softmax 除法器 0.05，核心寄存器 0.42，注意力乘法器 0.41，查找表 0.07，主机接口 0.02。其他形状的核心逻辑（按维度）和查找表面积是外推值。KV 寄存器的复位值来自复位后的清零过程（AGENTS.md，负责人决定，2026-10-21），门级仿真的证明随物理实现一起完成。生成器实现维度为 2 的幂（头大小至少 4）、2 个头、1 个 KV 头、上下文 64、任意层数、隐藏维度不超过 255 的模型；其他形状会被拒绝并给出原因。不给 `die`（或 `targetAreaMm2`）时，面积上限是工艺档案的 prerun 面积（2.4 mm²），空间引擎放不下；PPA 会给出建议的晶粒（`suggestedDie`），在 prerun 约束更新之前（P4），设计使用这个晶粒。
-- **迁移**：评估与审批门作废可用。下游产物不会被标记为失效（FR-MIG-03、FR-TRC-05）。没有能自动打标签的 NDA PDK 导入通道（FR-INT-04、FR-SEC-01）。
+- **迁移**：评估可用，确认后记录重新开始的阶段。下游产物与判定不会被标记为失效（FR-MIG-03、FR-TRC-05）。从 S3 或更早重新开始须由人类确认（FR-MIG-04），这一点没有测试：唯一不是人类的调用方是外部令牌，而 `migration.apply` 不在外部方法白名单中。没有能自动打标签的 NDA PDK 导入通道（FR-INT-04、FR-SEC-01）。
 - **智能体**：变更集没有大小阈值（FR-AGT-06）。没有软约束流程（FR-AGT-09）。没有按角色区分的工具集或 LLM（FR-AGT-14/19）。去密接手包只作为建议给出，不会实际生成（FR-AGT-13a）。
-- **UI**：没有条件审批与关闭条件的界面。没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-09/10/11/13、FR-AGT-25/26）。
-- **CLI**：审批、豁免、去密、导出、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
+- **UI**：没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-10/11/13、FR-AGT-25/26）。每一步的“运行研发流程”和“运行全部测试”两个入口尚未实现（R1）。演示流程页的“完成”是近似：阶段内每项已判定检查的最新判定都通过、每个处理器的最新运行都成功，并且已进入下一阶段（最后一个阶段除外）；各步骤必需的测试清单要到 R1 才在流程包中定义。
+- **工具版本的追溯**：运行记录只保存插件和处理器，不保存当次运行使用的容器镜像；镜像只能从插件清单中查到（摘要固定），清单改变后无法从运行本身得知旧镜像（FR-TRC-02、AC-08）。
+- **R0 之前的判定**：在旧主目录中，`accuracy.budget` 或 `phy.drc` 的版本 1 判定若为 `waived`，之后版本 2 的通过会打开 `standard_lowered` 事故，尽管标准实际上变严了（取消了豁免）。关闭事故时说明即可。
+- **CLI**：去密、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
 - **TypeScript 插件 SDK** 没有自己的测试，只通过 `stub-tool` 间接覆盖。
-- **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S8 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
-- **S3 的速度和面积**（参考模型的占位模型，三值，2 条通道，8 MHz，2026-10-20 实测）：旧公式给出 10.1 tok/s；旧设计（SPI、无缓冲）的精确周期是每 token 1,024,601，即 7.8 tok/s。四线 SPI 为 352,505 个周期、22.7 tok/s（2.9 倍）；加注意力缓冲 34.6 tok/s；全部缓冲 43.8 tok/s。即便用四线 SPI，仍有 77.7% 的周期在等片外存储。在 1.2 × 2 mm 晶粒上只有“四线 SPI、无缓冲”能放下：综合出的单元面积 287k µm²，核心区 497k µm²。布局已到极限，而且对密度设置不单调：同一网表在 70% 和 85% 时放下并满足时序（建立时间余量 +22 ns，约 9.7 MHz 也能满足），在 75% 和 80% 时详细布局失败；预流片取 70%（`PRERUN.placementDensityPct`）。旧的 SPI 设计在原来的 62% 时也已无法布线。加注意力缓冲（332k µm²）或全部缓冲（398k µm²）在试过的每个密度（62–85%）下详细布局都失败；把两条通道改成一条也无法布线。四线 SPI 的焊盘是双向 `bi_t` 单元，只在不驱动时打开输入（IE = ¬OE）：焊盘库只在 IE 为低时定义 A → PAD 的时序弧，IE 固定为高时输出方向不受时序约束，STA 报告这四个引脚未约束。门级仿真用的焊盘功能模型（`plugins/eda-gf180/sim/pads.v`）原先把 `bi_t` 的输入通路固定为 0，这只在没有双向引脚时成立；现在 IE 为高时它输出焊盘上的值。SDF 时序仿真的测试平台和流片包的测试计划按设计的实际引脚（SPI 或四线 SPI）描述片外存储。工艺库的面积估算看不出这一点：它的控制逻辑是 0.05 mm²（经验值），综合结果约 0.19 mm²；利用率取 0.7（经验值），实测 0.58 能放下、0.67 放不下。在用这些实现结果校准工艺库之前，`explore` 给出的“放得下”偏乐观；设计能否放下只能由 `eda-gf180 implement` 证明。
+- **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S7 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
+- **S3 的速度和面积**（参考模型的占位模型，三值，2 条通道，8 MHz，2026-10-20 实测）：旧公式给出 10.1 tok/s；旧设计（SPI、无缓冲）的精确周期是每 token 1,024,601，即 7.8 tok/s。四线 SPI 为 352,505 个周期、22.7 tok/s（2.9 倍）；加注意力缓冲 34.6 tok/s；全部缓冲 43.8 tok/s。即便用四线 SPI，仍有 77.7% 的周期在等片外存储。在 1.2 × 2 mm 晶粒上只有“四线 SPI、无缓冲”能放下：综合出的单元面积 287k µm²，核心区 497k µm²。布局已到极限，而且对密度设置不单调：同一网表在 70% 和 85% 时放下并满足时序（建立时间余量 +22 ns，约 9.7 MHz 也能满足），在 75% 和 80% 时详细布局失败；预流片取 70%（`PRERUN.placementDensityPct`）。旧的 SPI 设计在原来的 62% 时也已无法布线。加注意力缓冲（332k µm²）或全部缓冲（398k µm²）在试过的每个密度（62–85%）下详细布局都失败；把两条通道改成一条也无法布线。四线 SPI 的焊盘是双向 `bi_t` 单元，只在不驱动时打开输入（IE = ¬OE）：焊盘库只在 IE 为低时定义 A → PAD 的时序弧，IE 固定为高时输出方向不受时序约束，STA 报告这四个引脚未约束。门级仿真用的焊盘功能模型（`plugins/eda-gf180/sim/pads.v`）原先把 `bi_t` 的输入通路固定为 0，这只在没有双向引脚时成立；现在 IE 为高时它输出焊盘上的值。SDF 时序仿真的测试平台按设计的实际引脚（SPI 或四线 SPI）描述片外存储。工艺库的面积估算看不出这一点：它的控制逻辑是 0.05 mm²（经验值），综合结果约 0.19 mm²；利用率取 0.7（经验值），实测 0.58 能放下、0.67 放不下。在用这些实现结果校准工艺库之前，`explore` 给出的“放得下”偏乐观；设计能否放下只能由 `eda-gf180 implement` 证明。
 - **数值分析结果**（int8、分组 32、四舍五入、饱和、逐层小数位、残差流 24 位；4 个提示 × 8 个 token、3 段文本；开发机，2026-10-19）：stories260K 困惑度 3.16 → 3.17，下一 token 一致率 98.6%，1 秒；SmolLM2-135M 12.64 → 12.76，94.3%，30 秒；Qwen3-0.6B 23.00 → 22.39，88.8%，136 秒；DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92，88.8%，584 秒。int4 时 SmolLM2 升到 22.6，Qwen3 升到 28.6。每类张量只用一个 16 位格式时 SmolLM2 会崩溃（困惑度约 290 万）：少数层的残差流值接近 20000。`numeric.accuracy` 要求下一 token 一致率 ≥ 0.9，Qwen3 和 DeepSeek 在 int8 时略差一点没有达到。
-- **虚拟芯片测试环境**（`llmchip-vchip`，负责人草案设计的 L1 与 L3）：后端为 `reference`、`numeric`、`process`、`rtl`。RTL 路径只覆盖一个生成器 `taalas-spatial/1`（5K 占位模型；受该生成器的形状限制）；`taalas-rom/1` 还没有 RTL 生成器。没有门级后端（设计 T-20，L3+），也没有性能模型后端。完整的 20 个提示词 L3 运行须显式开启（`LLMCHIP_VCHIP_L3=1`，约 11 分钟）；有镜像时默认测试只跑 4 个提示词。困惑度需要 `logits` 能力。独立运行（`vchip`）时，运行不是产物，按芯片策略自行判定（ADR-010）；经内核插件 `vchip`（L4）运行时，运行与报告是产物，由流程的检查判定，但这些检查不属于任何审批门。插件只从 `llmchip-numeric-spec/1` 规格构建芯片（llama2.c 模型的 S2；导入模型的计算图数值规格会被拒绝），也只运行 `taalas-spatial/1` 的 bundle。它的仿真器在自己的会话和容器中运行：运行被取消时会被移除，但内核崩溃后，内核的遗留进程清理只杀插件的进程组，仿真容器可能留下（`podman ps --filter name=llmchip-vchip`）。Web UI 页面发起运行并显示报告；没有单独的 HTTP API（内核 API 就是 API），也没有采样。
+- **虚拟芯片测试环境**（`llmchip-vchip`，负责人草案设计的 L1 与 L3）：后端为 `reference`、`numeric`、`process`、`rtl`。RTL 路径只覆盖一个生成器 `taalas-spatial/1`（5K 占位模型；受该生成器的形状限制）；`taalas-rom/1` 还没有 RTL 生成器。没有门级后端（设计 T-20，L3+），也没有性能模型后端。完整的 20 个提示词 L3 运行须显式开启（`LLMCHIP_VCHIP_L3=1`，约 11 分钟）；有镜像时默认测试只跑 4 个提示词。困惑度需要 `logits` 能力。独立运行（`vchip`）时，运行不是产物，按芯片策略自行判定（ADR-010）；经内核插件 `vchip`（L4）运行时，运行与报告是产物，由流程的检查判定，但这些检查不属于流程的任何阶段。插件只从 `llmchip-numeric-spec/1` 规格构建芯片（llama2.c 模型的 S2；导入模型的计算图数值规格会被拒绝），也只运行 `taalas-spatial/1` 的 bundle。它的仿真器在自己的会话和容器中运行：运行被取消时会被移除，但内核崩溃后，内核的遗留进程清理只杀插件的进程组，仿真容器可能留下（`podman ps --filter name=llmchip-vchip`）。Web UI 页面发起运行并显示报告；没有单独的 HTTP API（内核 API 就是 API），也没有采样。
 - **分析检查不通过也会开事故单**，与所有不通过的检查一样（FR-VER-06），所以在 S2 试验台上尝试较差的方案会让事故列表变长。
 
 ### 7.3 代码与上游文档的冲突（未解决，已上报）

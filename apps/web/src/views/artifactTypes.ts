@@ -11,8 +11,8 @@ export const ARTIFACT_TYPES = [
   'rtl.bundle', 'storage.map', 'isa.check', 'lint.report', 'qualification.report', 'verification.plan', 'verification.report', 'waveform.vcd', 'l3.outputs',
   'vchip.report', 'vchip.outputs', 'vchip.conformance',
   'timing.constraints', 'timing.exceptions', 'layout.bundle', 'layout.gds', 'layout.image', 'measurement.record', 'pad.list', 'timing.sdf',
-  'drc.report', 'lvs.report', 'sta.report', 'gatesim.report', 'sdfsim.report', 'signoff.rules', 'package.template', 'tapeout.package', 'package.manifest',
-  'package.integrity', 'tapeout.export', 'external.report', 'external.signoff', 'migration.report', 'run.log', 'agent.handoff', 'changeset.file',
+  'drc.report', 'lvs.report', 'sta.report', 'gatesim.report', 'sdfsim.report', 'signoff.rules', 
+  'migration.report', 'run.log', 'agent.handoff', 'changeset.file',
 ] as const
 
 const known = (key: string): key is Key => key in CATALOGS.zh

@@ -51,7 +51,7 @@ async function browser() {
 /** Every catalog key; none may appear verbatim in a rendered page. */
 const CATALOG_KEYS = Object.keys(CATALOGS.zh)
 
-const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'approvals', 'incidents', 'artifacts', 'settings']
+const PAGES = ['flow', 'overview', 'agents', 'trajectory', 'estimator', 'playground', 'vchip', 'incidents', 'artifacts', 'settings']
 
 describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
   it('renders every page in both languages without errors or raw keys', { timeout: 240_000 }, async (ctx) => {
@@ -128,7 +128,7 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
           const text = await page.innerText('.app')
           // No catalog key leaked into the page, e.g. "nav.overview".
           expect(CATALOG_KEYS.filter((key) => text.includes(key)), `${lang}/${name}`).toEqual([])
-          expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|approvals|incidents|artifacts|settings|status|feasibility|playground)\.[a-z]\w*/)
+          expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|incidents|artifacts|settings|status|feasibility|playground)\.[a-z]\w*/)
         }
         // The S0 detail view, opened from its card on the flow page.
         await page.click('button[data-page=flow]')

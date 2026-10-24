@@ -78,7 +78,6 @@ export function S1Detail({ project, onBack, onProject }: { project: string; onBa
   const { data: bundle } = useQuery((c) => json(c, out(imported, 'bundle')), [out(imported, 'bundle')], false)
   const { data: outputs } = useQuery((c) => json(c, out(l0, 'outputs')), [out(l0, 'outputs')], false)
   const { data: suite } = useQuery((c) => json(c, out(compared, 'report')), [out(compared, 'report')], false)
-  const { data: state } = useQuery((c) => c.call('projects.get', { project }), [project])
   const { data: verdicts } = useQuery((c) => c.call('verdicts.list', { limit: 1000 }), [])
   const choices = useModelChoices()
   const verdictOf = (check: string, r: RunRecord | undefined) => verdicts?.verdicts.find((v) => v.check === check && v.run === r?.id)
@@ -88,8 +87,6 @@ export function S1Detail({ project, onBack, onProject }: { project: string; onBa
   const [path, setPath] = useState('')
   const [prompts, setPrompts] = useState('')
   const [steps, setSteps] = useState(8)
-  const g0 = state?.gates.find((g) => g.gate === 'G0')
-  const entered = state?.stages.find((s) => s.id === 'S1')?.entered
   const canRun = Boolean(imported || ownWeights)
 
   const track = (step: string, s: StepState, detail?: string) => setProgress((p) => ({ ...p, [step]: { state: s, ...(detail ? { detail } : {}) } }))
@@ -143,7 +140,6 @@ export function S1Detail({ project, onBack, onProject }: { project: string; onBa
         </div>
         <p className="muted">{t('s1.pickNote')}</p>
         {bundle && <p>{bundle.source.startsWith('artifact ') ? t('s1.modelFromProject', { project }) : t('s1.model', { name: bundle.name, source: bundle.source })}</p>}
-        {g0 && !g0.released && runs && <p className="flow-note">{t(entered ? 's1.entered' : 's1.notEntered', { status: t(`status.${g0.status}` as Key) })}</p>}
         {!canRun && runs && <p className="muted">{t('s1.noImport')}</p>}
       </Section>
 

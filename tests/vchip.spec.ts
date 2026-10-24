@@ -1,7 +1,7 @@
 // The virtual-chip test harness through the kernel (owner's draft design, L4): the bundled
 // plugin `vchip` builds its chips from a project's artifacts, its runs and reports are
 // artifacts, and the flow's checks `vchip.l3` and `vchip.conformance` judge them (ADR-010:
-// the harness's own policy verdicts are not gate evidence; these verdicts are).
+// the harness's own policy verdicts are not check evidence; these verdicts are).
 //
 // Without the EDA image: the L2 chip against the float reference of the Model IR (needs .venv).
 // With the image: the spatial RTL under the pin-level testbench on 4 prompts (the check is then

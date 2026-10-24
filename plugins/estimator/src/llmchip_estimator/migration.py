@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-STAGES = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"]
+STAGES = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7"]
 
 
 def earliest(stages: list[str]) -> str | None:
@@ -168,7 +168,7 @@ def assess(chip: dict, current: dict, target: dict, library: dict) -> dict[str, 
             "medium",
             "S7",
             True,
-            "the target's rule decks may not run in open tools: plan external signoff results (FR-SGN-06)",
+            "the target's rule decks may not run in open tools: check which signoff checks still run",
         )
     # The die must follow the target's size rules (architecture decides the die).
     die = (chip.get("targets") or {}).get("die")

@@ -1,7 +1,7 @@
 // Starting a chip project from a downloaded model, through the kernel API as
 // the owner: S0 (import, census, estimate, checks) and S1 (graph recovery, L0,
-// comparison with the official implementation, checks). The G0 approval stays
-// a human decision on the Approvals page.
+// comparison with the official implementation, checks). There are no approval
+// gates: each stage is entered when its work starts, and its checks judge it.
 
 import type { KernelClient } from '@llmchip/client'
 import type { RunRecord } from '@llmchip/kernel-api'
@@ -127,10 +127,9 @@ export async function importPath(client: KernelClient, project: string, path: st
 export async function recoverGraph(client: KernelClient, project: string, report: Report, options: TestOptions = {}): Promise<void> {
   const step = stepper(report)
   const imported = (await latestImport(client, project)) ?? (await step('importWeights', () => importProjectWeights(client, project)))
-  // Enter S1 when G0 allows it; otherwise the runs are analysis outside the stage.
-  const release = await client.call('gates.release', { project, gate: 'G0' })
+  // Enter S1: its work starts here.
   const state = await client.call('projects.get', { project })
-  if (release.released && !state.stages.find((s) => s.id === 'S1')?.entered) await client.call('stages.enter', { project, stage: 'S1' })
+  if (!state.stages.find((s) => s.id === 'S1')?.entered) await client.call('stages.enter', { project, stage: 'S1' })
   const census = outputs(imported, 'census')[0]!
   const graph = await step('recover', () => run(client, project, 'model-llama', 'recover', [['census', census]]))
   await step('graphCheck', () => judge(client, project, 'model.graph', graph), (v) => v)
@@ -219,9 +218,9 @@ export async function runScheme(client: KernelClient, project: string, path: 'ch
 }
 
 /**
- * Makes a chip-path scheme the formal numeric spec of the project: binds the G1 slots
- * (this invalidates earlier G1/G2 approvals), judges the G1 check on its evaluation,
- * and runs L2 with observation-point traces for S3-S5. G1 itself stays a human decision.
+ * Makes a chip-path scheme the formal numeric spec of the project: binds its slots,
+ * judges the S2 accuracy check on its evaluation, and runs L2 with observation-point
+ * traces for S3-S5.
  */
 export async function adoptScheme(client: KernelClient, project: string, quantize: RunRecord, evaluate: RunRecord, report: Report): Promise<void> {
   const step = stepper(report)
@@ -275,7 +274,7 @@ async function processData(client: KernelClient) {
   return { profile: data.find((d) => d.id === 'gf180mcu')!.hash, library: data.find((d) => d.type === 'implementation.library')!.hash }
 }
 
-/** The numeric spec S3 designs from: the formal one (G1 slot), else the latest chip-path or analysis spec. */
+/** The numeric spec S3 designs from: the formal one (the bound `numeric-spec` slot), else the latest chip-path or analysis spec. */
 export async function archSource(client: KernelClient, project: string): Promise<{ spec: string; weights: string; analysis: boolean } | undefined> {
   const state = await client.call('projects.get', { project })
   if (state.slots['numeric-spec'] && state.slots['l2-weights']) return { spec: state.slots['numeric-spec'], weights: state.slots['l2-weights'], analysis: false }
@@ -307,7 +306,7 @@ function exploreParams(point: ArchPoint | SpatialPoint): Record<string, unknown>
 
 /**
  * S3 chip spec and PPA at a point (chip path only), its consistency check, and, with `bind`,
- * the G2 slots (this invalidates earlier G2 approvals). G2 itself stays a human decision.
+ * the project's `chip-spec` and `ppa-estimate` slots.
  */
 export async function designArch(client: KernelClient, project: string, point: ArchPoint | SpatialPoint, bind: boolean, report: Report): Promise<RunRecord> {
   const step = stepper(report)

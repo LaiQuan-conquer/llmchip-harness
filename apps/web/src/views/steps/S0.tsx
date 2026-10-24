@@ -6,7 +6,7 @@ import { useI18n, type Key } from '../../i18n.ts'
 import { ErrorLine, Section } from '../common.tsx'
 
 // S0 in detail: the question the stage answers, its inputs, how area and speed
-// are computed, how large a model would fit, the verdict and gate, and a form
+// are computed, how large a model would fit, the verdict, and a form
 // that reruns the real estimator with another model or bit width.
 
 type Range = { low: number; typ: number; high: number }
@@ -62,9 +62,7 @@ export function S0Detail({ project, onBack }: { project: string; onBack(): void;
   const { data: report, error } = useQuery((c) => (reportHash ? json<Report>(c, reportHash) : Promise.resolve(undefined)), [reportHash], false)
   const { data: request } = useQuery((c) => (requestHash ? json<Record<string, unknown>>(c, requestHash) : Promise.resolve(undefined)), [requestHash], false)
   const { data: verdicts } = useQuery((c) => c.call('verdicts.list', { check: 'estimate.feasibility', limit: 1000 }), [])
-  const { data: state } = useQuery((c) => c.call('projects.get', { project }), [project])
   const verdict = verdicts?.verdicts.find((v) => v.run === run?.id)
-  const gate = state?.gates.find((g) => g.gate === 'G0')
 
   return (
     <>
@@ -87,12 +85,6 @@ export function S0Detail({ project, onBack }: { project: string; onBack(): void;
                 <span className={`pill ${verdict?.verdict === 'pass' ? 'ok' : verdict ? 'bad' : ''}`}>{t(`flow.verdict.${verdict?.verdict ?? 'none'}` as Key)}</span>
                 {t('flow.check.feasibility')}
               </li>
-              {gate && (
-                <li>
-                  <span className={`pill ${gate.released ? 'ok' : ''}`}>{t('flow.gate', { gate: 'G0' })}</span>
-                  {t(`status.${gate.status}` as Key)} · {t('s0.gateMeaning')}
-                </li>
-              )}
             </ul>
             <Raw report={report} />
           </Section>

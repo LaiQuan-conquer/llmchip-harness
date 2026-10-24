@@ -1,5 +1,5 @@
 // The estimator plugin (requirements FR-EST, AC-M1-10) end to end: bundled
-// plugins, the Python plugin process, the CLI and the G0 feasibility check.
+// plugins, the Python plugin process, the CLI and the S0 feasibility check.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -30,7 +30,7 @@ describe('estimator (AC-M1-10)', () => {
     const { client } = await setup()
     const { plugins, problems } = await client.call('plugins.list')
     expect(problems).toEqual([])
-    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'model-llama', 'numeric', 'packager', 'process-library', 'rtl-taalas', 'sim-verilator', 'vchip'])
+    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'model-llama', 'numeric', 'process-library', 'rtl-taalas', 'sim-verilator', 'vchip'])
     expect((await client.call('checks.list')).checks.map((c) => c.id)).toContain('estimate.feasibility')
   })
 
@@ -55,7 +55,7 @@ describe('estimator (AC-M1-10)', () => {
     }
   })
 
-  it('reports missing data instead of assuming zero, and the G0 check judges accordingly', { timeout: 60_000 }, async () => {
+  it('reports missing data instead of assuming zero, and the S0 check judges accordingly', { timeout: 60_000 }, async () => {
     const { client } = await setup()
     const profile = JSON.parse(readFileSync(join(REPO_PLUGINS, 'process-library/data/sephonchitech-180bcd.json'), 'utf8'))
     profile.ring.ioRingWidthMm = null

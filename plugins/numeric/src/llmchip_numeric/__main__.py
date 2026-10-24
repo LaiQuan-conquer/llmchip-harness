@@ -1,4 +1,4 @@
-"""IF-2 entry point of the numeric plugin: quantize (S2), L2 inference, evaluation (G1), and the
+"""IF-2 entry point of the numeric plugin: quantize (S2), L2 inference, evaluation (S2 accuracy), and the
 analysis of any recovered graph (quantize_graph, evaluate_graph)."""
 
 import json

@@ -193,7 +193,7 @@
             "exclusiveMinimum": 0
           }
         },
-        "description": "Estimate parameters. An `estimate.request` input (JSON with the same fields) takes precedence, so the request can be part of a design snapshot (G0)."
+        "description": "Estimate parameters. An `estimate.request` input (JSON with the same fields) takes precedence, so the S0 verdict judges exactly the bound request."
       }
     },
     {

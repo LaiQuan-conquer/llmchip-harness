@@ -13,7 +13,6 @@ members = [
     "llmchip-harness-python",
     "llmchip-model",
     "llmchip-numeric",
-    "llmchip-packager",
     "llmchip-rtl",
     "llmchip-sdk",
     "llmchip-vchip",
@@ -239,7 +238,6 @@ dependencies = [
     { name = "llmchip-estimator" },
     { name = "llmchip-model" },
     { name = "llmchip-numeric" },
-    { name = "llmchip-packager" },
     { name = "llmchip-rtl" },
     { name = "llmchip-sdk" },
     { name = "llmchip-vchip" },
@@ -258,7 +256,6 @@ requires-dist = [
     { name = "llmchip-estimator", editable = "plugins/estimator" },
     { name = "llmchip-model", editable = "plugins/model-llama" },
     { name = "llmchip-numeric", editable = "plugins/numeric" },
-    { name = "llmchip-packager", editable = "plugins/packager" },
     { name = "llmchip-rtl", editable = "plugins/rtl-taalas" },
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
     { name = "llmchip-vchip", editable = "python/llmchip-vchip" },
@@ -309,17 +306,6 @@ requires-dist = [
     { name = "llmchip-sdk", editable = "python/llmchip-sdk" },
     { name = "numpy", specifier = ">=2.0" },
 ]
-
-[[package]]
-name = "llmchip-packager"
-version = "0.1.0"
-source = { editable = "plugins/packager" }
-dependencies = [
-    { name = "llmchip-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "llmchip-sdk", editable = "python/llmchip-sdk" }]
 
 [[package]]
 name = "llmchip-rtl"

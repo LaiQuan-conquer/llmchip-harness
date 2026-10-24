@@ -1,4 +1,4 @@
-"""Accuracy of L2 against L0 on an evaluation set (requirements FR-QNT-04, G1)."""
+"""Accuracy of L2 against L0 on an evaluation set (requirements FR-QNT-04; S2 check accuracy.budget)."""
 
 from __future__ import annotations
 

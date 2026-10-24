@@ -179,7 +179,7 @@
     },
     {
       "name": "verify_spec",
-      "title": "Chip spec consistency with the numeric spec and the area limit (G2 evidence)",
+      "title": "Chip spec consistency with the numeric spec and the area limit (S3 evidence)",
       "inputs": [
         {
           "name": "chip",

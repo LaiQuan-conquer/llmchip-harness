@@ -13,8 +13,8 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18'
 /** Shown to the connecting agent and its user (FR-AGT-01). */
 export const BOUNDARY_NOTICE =
   'You are connected to the llmchip-harness workbench as an external client. Through these tools you can read projects, ' +
-  'artifacts, runs, events and incidents, and start runs and agent tasks. You cannot approve gates, waive checks, change ' +
-  'constraints or policy, or read NDA-labelled content. The workbench controls only what you do through these tools: it ' +
+  'artifacts, runs, events and incidents, and start runs and agent tasks. You cannot change constraints or ' +
+  'policy, or read NDA-labelled content. The workbench controls only what you do through these tools: it ' +
   'does not control your other tools, such as files or a terminal on this computer.'
 
 interface Tool {
@@ -35,7 +35,7 @@ const TOOLS: Tool[] = [
   { name: 'list_projects', description: 'List chip projects.', inputSchema: object(), run: rpc('projects.list') },
   {
     name: 'get_project',
-    description: 'Project state: slots, stages and gate release status.',
+    description: 'Project state: slots and stages.',
     inputSchema: object({ project: { type: 'string' }, branch: { type: 'string' } }, ['project']),
     run: rpc('projects.get'),
   },

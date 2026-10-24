@@ -30,11 +30,12 @@ interface StepView {
 const key = (r: RunRecord) => `${r.plugin}/${r.handler}`
 
 /**
- * The demo flow (S0-S9) of a project as a path: per stage what it does, its
- * state, key results in plain language, checks, gate, deliverables and runs.
+ * The demo flow (S0-S7) of a project as a path: per stage what it does, its
+ * state, key results in plain language, checks, deliverables and runs. There
+ * are no approval gates: a stage is done when every check judged in it passed.
  */
 export function FlowView({ selection, select, onUp }: { selection: Selection; select: (s: Partial<Selection>, to?: Page) => void; onUp(): boolean }) {
-  const { t, lang, message } = useI18n()
+  const { t, lang } = useI18n()
   const project = selection.project
   const { data: projects } = useQuery((c) => c.call('projects.list'), [])
   // Open the demo project (or the only one) without a click.
@@ -90,7 +91,6 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
   const implemented = steps.filter((s) => s.def.implemented)
   const done = implemented.filter((s) => s.state === 'done').length
   const current = implemented.find((s) => s.state !== 'done')
-  const released = state.gates.filter((g) => g.released).length
   const goTo = (stage: string) => {
     setOpen(stage)
     document.getElementById(`flow-${stage}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -112,7 +112,7 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
         }
       >
         <p className="flow-summary">
-          {t('flow.progress', { done, total: implemented.length, gates: released, gatesTotal: state.gates.length })}{' '}
+          {t('flow.progress', { done, total: implemented.length })}{' '}
           {current ? t('flow.current', { stage: `${current.def.stage} ${t(current.def.title)}` }) : t('flow.allDone')}
         </p>
         <div className="flow-bar">
@@ -120,29 +120,20 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
         </div>
         {proxy && <p className="flow-note">{t('flow.caveat.proxy')}</p>}
         <div className="flow-path">
-          {steps.map((s) => {
-            const gate = s.def.gate ? state.gates.find((g) => g.gate === s.def.gate) : undefined
-            return (
-              <div className="flow-segment" key={s.def.stage}>
-                <button className={`flow-node ${s.state}${open === s.def.stage ? ' selected' : ''}`} onClick={() => goTo(s.def.stage)}>
-                  <span className="flow-id">{s.def.stage}</span>
-                  <span className="flow-name">{t(s.def.title)}</span>
-                  <span className="flow-state">{t(`flow.state.${s.state}` as Key)}</span>
-                </button>
-                {gate && (
-                  <div className={`flow-gate ${gate.released ? 'released' : gate.status}`} title={gate.reasons.map(message).join('\n')}>
-                    <span>{gate.gate}</span>
-                    <small>{t(`status.${gate.status}` as Key)}</small>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          {steps.map((s) => (
+            <div className="flow-segment" key={s.def.stage}>
+              <button className={`flow-node ${s.state}${open === s.def.stage ? ' selected' : ''}`} onClick={() => goTo(s.def.stage)}>
+                <span className="flow-id">{s.def.stage}</span>
+                <span className="flow-name">{t(s.def.title)}</span>
+                <span className="flow-state">{t(`flow.state.${s.state}` as Key)}</span>
+              </button>
+            </div>
+          ))}
         </div>
       </Section>
 
       {steps.map((s) => (
-        <StepCard key={s.def.stage} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} gate={s.def.gate ? state.gates.find((g) => g.gate === s.def.gate) : undefined} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => select({ stage: s.def.stage }) : undefined} />
+        <StepCard key={s.def.stage} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => select({ stage: s.def.stage }) : undefined} />
       ))}
     </>
   )
@@ -249,7 +240,6 @@ function StepCard({
   format,
   expanded,
   onToggle,
-  gate,
   proxy,
   select,
   onDetail,
@@ -258,7 +248,6 @@ function StepCard({
   format: Format
   expanded: boolean
   onToggle(): void
-  gate: { gate: string; status: string; released: boolean; reasons: { code: string; params?: Record<string, unknown> }[] } | undefined
   proxy: boolean
   select: (s: Partial<Selection>, to?: Page) => void
   onDetail: (() => void) | undefined
@@ -328,14 +317,6 @@ function StepCard({
             </ul>
           )}
 
-          {gate && (
-            <p className="flow-gate-line">
-              <span className={`pill ${gate.released ? 'ok' : gate.status === 'invalidated' || gate.status === 'rejected' ? 'bad' : ''}`}>{t('flow.gate', { gate: gate.gate })}</span>
-              {t(`status.${gate.status}` as Key)}
-              {!gate.released && gate.status !== 'none' && gate.reasons.length > 0 && <small className="muted"> · {gate.reasons.map(message).join('; ')}</small>}
-            </p>
-          )}
-
           {deliverables.length > 0 && (
             <>
               <h4>{t('flow.deliverables')}</h4>
@@ -387,7 +368,7 @@ function StepCard({
 
 /** Assigns the project's runs to stages and derives each stage's state. */
 function viewSteps(
-  state: { stages: { id: string; entered: boolean }[]; gates: { gate: string; released: boolean }[] },
+  state: { stages: { id: string; entered: boolean }[] },
   runs: RunRecord[],
   verdicts: VerdictRecord[],
 ): StepView[] {
@@ -408,12 +389,20 @@ function viewSteps(
     for (const r of mine) if (r.state === 'finished' && r.execution === 'exited_zero') latest.set(key(r), r)
     const judged = new Map<string, VerdictRecord>()
     for (const v of ours) if (def.checks.includes(v.check)) judged.set(v.check, v)
+    // The latest finished run of each handler: an earlier failure that a rerun fixed no longer counts.
+    const last = new Map<string, RunRecord>()
+    for (const r of mine) if (r.state === 'finished') last.set(key(r), r)
     const next = STEPS[i + 1]
+    const moved = !next || entered.has(next.stage)
+    const verdicts = [...judged.values()]
+    // Done: every check judged in the stage passed (latest verdict per check) and the flow moved on.
+    // Each step's list of required tests comes with the step pipelines (R1); until then, a stage
+    // with passing checks counts as done once the next stage is entered.
     let s: StepState
     if (!def.implemented) s = 'notImplemented'
     else if (mine.some((r) => r.state !== 'finished')) s = 'running'
-    else if (def.gate ? state.gates.find((g) => g.gate === def.gate)?.released : next && entered.has(next.stage)) s = 'done'
-    else if ([...judged.values()].some((v) => v.verdict === 'fail' || v.verdict === 'indeterminate') || mine.some((r) => r.execution !== 'exited_zero')) s = 'attention'
+    else if (verdicts.some((v) => v.verdict !== 'pass') || [...last.values()].some((r) => r.execution !== 'exited_zero')) s = 'attention'
+    else if (moved && (verdicts.length > 0 || entered.has(def.stage) || mine.length > 0)) s = 'done'
     else if (mine.length > 0 || entered.has(def.stage)) s = 'active'
     else s = 'pending'
     return { def, state: s, runs: mine, latest, verdicts: judged }
@@ -425,7 +414,8 @@ function tone(state: StepState): string {
 }
 
 function verdictTone(verdict: string | undefined): string {
-  return verdict === 'pass' || verdict === 'waived' ? 'ok' : verdict === 'fail' ? 'bad' : verdict === 'indeterminate' ? 'warn' : ''
+  // `waived` exists only in verdicts recorded before waivers were removed: it was a failure.
+  return verdict === 'pass' ? 'ok' : verdict === 'fail' || verdict === 'waived' ? 'bad' : verdict === 'indeterminate' ? 'warn' : ''
 }
 
 function runState(r: RunRecord): Key {

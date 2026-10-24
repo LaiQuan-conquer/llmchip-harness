@@ -47,6 +47,8 @@ export interface KernelEventPayloads {
   'project.branched': T.ProjectBranchedPayload
   'project.slot_bound': T.SlotBoundPayload
   'stage.entered': T.StageEnteredPayload
+  // History only: approval gates and waivers were removed (owner decision 2026-10-24). These kinds
+  // stay registered so that logs written before can be read and verified; nothing writes them.
   'approval.recorded': T.ApprovalRecordedPayload
   'approval.condition_closed': T.ConditionClosedPayload
   'approval.invalidated': T.ApprovalInvalidatedPayload
@@ -62,6 +64,7 @@ export interface KernelEventPayloads {
   'agent.step': T.AgentStepPayload
   'changeset.updated': T.ChangesetEventPayload
   'migration.applied': T.MigrationAppliedPayload
+  // History only, like the approval kinds above: export was removed with the tapeout package.
   'package.exported': T.PackageExportedPayload
 }
 
@@ -137,14 +140,7 @@ export interface KernelMethods {
   'projects.bind': { params: T.ProjectsBindParams; result: T.OkResult }
   'projects.branch': { params: T.ProjectsBranchParams; result: T.OkResult }
   'stages.enter': { params: T.StagesEnterParams; result: T.OkResult }
-  'gates.snapshot': { params: T.GateRefParams; result: T.Snapshot }
-  'gates.release': { params: T.GateRefParams; result: T.ReleaseResult }
-  'approvals.decide': { params: T.ApprovalsDecideParams; result: T.ApprovalRecord }
-  'approvals.closeCondition': { params: T.ApprovalsCloseConditionParams; result: T.ApprovalRecord }
-  'approvals.list': { params: T.ProjectRefParams; result: T.ApprovalsListResult }
-  'packages.export': { params: T.PackagesExportParams; result: T.ExportResult }
   'migration.apply': { params: T.MigrationApplyParams; result: T.MigrationApplyResult }
-  'waivers.create': { params: T.WaiversCreateParams; result: T.WaiverRecord }
   'incidents.list': { params: T.IncidentsListParams; result: T.IncidentsListResult }
   'incidents.close': { params: T.IncidentsCloseParams; result: T.IncidentRecord }
   'declass.setRule': { params: T.DeclassRule; result: T.OkResult }
@@ -199,14 +195,7 @@ export const KERNEL_METHOD_DEFS: { readonly [M in KernelMethod]: { params: strin
   'projects.bind': { params: 'ProjectsBindParams', result: 'OkResult' },
   'projects.branch': { params: 'ProjectsBranchParams', result: 'OkResult' },
   'stages.enter': { params: 'StagesEnterParams', result: 'OkResult' },
-  'gates.snapshot': { params: 'GateRefParams', result: 'Snapshot' },
-  'gates.release': { params: 'GateRefParams', result: 'ReleaseResult' },
-  'approvals.decide': { params: 'ApprovalsDecideParams', result: 'ApprovalRecord' },
-  'approvals.closeCondition': { params: 'ApprovalsCloseConditionParams', result: 'ApprovalRecord' },
-  'approvals.list': { params: 'ProjectRefParams', result: 'ApprovalsListResult' },
-  'packages.export': { params: 'PackagesExportParams', result: 'ExportResult' },
   'migration.apply': { params: 'MigrationApplyParams', result: 'MigrationApplyResult' },
-  'waivers.create': { params: 'WaiversCreateParams', result: 'WaiverRecord' },
   'incidents.list': { params: 'IncidentsListParams', result: 'IncidentsListResult' },
   'incidents.close': { params: 'IncidentsCloseParams', result: 'IncidentRecord' },
   'declass.setRule': { params: 'DeclassRule', result: 'OkResult' },

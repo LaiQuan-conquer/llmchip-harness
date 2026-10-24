@@ -302,7 +302,7 @@ export const kernelSchema = {
     },
     "CheckVerdict": {
       "title": "CheckVerdict",
-      "description": "Verdict layer ③ (requirements §3.9).",
+      "description": "Verdict layer ③ (requirements §3.9). `waived` is history only: it appears in verdicts recorded before waivers were removed (owner decision 2026-10-24) and is never issued now.",
       "type": "string",
       "enum": [
         "pass",
@@ -493,7 +493,6 @@ export const kernelSchema = {
         "verdict",
         "reasons",
         "reqRef",
-        "waiver",
         "createdAt"
       ],
       "properties": {
@@ -549,7 +548,8 @@ export const kernelSchema = {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "History only: the waiver that turned a failure into `waived` before waivers were removed (owner decision 2026-10-24). Never written now."
         },
         "createdAt": {
           "type": "string",
@@ -1325,8 +1325,6 @@ export const kernelSchema = {
         "process-profile",
         "implementation-library",
         "signoff-check",
-        "package-template",
-        "silicon-test",
         "estimator",
         "llm-provider",
         "ui-panel",
@@ -1978,16 +1976,6 @@ export const kernelSchema = {
             "$ref": "#/$defs/Criterion"
           },
           "minItems": 1
-        },
-        "waiver": {
-          "type": "string",
-          "enum": [
-            "none",
-            "risk_acceptance",
-            "foundry_waiver"
-          ],
-          "default": "none",
-          "description": "Which kind of waiver may apply (requirements §3.7.4)."
         }
       },
       "required": [
@@ -2015,12 +2003,6 @@ export const kernelSchema = {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "gates": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "checks": {
               "type": "array",
               "items": {
@@ -2049,43 +2031,6 @@ export const kernelSchema = {
         "title"
       ]
     },
-    "FlowGate": {
-      "title": "FlowGate",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "after": {
-          "type": "string"
-        },
-        "members": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "description": "Project slots forming the design snapshot."
-        },
-        "checks": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "title",
-        "after",
-        "members",
-        "checks"
-      ]
-    },
     "FlowPack": {
       "title": "FlowPack",
       "type": "object",
@@ -2103,12 +2048,6 @@ export const kernelSchema = {
             "$ref": "#/$defs/FlowStage"
           },
           "minItems": 1
-        },
-        "gates": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/FlowGate"
-          }
         },
         "checks": {
           "type": "array",
@@ -2128,10 +2067,9 @@ export const kernelSchema = {
         "id",
         "version",
         "stages",
-        "gates",
         "checks"
       ],
-      "description": "Stages, gates and check definitions of a workflow (architecture §4.3)."
+      "description": "Stages and check definitions of a workflow (architecture §4.3). There are no approval gates (owner decision 2026-10-24)."
     },
     "ProjectRecord": {
       "title": "ProjectRecord",
@@ -2163,74 +2101,6 @@ export const kernelSchema = {
         "flowHash",
         "createdAt"
       ]
-    },
-    "SnapshotMember": {
-      "title": "SnapshotMember",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "slot": {
-          "type": "string"
-        },
-        "hash": {
-          "$ref": "#/$defs/Hash"
-        }
-      },
-      "required": [
-        "slot",
-        "hash"
-      ]
-    },
-    "Snapshot": {
-      "title": "Snapshot",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "project": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string"
-        },
-        "gate": {
-          "type": "string"
-        },
-        "members": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SnapshotMember"
-          }
-        },
-        "hash": {
-          "$ref": "#/$defs/Hash"
-        },
-        "evidence": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "evidenceHash": {
-          "$ref": "#/$defs/Hash"
-        },
-        "missing": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "project",
-        "branch",
-        "gate",
-        "members",
-        "hash",
-        "evidence",
-        "evidenceHash",
-        "missing"
-      ],
-      "description": "Design snapshot of a gate plus its evidence manifest (requirements §3.7.2)."
     },
     "ApprovalCondition": {
       "title": "ApprovalCondition",
@@ -2285,7 +2155,8 @@ export const kernelSchema = {
         "closeCriteria",
         "check",
         "closed"
-      ]
+      ],
+      "description": "History only: the payload of an event kind the kernel no longer writes."
     },
     "ApprovalRecord": {
       "title": "ApprovalRecord",
@@ -2347,56 +2218,8 @@ export const kernelSchema = {
         "comment",
         "by",
         "at"
-      ]
-    },
-    "ApprovalStatus": {
-      "title": "ApprovalStatus",
-      "type": "string",
-      "enum": [
-        "none",
-        "approved",
-        "conditional_pending",
-        "conditional_closed",
-        "rejected",
-        "invalidated"
       ],
-      "description": "Approval states of requirements §3.7.3, plus `none` and `invalidated`."
-    },
-    "ReleaseResult": {
-      "title": "ReleaseResult",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "gate": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/$defs/ApprovalStatus"
-        },
-        "released": {
-          "type": "boolean"
-        },
-        "approval": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reasons": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Message"
-          }
-        }
-      },
-      "required": [
-        "gate",
-        "status",
-        "released",
-        "approval",
-        "reasons"
-      ],
-      "description": "Result of the single release check before advancing or exporting (architecture §4.7)."
+      "description": "History only: the payload of an event kind the kernel no longer writes."
     },
     "WaiverRecord": {
       "title": "WaiverRecord",
@@ -2458,7 +2281,8 @@ export const kernelSchema = {
         "acknowledgement",
         "by",
         "at"
-      ]
+      ],
+      "description": "History only: the payload of an event kind the kernel no longer writes."
     },
     "ProjectState": {
       "title": "ProjectState",
@@ -2502,12 +2326,6 @@ export const kernelSchema = {
               "entered"
             ]
           }
-        },
-        "gates": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ReleaseResult"
-          }
         }
       },
       "required": [
@@ -2515,8 +2333,7 @@ export const kernelSchema = {
         "branches",
         "branch",
         "slots",
-        "stages",
-        "gates"
+        "stages"
       ]
     },
     "RunQueuedPayload": {
@@ -2760,7 +2577,8 @@ export const kernelSchema = {
       },
       "required": [
         "approval"
-      ]
+      ],
+      "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
     },
     "ConditionClosedPayload": {
       "title": "ConditionClosedPayload",
@@ -2781,7 +2599,8 @@ export const kernelSchema = {
         "approval",
         "condition",
         "verdict"
-      ]
+      ],
+      "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
     },
     "ApprovalInvalidatedPayload": {
       "title": "ApprovalInvalidatedPayload",
@@ -2802,7 +2621,8 @@ export const kernelSchema = {
         "approval",
         "gate",
         "reason"
-      ]
+      ],
+      "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
     },
     "WaiverRecordedPayload": {
       "title": "WaiverRecordedPayload",
@@ -2815,7 +2635,8 @@ export const kernelSchema = {
       },
       "required": [
         "waiver"
-      ]
+      ],
+      "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
     },
     "PluginsListResult": {
       "title": "PluginsListResult",
@@ -3177,174 +2998,6 @@ export const kernelSchema = {
       "required": [
         "project",
         "stage"
-      ]
-    },
-    "GateRefParams": {
-      "title": "GateRefParams",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "project": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string",
-          "default": "main"
-        },
-        "gate": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "project",
-        "gate"
-      ]
-    },
-    "ConditionInput": {
-      "title": "ConditionInput",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "owner": {
-          "type": "string"
-        },
-        "closeCriteria": {
-          "type": "string"
-        },
-        "check": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "title",
-        "owner",
-        "closeCriteria",
-        "check"
-      ]
-    },
-    "ApprovalsDecideParams": {
-      "title": "ApprovalsDecideParams",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "project": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string",
-          "default": "main"
-        },
-        "gate": {
-          "type": "string"
-        },
-        "decision": {
-          "type": "string",
-          "enum": [
-            "approved",
-            "conditional",
-            "rejected"
-          ]
-        },
-        "conditions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ConditionInput"
-          },
-          "default": []
-        },
-        "comment": {
-          "type": "string",
-          "default": ""
-        }
-      },
-      "required": [
-        "project",
-        "gate",
-        "decision"
-      ]
-    },
-    "ApprovalsCloseConditionParams": {
-      "title": "ApprovalsCloseConditionParams",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "approval": {
-          "type": "string"
-        },
-        "condition": {
-          "type": "string"
-        },
-        "verdict": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "approval",
-        "condition",
-        "verdict"
-      ]
-    },
-    "ApprovalsListResult": {
-      "title": "ApprovalsListResult",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "approvals": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ApprovalRecord"
-          }
-        }
-      },
-      "required": [
-        "approvals"
-      ]
-    },
-    "WaiversCreateParams": {
-      "title": "WaiversCreateParams",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "risk_acceptance",
-            "foundry_waiver"
-          ]
-        },
-        "check": {
-          "type": "string"
-        },
-        "subjects": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Hash"
-          },
-          "minItems": 1
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1
-        },
-        "impact": {
-          "type": "string"
-        },
-        "acknowledgement": {
-          "$ref": "#/$defs/Hash"
-        }
-      },
-      "required": [
-        "kind",
-        "check",
-        "subjects",
-        "reason"
       ]
     },
     "IncidentRecord": {
@@ -4589,60 +4242,6 @@ export const kernelSchema = {
         "external"
       ]
     },
-    "PackagesExportParams": {
-      "title": "PackagesExportParams",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "project": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string",
-          "default": "main"
-        },
-        "gate": {
-          "type": "string",
-          "default": "G4",
-          "description": "Gate whose approval releases the export."
-        },
-        "slot": {
-          "type": "string",
-          "default": "tapeout-package",
-          "description": "Snapshot member holding the package."
-        }
-      },
-      "required": [
-        "project"
-      ]
-    },
-    "ExportResult": {
-      "title": "ExportResult",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "archive": {
-          "$ref": "#/$defs/ArtifactMeta"
-        },
-        "package": {
-          "$ref": "#/$defs/Hash"
-        },
-        "approval": {
-          "type": "string"
-        },
-        "lineageArtifacts": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "archive",
-        "package",
-        "approval",
-        "lineageArtifacts"
-      ],
-      "description": "An export archive: the released package with its lineage manifest (FR-PKG-02/04/05)."
-    },
     "MigrationApplyParams": {
       "title": "MigrationApplyParams",
       "type": "object",
@@ -4674,19 +4273,12 @@ export const kernelSchema = {
       "properties": {
         "restartStage": {
           "type": "string"
-        },
-        "invalidatedGates": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       },
       "required": [
-        "restartStage",
-        "invalidatedGates"
+        "restartStage"
       ],
-      "description": "Effect of a confirmed migration impact assessment (FR-MIG-03)."
+      "description": "Effect of a confirmed migration impact assessment (FR-MIG): the earliest stage to restart."
     },
     "MigrationAppliedPayload": {
       "title": "MigrationAppliedPayload",
@@ -4709,7 +4301,8 @@ export const kernelSchema = {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "History only: gates whose approvals the migration invalidated, before approval gates were removed (owner decision 2026-10-24)."
         },
         "comment": {
           "type": "string"
@@ -4719,8 +4312,7 @@ export const kernelSchema = {
         "project",
         "branch",
         "report",
-        "restartStage",
-        "gates"
+        "restartStage"
       ]
     },
     "PackageExportedPayload": {
@@ -4754,7 +4346,8 @@ export const kernelSchema = {
         "approval",
         "package",
         "archive"
-      ]
+      ],
+      "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
     }
   }
 } as const

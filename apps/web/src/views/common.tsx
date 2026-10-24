@@ -28,8 +28,6 @@ export function eventLine(e: EventRecord): string {
       return `incident ${p.incident.kind}`
     case 'egress.decided':
       return `egress ${p.destination.id}: ${p.decision}`
-    case 'approval.recorded':
-      return `approval ${p.approval.gate}: ${p.approval.decision}`
     case 'task.state':
       return `task ${short(p.task)} ${p.state}`
     default:

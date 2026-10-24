@@ -227,7 +227,6 @@ export function S2Detail({
     verdicts?.verdicts
       .filter((v) => v.check === check && v.run === r?.id)
       .at(-1);
-  const g0 = state?.gates.find((g) => g.gate === "G0");
 
   return (
     <>
@@ -257,11 +256,6 @@ export function S2Detail({
             hasChip ? "s2.pathChip" : hasGraph ? "s2.pathGraph" : "s2.pathNone",
           )}
         </p>
-        {g0 && !g0.released && runsData && (hasChip || hasGraph) && (
-          <p className="flow-note">
-            {t("s2.analysisOnly", { status: t(`status.${g0.status}` as Key) })}
-          </p>
-        )}
         {spec && (
           <Answer
             spec={spec}

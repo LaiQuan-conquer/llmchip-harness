@@ -37,8 +37,6 @@ export interface StepDef {
   /** The research step of the weights-to-silicon method this stage carries out. */
   research: Key | null
   what: Key
-  /** Gate decided after this stage. */
-  gate?: string
   checks: string[]
   runs: string[]
   facts: Fact[]
@@ -55,7 +53,6 @@ export const STEPS: StepDef[] = [
     title: 'flow.s0.title',
     research: 'flow.rd.census',
     what: 'flow.s0.what',
-    gate: 'G0',
     checks: ['model.census', 'estimate.feasibility'],
     runs: ['model-llama/import', 'estimator/estimate'],
     facts: [
@@ -123,7 +120,6 @@ export const STEPS: StepDef[] = [
     title: 'flow.s2.title',
     research: 'flow.rd.quant',
     what: 'flow.s2.what',
-    gate: 'G1',
     checks: ['accuracy.budget', 'numeric.accuracy'],
     runs: ['numeric/quantize', 'numeric/evaluate', 'numeric/infer', 'numeric/quantize_graph', 'numeric/evaluate_graph'],
     facts: [
@@ -158,7 +154,6 @@ export const STEPS: StepDef[] = [
     title: 'flow.s3.title',
     research: 'flow.rd.dataflow',
     what: 'flow.s3.what',
-    gate: 'G2',
     checks: ['arch.spec'],
     runs: ['arch-taalas/design', 'arch-taalas/verify_spec', 'arch-taalas/explore'],
     facts: [
@@ -223,7 +218,6 @@ export const STEPS: StepDef[] = [
     title: 'flow.s5.title',
     research: 'flow.rd.bitexact',
     what: 'flow.s5.what',
-    gate: 'G3',
     checks: ['sim-verilator.qualify.rtl-functional-sim', 'rtl.equivalence'],
     runs: ['sim-verilator/qualify', 'sim-verilator/verify'],
     facts: [
@@ -308,36 +302,6 @@ export const STEPS: StepDef[] = [
     ],
     implemented: true,
   },
-  {
-    stage: 'S8',
-    title: 'flow.s8.title',
-    research: null,
-    what: 'flow.s8.what',
-    gate: 'G4',
-    checks: ['package.integrity'],
-    runs: ['packager/build', 'packager/check'],
-    facts: [
-      { label: 'flow.fact.missingFiles', run: 'packager/check', show: (m, f) => (has(m, 'missing_files') ? f.int(m.missing_files) : undefined), good: (m) => zero(m, 'missing_files') },
-      { label: 'flow.fact.hashMismatches', run: 'packager/check', show: (m, f) => (has(m, 'hash_mismatches') ? f.int(m.hash_mismatches) : undefined), good: (m) => zero(m, 'hash_mismatches') },
-      { label: 'flow.fact.gdsMatches', run: 'packager/check', show: (m, f) => (has(m, 'gds_matches_snapshot') ? f.yes(m.gds_matches_snapshot) : undefined), good: (m) => m.gds_matches_snapshot as boolean | undefined },
-    ],
-    deliverables: [
-      { label: 'flow.out.package', run: 'packager/build', output: 'package' },
-      { label: 'flow.out.manifest', run: 'packager/build', output: 'manifest' },
-    ],
-    implemented: true,
-  },
-  {
-    stage: 'S9',
-    title: 'flow.s9.title',
-    research: null,
-    what: 'flow.s9.what',
-    checks: [],
-    runs: [],
-    facts: [],
-    deliverables: [],
-    implemented: false,
-  },
 ]
 
 /** Plain-language names of checks and run handlers. */
@@ -359,7 +323,6 @@ export const CHECK_TITLES: Record<string, Key> = {
   'phy.lvs': 'flow.check.lvs',
   'phy.sta': 'flow.check.sta',
   'phy.gatesim': 'flow.check.gatesim',
-  'package.integrity': 'flow.check.package',
   'vchip.l3': 'flow.check.vchipL3',
   'vchip.conformance': 'flow.check.vchipConformance',
 }
@@ -394,8 +357,6 @@ export const RUN_TITLES: Record<string, Key> = {
   'eda-gf180/lvs': 'flow.run.lvs',
   'eda-gf180/sta': 'flow.run.sta',
   'sim-verilator/gatesim': 'flow.run.gatesim',
-  'packager/build': 'flow.run.build',
-  'packager/check': 'flow.run.check',
   'vchip/bench': 'flow.run.vchipBench',
   'vchip/conform': 'flow.run.vchipConform',
 }

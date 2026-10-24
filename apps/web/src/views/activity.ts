@@ -1,5 +1,5 @@
 // Plain-language activity feed: the events a person follows (runs, checks,
-// stages, approvals, incidents), described by name. Internal bookkeeping such
+// stages, incidents), described by name. Internal bookkeeping such
 // as artifact writes and run starts is left out; the trajectory page keeps the
 // complete log.
 
@@ -26,20 +26,14 @@ export function activityLine(e: EventRecord, runNames: Map<string, string>, t: T
     case 'verdict.recorded': {
       const v = p.verdict
       const check = CHECK_TITLES[v.check] ? t(CHECK_TITLES[v.check]!) : v.check
-      return { text: t('activity.verdict', { check, verdict: t(`flow.verdict.${v.verdict}` as Key) }), tone: v.verdict === 'pass' || v.verdict === 'waived' ? 'ok' : 'bad' }
+      return { text: t('activity.verdict', { check, verdict: t(`flow.verdict.${v.verdict}` as Key) }), tone: v.verdict === 'pass' ? 'ok' : 'bad' }
     }
     case 'stage.entered': {
       const step = STEPS.find((s) => s.stage === p.stage)
       return { text: t('activity.stage', { stage: `${p.stage}${step ? ` ${t(step.title)}` : ''}` }), tone: '' }
     }
-    case 'approval.recorded':
-      return { text: t('activity.approval', { gate: p.approval.gate, decision: t(`activity.decision.${p.approval.decision}` as Key) }), tone: p.approval.decision === 'rejected' ? 'bad' : 'ok' }
-    case 'approval.invalidated':
-      return { text: t('activity.invalidated', { gate: p.gate }), tone: 'bad' }
     case 'project.created':
       return { text: t('activity.project', { project: p.project.title }), tone: '' }
-    case 'package.exported':
-      return { text: t('activity.exported'), tone: 'ok' }
     case 'incident.opened':
       return { text: t('activity.incident', { summary: message(p.incident.summary) }), tone: 'bad' }
     case 'kernel.started':

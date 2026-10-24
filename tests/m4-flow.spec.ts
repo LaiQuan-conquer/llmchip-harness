@@ -1,13 +1,12 @@
-// M4 acceptance: S0-S8 on GF180MCU through the kernel with the bundled plugins
-// and the proxy of the reference model, the human approving at G0-G4 (AC-02 for
-// the prerun): physical implementation, signoff (DRC, LVS, multi-corner STA with
-// constraint completeness, gate-level simulation), the tapeout package, its
-// integrity check, G4 and the export with lineage (AC-05, AC-08, AC-10). Reverse
-// tests: a removed constraint and an unregistered false path block signoff
-// (AC-06), an SDF result with incomplete annotation never passes (AC-12), an
-// external report for another GDS does not count (AC-11), and the migration
-// assessment to the target foundry restarts at S6 for this standard-cell-ROM design
-// (AC-14).
+// M4 acceptance: S0-S7 on GF180MCU through the kernel with the bundled plugins
+// and the proxy of the reference model, each stage judged by its checks:
+// physical implementation, signoff (DRC, LVS, multi-corner STA with constraint
+// completeness, gate-level simulation) and the lineage of the GDS back to the
+// model weights (AC-05, AC-08). Reverse tests: a removed constraint and an
+// unregistered false path block signoff (AC-06), an SDF result with incomplete
+// annotation never passes (AC-12), and the migration assessment to another
+// 180 nm process restarts at S6 for this standard-cell-ROM design (AC-14).
+// There is no tapeout package and no export (owner decision 2026-10-24).
 //
 // The full flow runs the EDA tools for about half an hour, so it is opt-in:
 // LLMCHIP_FULL_FLOW=1 (and the pinned image installed); otherwise it is skipped, visibly.
@@ -19,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { KernelClient } from '@llmchip/client'
-import { flow, out, PRERUN, PRERUN_SPATIAL, run, SPATIAL, throughG3Proxy } from './flow-helpers.ts'
+import { flow, out, PRERUN, PRERUN_SPATIAL, run, SPATIAL, throughS5Proxy } from './flow-helpers.ts'
 import { connect, REPO_PLUGINS, startKernel } from './helpers.ts'
 
 const IMAGE = JSON.parse(readFileSync(join(REPO_PLUGINS, 'eda-gf180/llmchip-plugin.json'), 'utf8')).entry.image as string
@@ -35,13 +34,13 @@ function available(image: string): boolean {
 
 const json = async (client: KernelClient, hash: string) => JSON.parse(await (await client.download(hash)).text())
 
-describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physical implementation, signoff and tapeout package on GF180MCU', () => {
-  it('runs S0-S8, signs off, approves G4 and exports the package with its lineage', { timeout: SPATIAL ? 36_000_000 : 5_400_000 }, async () => {
+describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physical implementation and signoff on GF180MCU', () => {
+  it('runs S0-S7, signs off, and traces the GDS back to the weights', { timeout: SPATIAL ? 36_000_000 : 5_400_000 }, async () => {
     const { kernel } = await startKernel(undefined, { bundled: true, config: { scheduler: { containerCpus: 16, containerMemory: '12g' } } })
     const client = await connect(kernel)
-    const { bind, judge, approve, dataHash } = flow(client)
-    const g3 = await throughG3Proxy(client)
-    const { spec, rtl, trace, design, l2 } = g3
+    const { bind, judge, dataHash } = flow(client)
+    const g3 = await throughS5Proxy(client)
+    const { spec, rtl, trace, design } = g3
     const chip = out(design, 'chip')
 
     // S6: constraints from the chip spec, physical implementation.
@@ -96,40 +95,20 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
     expect(partial.metrics.sdf_annotation_complete).toBe(false)
     expect((await judge('sdf.timing', partial)).verdict).not.toBe('pass')
 
-    // AC-11: an external DRC report bound to another GDS is marked as not matching the design.
-    const external = await client.upload(
-      JSON.stringify({ check: 'drc', gdsHash: 'f'.repeat(64), pdkVersion: 'gf180mcuD', ruleFileVersion: 'v1', tool: 'calibre', toolVersion: '2025.1', conditions: { switches: ['FEOL', 'BEOL'] }, topCell: 'chip_top', violations: 0 }),
-      { type: 'external.report' },
-    )
-    const imported = await run(client, 'packager', 'import_external', { report: external.hash, gds })
-    expect(imported.metrics).toMatchObject({ binding_complete: true, matches_current_design: false })
-    expect((await judge('external.signoff', imported)).verdict).toBe('fail')
-
-    // S8: tapeout package and its integrity check, then G4 and the export.
-    await client.call('stages.enter', { project: 'chip', stage: 'S8' })
-    const template = await dataHash('package-gf180mcu')
-    const pkg = await run(client, 'packager', 'build', {
-      template, gds, layout, rtl, chip, pads: out(impl, 'pads'), drc: out(drc, 'report'), lvs: out(lvs, 'report'), sta: out(sta, 'report'),
-      constraints: sdc, exceptions: registry.hash, measurements: out(impl, 'measurements'), l2: out(l2, 'outputs'),
-    })
-    await bind('package-template', template)
-    await bind('tapeout-package', out(pkg, 'package'))
-    const integrity = await run(client, 'packager', 'check', { package: out(pkg, 'package'), template, gds })
-    expect((await judge('package.integrity', integrity)).verdict).toBe('pass')
-    const g4 = await approve('G4')
-    const exported = await client.call('packages.export', { project: 'chip' })
-    expect(exported.approval).toBe(g4.id)
-    // AC-08: from the package back to the model weights, with runs, tool versions and verdicts.
-    const tar = Buffer.from(await (await client.download(exported.archive.hash)).arrayBuffer())
-    const lineage = JSON.parse(entry(tar, 'lineage.json'))
-    const types = new Set(lineage.artifacts.map((a: { type: string }) => a.type))
-    for (const type of ['model.weights.llama2c', 'numeric.spec', 'rtl.bundle', 'layout.gds', 'drc.report', 'tapeout.package']) expect(types).toContain(type)
-    expect(lineage.runs.some((r: { plugin: string; image: string | null }) => r.plugin === 'eda-gf180' && r.image === IMAGE)).toBe(true)
-
-    // AC-10: changing a snapshot member after G4 (here the constraints) invalidates it and blocks the export.
-    await bind('constraints', removed.hash)
-    expect(await client.call('gates.release', { project: 'chip', gate: 'G4' })).toMatchObject({ released: false, status: 'invalidated' })
-    await expect(client.call('packages.export', { project: 'chip' })).rejects.toMatchObject({ code: 'EXPORT_BLOCKED' })
+    // AC-08: from the GDS back to the model weights, through the runs that made each artifact.
+    const lineage = await client.call('artifacts.lineage', { hash: gds, direction: 'up' })
+    const types = new Set(lineage.nodes.map((n) => n.type))
+    for (const type of ['model.weights.llama2c', 'numeric.spec', 'rtl.bundle', 'layout.gds']) expect(types).toContain(type)
+    const implRun = await client.call('runs.get', { run: lineage.nodes.find((n) => n.type === 'layout.gds')!.run! })
+    expect(implRun.plugin).toBe('eda-gf180')
+    // The tool version of that run: the plugin's version and the image its manifest pins by digest
+    // (the run record does not store the image itself; implementation guide §7.2).
+    const eda = (await client.call('plugins.list')).plugins.find((p) => p.id === implRun.plugin)!
+    expect(eda.version).toBeTruthy()
+    expect(JSON.parse(readFileSync(join(eda.dir, 'llmchip-plugin.json'), 'utf8')).entry.image).toBe(IMAGE)
+    // The verdicts recorded on the GDS: the signoff checks that judged it.
+    const onGds = (await client.call('verdicts.list', { subject: gds })).verdicts
+    for (const check of ['phy.drc', 'phy.lvs']) expect(onGds.find((v) => v.check === check)?.verdict).toBe('pass')
 
     // AC-14 (and FR-MIG-01/02): the target foundry, assessed for this standard-cell-ROM design.
     const migration = await run(client, 'estimator', 'migrate', { chip, current: await dataHash('gf180mcu'), target: await dataHash('sephonchitech-180bcd'), library: await dataHash('library-180nm') })
@@ -137,13 +116,3 @@ describe.skipIf(!process.env.LLMCHIP_FULL_FLOW || !available(IMAGE))('M4: physic
   })
 })
 
-function entry(tar: Buffer, name: string): string {
-  let offset = 0
-  while (offset + 512 <= tar.length && tar[offset] !== 0) {
-    const entryName = tar.subarray(offset, offset + 100).toString('utf8').replace(/\0.*$/s, '')
-    const size = parseInt(tar.subarray(offset + 124, offset + 136).toString('utf8').replace(/\0.*$/s, '').trim(), 8)
-    if (entryName === name) return tar.subarray(offset + 512, offset + 512 + size).toString('utf8')
-    offset += 512 + Math.ceil(size / 512) * 512
-  }
-  throw new Error(`${name} is not in the archive`)
-}

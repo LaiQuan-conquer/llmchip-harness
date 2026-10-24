@@ -287,16 +287,8 @@ export class Kernel {
         this.workflow.enterStage(project, branch ?? 'main', stage, session.actor)
         return { ok: true }
       },
-      'gates.snapshot': ({ project, branch, gate }) => this.workflow.snapshot(project, branch ?? 'main', gate),
-      'gates.release': ({ project, branch, gate }) => this.workflow.release(project, branch ?? 'main', gate),
-      'approvals.decide': (params, session) => this.workflow.decide(params, session.actor),
-      'approvals.closeCondition': ({ approval, condition, verdict }, session) => this.workflow.closeCondition(approval, condition, verdict, session.actor),
-      'approvals.list': ({ project, branch }) => ({ approvals: this.workflow.approvals(project, branch) }),
-      'packages.export': ({ project, branch, gate, slot }, session) =>
-        this.workflow.exportPackage(project, branch ?? 'main', gate ?? 'G4', slot ?? 'tapeout-package', session.actor),
       'migration.apply': ({ project, branch, report, comment }, session) =>
         this.workflow.applyMigration(project, branch ?? 'main', report, comment ?? '', session.actor),
-      'waivers.create': (params, session) => this.workflow.createWaiver(params, session.actor),
       'incidents.list': (params) => ({ incidents: this.incidents.list(params) }),
       'incidents.close': ({ incident, cause, action }, session) => this.incidents.close(incident, cause, action, session.actor),
       'declass.setRule': (rule, session) => {

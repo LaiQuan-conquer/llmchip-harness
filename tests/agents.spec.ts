@@ -186,7 +186,7 @@ describe('policy and permissions (AC-M1-07)', () => {
       expect((await external.call('kernel.info')).name).toBe('harnessd')
       expect((await external.call('projects.list')).projects).toHaveLength(1)
       for (const [method, params] of [
-        ['approvals.decide', { project: 'chip', gate: 'GA', decision: 'approved' }],
+        ['projects.bind', { project: 'chip', slot: 'design', hash: '0'.repeat(64) }],
         ['secrets.list', {}],
         ['kernel.shutdown', {}],
         ['declass.setRule', { id: 'r', sourceType: 't', fields: ['/a'], targetLabel: 'public' }],

@@ -66,7 +66,7 @@ export function SpatialAnswer({ chip, ppa, verify, bound }: { chip: Json; ppa: J
   return (
     <div className={`s0-answer ${die && limit && die.typ > limit ? 'infeasible' : ''}`}>
       <span>
-        <span className="pill">{t(bound ? 's3.boundG2' : 's3.notBound')}</span>{' '}
+        <span className="pill">{t(bound ? 's3.bound' : 's3.notBound')}</span>{' '}
         {t('s3sp.answer', { tps: f.tps(p.tokensPerSecond), clock: chip.targets.clockMHz, cycles: f.int(p.cyclesPerToken), cells: f.mm2(ppa.area?.cellsMm2?.typ), x: chosen?.xMm, y: chosen?.yMm })}
       </span>
       <small>

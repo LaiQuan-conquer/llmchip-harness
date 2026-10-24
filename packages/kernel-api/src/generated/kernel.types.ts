@@ -23,7 +23,7 @@ export type ExecutionStatus =
  */
 export type ParseStatus = 'complete' | 'incomplete' | 'failed'
 /**
- * Verdict layer ③ (requirements §3.9).
+ * Verdict layer ③ (requirements §3.9). `waived` is history only: it appears in verdicts recorded before waivers were removed (owner decision 2026-10-24) and is never issued now.
  */
 export type CheckVerdict = 'pass' | 'fail' | 'waived' | 'indeterminate'
 /**
@@ -47,17 +47,10 @@ export type PluginKind =
   | 'process-profile'
   | 'implementation-library'
   | 'signoff-check'
-  | 'package-template'
-  | 'silicon-test'
   | 'estimator'
   | 'llm-provider'
   | 'ui-panel'
   | 'test'
-/**
- * Approval states of requirements §3.7.3, plus `none` and `invalidated`.
- */
-export type ApprovalStatus =
-  'none' | 'approved' | 'conditional_pending' | 'conditional_closed' | 'rejected' | 'invalidated'
 
 /**
  * Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements §6.1).
@@ -215,7 +208,10 @@ export interface VerdictRecord {
   verdict: CheckVerdict
   reasons: Message[]
   reqRef: string | null
-  waiver: string | null
+  /**
+   * History only: the waiver that turned a failure into `waived` before waivers were removed (owner decision 2026-10-24). Never written now.
+   */
+  waiver?: string | null
   createdAt: string
 }
 /**
@@ -664,10 +660,6 @@ export interface CheckDefinition {
    * @minItems 1
    */
   criteria: [Criterion, ...Criterion[]]
-  /**
-   * Which kind of waiver may apply (requirements §3.7.4).
-   */
-  waiver?: 'none' | 'risk_acceptance' | 'foundry_waiver'
 }
 export interface FlowStage {
   id: string
@@ -675,7 +667,6 @@ export interface FlowStage {
   entry?: StageEntry
 }
 export interface StageEntry {
-  gates?: string[]
   /**
    * Checks that must pass on the artifact bound to a slot before the stage can be entered (e.g. integration views, FR-PHY-08).
    */
@@ -684,20 +675,8 @@ export interface StageEntry {
     slot: string
   }[]
 }
-export interface FlowGate {
-  id: string
-  title: string
-  after: string
-  /**
-   * Project slots forming the design snapshot.
-   *
-   * @minItems 1
-   */
-  members: [string, ...string[]]
-  checks: string[]
-}
 /**
- * Stages, gates and check definitions of a workflow (architecture §4.3).
+ * Stages and check definitions of a workflow (architecture §4.3). There are no approval gates (owner decision 2026-10-24).
  */
 export interface FlowPack {
   id: string
@@ -706,7 +685,6 @@ export interface FlowPack {
    * @minItems 1
    */
   stages: [FlowStage, ...FlowStage[]]
-  gates: FlowGate[]
   checks: CheckDefinition[]
   /**
    * Slots whose artifacts are hard constraints (e.g. the timing exception registry): only a human may bind them (requirements §3.2, FR-SGN-02b).
@@ -720,23 +698,9 @@ export interface ProjectRecord {
   flowHash: Hash
   createdAt: string
 }
-export interface SnapshotMember {
-  slot: string
-  hash: Hash
-}
 /**
- * Design snapshot of a gate plus its evidence manifest (requirements §3.7.2).
+ * History only: the payload of an event kind the kernel no longer writes.
  */
-export interface Snapshot {
-  project: string
-  branch: string
-  gate: string
-  members: SnapshotMember[]
-  hash: Hash
-  evidence: string[]
-  evidenceHash: Hash
-  missing: string[]
-}
 export interface ApprovalCondition {
   id: string
   title: string
@@ -752,6 +716,9 @@ export interface ApprovalCondition {
     verdict: string
   } | null
 }
+/**
+ * History only: the payload of an event kind the kernel no longer writes.
+ */
 export interface ApprovalRecord {
   id: string
   project: string
@@ -766,15 +733,8 @@ export interface ApprovalRecord {
   at: string
 }
 /**
- * Result of the single release check before advancing or exporting (architecture §4.7).
+ * History only: the payload of an event kind the kernel no longer writes.
  */
-export interface ReleaseResult {
-  gate: string
-  status: ApprovalStatus
-  released: boolean
-  approval: string | null
-  reasons: Message[]
-}
 export interface WaiverRecord {
   id: string
   kind: 'risk_acceptance' | 'foundry_waiver'
@@ -800,7 +760,6 @@ export interface ProjectState {
     [k: string]: Hash | undefined
   }
   stages: StageState[]
-  gates: ReleaseResult[]
 }
 export interface StageState {
   id: string
@@ -852,19 +811,31 @@ export interface StageEnteredPayload {
   branch: string
   stage: string
 }
+/**
+ * History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more.
+ */
 export interface ApprovalRecordedPayload {
   approval: ApprovalRecord
 }
+/**
+ * History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more.
+ */
 export interface ConditionClosedPayload {
   approval: string
   condition: string
   verdict: string
 }
+/**
+ * History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more.
+ */
 export interface ApprovalInvalidatedPayload {
   approval: string
   gate: string
   reason: Message
 }
+/**
+ * History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more.
+ */
 export interface WaiverRecordedPayload {
   waiver: WaiverRecord
 }
@@ -951,45 +922,6 @@ export interface StagesEnterParams {
   project: string
   branch?: string
   stage: string
-}
-export interface GateRefParams {
-  project: string
-  branch?: string
-  gate: string
-}
-export interface ConditionInput {
-  id: string
-  title: string
-  owner: string
-  closeCriteria: string
-  check: string
-}
-export interface ApprovalsDecideParams {
-  project: string
-  branch?: string
-  gate: string
-  decision: 'approved' | 'conditional' | 'rejected'
-  conditions?: ConditionInput[]
-  comment?: string
-}
-export interface ApprovalsCloseConditionParams {
-  approval: string
-  condition: string
-  verdict: string
-}
-export interface ApprovalsListResult {
-  approvals: ApprovalRecord[]
-}
-export interface WaiversCreateParams {
-  kind: 'risk_acceptance' | 'foundry_waiver'
-  check: string
-  /**
-   * @minItems 1
-   */
-  subjects: [Hash, ...Hash[]]
-  reason: string
-  impact?: string
-  acknowledgement?: Hash
 }
 /**
  * An anomaly that must be visible to humans (requirements §3.10).
@@ -1280,27 +1212,6 @@ export interface RuntimeTokens {
   owner: string
   external: string
 }
-export interface PackagesExportParams {
-  project: string
-  branch?: string
-  /**
-   * Gate whose approval releases the export.
-   */
-  gate?: string
-  /**
-   * Snapshot member holding the package.
-   */
-  slot?: string
-}
-/**
- * An export archive: the released package with its lineage manifest (FR-PKG-02/04/05).
- */
-export interface ExportResult {
-  archive: ArtifactMeta
-  package: Hash
-  approval: string
-  lineageArtifacts: number
-}
 export interface MigrationApplyParams {
   project: string
   branch?: string
@@ -1308,20 +1219,25 @@ export interface MigrationApplyParams {
   comment?: string
 }
 /**
- * Effect of a confirmed migration impact assessment (FR-MIG-03).
+ * Effect of a confirmed migration impact assessment (FR-MIG): the earliest stage to restart.
  */
 export interface MigrationApplyResult {
   restartStage: string
-  invalidatedGates: string[]
 }
 export interface MigrationAppliedPayload {
   project: string
   branch: string
   report: Hash
   restartStage: string
-  gates: string[]
+  /**
+   * History only: gates whose approvals the migration invalidated, before approval gates were removed (owner decision 2026-10-24).
+   */
+  gates?: string[]
   comment?: string
 }
+/**
+ * History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more.
+ */
 export interface PackageExportedPayload {
   project: string
   branch: string

@@ -579,7 +579,7 @@ export class AgentRuntime {
 function systemPrompt(task: TaskRecord): string {
   const { spec } = task
   return [
-    'You are a managed agent of llmchip-harness, a workbench that turns LLM weights into chip tapeout packages.',
+    'You are a managed agent of llmchip-harness, a workbench that takes LLM weights through specification, RTL, verification, synthesis, physical design and signoff of a chip.',
     `Role: ${spec.role}. Goal ${spec.goal}: ${spec.title}.`,
     'Work only through the tools. Every change goes through the iteration loop: write files, submit a change set, a different agent reviews it, a passing verdict verifies it, then it merges.',
     `You may write only paths matching: ${spec.writeScope!.join(', ') || '(nothing)'}. You may start only these runs: ${spec.runs!.join(', ') || '(none)'}.`,

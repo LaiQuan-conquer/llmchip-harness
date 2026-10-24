@@ -1,9 +1,9 @@
 // M3 acceptance through the kernel with the bundled plugins and the proxy of the
 // reference model (owner decision 2026-10-18; the chip-level RTL keeps its data
 // in the external SPI SRAM, see rtl-taalas):
-// after G2, S4 generates the RTL (lint, compiler check on the ISA simulator),
+// after S3, S4 generates the RTL (lint, compiler check on the ISA simulator),
 // S5 executes the whole verification plan in the pinned EDA image with a
-// qualified simulator, and G3 is approved on the bound snapshot (AC-03). An
+// qualified simulator, and rtl.equivalence passes on the bound RTL (AC-03). An
 // injected RTL defect fails the check, opens an incident and is localized to
 // its operation and cycle (AC-09). The Chip Playground's L3 equals L2.
 // Skipped, visibly, where the tool image is not installed.
@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { flow, out, run, throughG2Proxy } from './flow-helpers.ts'
+import { flow, out, run, throughS3Proxy } from './flow-helpers.ts'
 import { connect, REPO_PLUGINS, startKernel } from './helpers.ts'
 
 const IMAGE = JSON.parse(readFileSync(join(REPO_PLUGINS, 'sim-verilator/llmchip-plugin.json'), 'utf8')).entry.image as string
@@ -53,11 +53,11 @@ function editTar(tar: Buffer, name: string, edit: (text: string) => string): Buf
 }
 
 describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => {
-  it('verifies the RTL against L2, approves G3, and localizes an injected defect', { timeout: 1_800_000 }, async () => {
+  it('verifies the RTL against L2 and localizes an injected defect', { timeout: 1_800_000 }, async () => {
     const { kernel } = await startKernel(undefined, { bundled: true })
     const client = await connect(kernel)
-    const { bind, judge, approve, dataHash } = flow(client)
-    const { tokenizer, evalset, spec, l2weights, l2, design } = await throughG2Proxy(client)
+    const { bind, judge, dataHash } = flow(client)
+    const { tokenizer, evalset, spec, l2weights, l2, design } = await throughS3Proxy(client)
 
     // S4 admission: the storage implementation has the views S4 needs (FR-PHY-08).
     const calibration = await run(client, 'eda-gf180', 'calibrate', {}, { implementation: 'gf180mcu.stdcell-rom', sizes: [[256, 16]] })
@@ -107,9 +107,8 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
     const qualify = await run(client, 'sim-verilator', 'qualify', {})
     expect(qualify.metrics).toMatchObject({ 'verilator.mutant_detected': true, 'icarus.mutant_detected': true, qualified: true })
     expect((await judge('sim-verilator.qualify.rtl-functional-sim', qualify)).verdict).toBe('pass')
-    expect((await judge('rtl.equivalence', verify)).verdict).toBe('pass')
-    await approve('G3')
-    expect((await client.call('gates.release', { project: 'chip', gate: 'G3' })).released).toBe(true)
+    const passed = await judge('rtl.equivalence', verify)
+    expect(passed.verdict).toBe('pass')
 
     // AC-09: an injected RTL defect fails, becomes an incident and is localized.
     const tar = Buffer.from(await (await client.download(rtl)).arrayBuffer())
@@ -135,8 +134,9 @@ describe.skipIf(!available(IMAGE))('M3: RTL generation and verification', () => 
       code: 'CHECK_FAILED_DIVERGENCE',
       params: { check: 'rtl.equivalence', verdict: 'fail', divergence_operation: 'layer 0 silu gate', divergence_cycle: failing.metrics.divergence_cycle },
     })
-    // The faulty bundle is not part of the approved snapshot, so G3 stays released.
-    expect((await client.call('gates.release', { project: 'chip', gate: 'G3' })).released).toBe(true)
+    // The verdict judges the faulty bundle only: the bound RTL keeps its passing verdict.
+    expect(verdict.subjects).toContain(bad.hash)
+    expect((await client.call('verdicts.list', { check: 'rtl.equivalence', subject: rtl })).verdicts[0]).toMatchObject({ id: passed.id, verdict: 'pass' })
 
     // Chip Playground (FR-PLY-01/02): L3 from the RTL equals L2 token for token.
     const prompts = await client.upload(JSON.stringify({ format: 'llmchip-evalset/1', prompts: ['once upon a time', 'lily wanted'], steps: 24 }), {

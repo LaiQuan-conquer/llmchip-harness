@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This is the monorepo for **llmchip-harness**: a private-deployment workbench that takes the weights of an open-source LLM and produces a foundry-ready tapeout package for a chip with the model's weights hardwired into silicon. All research and development work in the workbench is done by AI agents; humans approve at gates.
+This is the monorepo for **llmchip-harness**: a private-deployment workbench that takes the weights of an open-source LLM through the six steps before tapeout (specification, RTL, verification, synthesis, physical design, signoff) for a chip with the model's weights hardwired into silicon, on open-source PDKs. All research and development work in the workbench is done by AI agents. There are no approval gates (owner decision 2026-10-24): each step's checks judge its results, and humans decide on hard constraints.
 
 This file is the **single entry point** for every agent working on this repository. Read it before doing anything else.
 
@@ -76,7 +76,7 @@ Current packages (responsibilities, entry points and allowed dependencies: imple
 
 Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2); `python/llmchip-vchip`, the test harness for virtual chips (`vchip`: loads a chip from its `chip.json`, drives generation from prompts, measures quality and speed against reference and golden chips; standalone, see its README, and inside the kernel as the plugin `vchip`).
 
-Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `packager`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
+Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -106,9 +106,18 @@ Planned directories still to be created: `apps/desktop/` and `images/` (architec
   - Among production sources, only `packages/kernel/src/plugin-host.ts` imports Cordis.
 - Kernel state changes only through `EventStore.append` or `EventStore.transaction`. Every other table belongs to a `Projection` and is written only in its `apply`. Bump a projection's `version` whenever its `setup` or `apply` changes.
 - Every kernel API method and event payload is defined in the kernel schema first, then in `KernelMethods`/`KERNEL_METHOD_DEFS` or `KernelEventPayloads`/`KERNEL_EVENT_PAYLOAD_DEFS`. Owner-only is the default; add a method to `EXTERNAL_METHODS` in `security/policy.ts` only when external clients may call it.
-- A gate check must consume the gate's slotted artifacts as run inputs, so that its verdict counts as evidence for exactly that snapshot. Each signoff check runs on exactly the artifacts it judges.
+- A check must consume the bound artifacts it judges as run inputs: its verdict's subjects are exactly those hashes, so it is evidence for them and for nothing else. Each signoff check runs on exactly the artifacts it judges.
 - Change a check definition's `version` whenever its standards change; that is how a check that passes only after a standard change is detected (AC-M1-13).
 - Data in `process-library` records its source and confidence for every value; empirical values stay empirical until calibrated.
+
+### Verdicts and failures
+
+Hard constraints (owner decisions 2026-10-24):
+
+- There are no waivers. A failed or undecidable check stays on record as it is; fix the generator, template or configuration, then run the step's work and its tests again. Never change a check, a threshold or a test so that a failure disappears (see Prohibitions).
+- A rule-deck configuration is not a waiver. The one in force: the GF180 signoff rules exclude CUP.3 and DCF.1a inside the PDK's own `gf180mcu_fd_io` cells and their footprints (owner decisions 2026-10-18 and 2026-10-24); the excluded markers stay fully reported and counted apart. Any other exclusion needs the owner.
+- Every signoff check added from now on runs with a second independent open-source tool where one exists (DRC: KLayout and Magic; LVS: Netgen and KLayout; equivalence: eqy and kepler-formal; GDS: two stream-outs compared by XOR), and has a negative control: a known injected defect that the check must report. Where no second tool exists, say so in the check's report. The existing GF180 signoff checks follow in phase R7.
+- A check that did not run, or ran without covering what it judges, is reported as not run or indeterminate, never as pass (DP-10).
 
 ### Toolchain
 
@@ -133,7 +142,7 @@ Planned directories still to be created: `apps/desktop/` and `images/` (architec
 | `yarn test` | Build project references, then run all tests |
 | `yarn build` | Compile every package to `lib/` and build the Web UI to `apps/web/dist/` |
 | `yarn ui` | Open the Web UI of the running kernel in the browser (`llmchip ui`) |
-| `yarn demo [--until G0..G4] [--arch spatial]` | Drive project `demo` through the default flow on the running kernel, for the Web UI's Flow page (S5 onwards needs the EDA image); `--arch spatial` designs the spatial engine `taalas-spatial/1` |
+| `yarn demo [--until S0..S7] [--arch spatial]` | Drive project `demo` through the default flow on the running kernel, stopping after the given stage, for the Web UI's Flow page (S5 onwards needs the EDA image); `--arch spatial` designs the spatial engine `taalas-spatial/1` |
 | `yarn demo --model PATH` | Start a project from a downloaded model on this machine: import, census, estimate, graph recovery, L0, comparison with transformers, and an int8 numeric analysis (S2) |
 | `yarn clean` | Remove build output |
 | `yarn harnessd serve [--home DIR]` | Run the kernel daemon from source (home defaults to `$LLMCHIP_HOME` or `~/.llmchip`) |
@@ -170,7 +179,7 @@ A package that imports a vendored package follows the same rules: declare it as 
 
 - `runtime: container` plugins run under Podman (`podman run -i`, IF-2 over stdio) with no network, read-only inputs and plugin directory, and only the run workspace writable. Pin `entry.image` by digest.
 - The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
-- The full S0–S8 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (36 min measured on 2026-10-20) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180`, `packager` or the signoff checks. `LLMCHIP_ARCH=spatial` runs it on the spatial engine instead; run that after any change to the spatial generator.
+- The full S0–S7 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (36 min measured on 2026-10-20) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180` or the signoff checks. `LLMCHIP_ARCH=spatial` runs it on the spatial engine instead; run that after any change to the spatial generator.
 - Hard constraint (owner decision 2026-10-22): after any change to the spatial generator (`plugins/rtl-taalas/src/llmchip_rtl/spatial/`) or to the test harness's bridge to the RTL (`python/llmchip-vchip/src/llmchip_vchip/bridges/`, including the testbench in `bridges/tb/`), run the full conformance check once and report its result: `yarn vchip new rtl --proxy --id spatial-5k`, then `yarn vchip conform spatial-5k` without `--quick` (T-01–T-19, about 13 min), or the L3 tests with `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py` (all 20 prompts, about 11 min). Both need the EDA image; a skipped run is not a pass.
 - In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 

@@ -1,21 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type {
-  ApprovalRecord,
-  ConstraintProposal,
-  ProjectRecord,
-  VerdictRecord,
-  WaiverRecord,
-} from '@llmchip/kernel-api'
+import type { ConstraintProposal, ProjectRecord, VerdictRecord } from '@llmchip/kernel-api'
 import type { Projection } from '../events/store.ts'
 
 /**
- * Projection of the workflow events (K3, K6, K7): projects, branches, slot
+ * Projection of the workflow events (K3, K6): projects, branches, slot
  * bindings with their history (for branching at a checkpoint), entered
- * stages, verdicts, approvals and waivers.
+ * stages, verdicts and constraint proposals. Version 3 dropped approvals and
+ * waivers (owner decision 2026-10-24); their events in older logs are ignored.
  */
 export const workflowProjection: Projection = {
   name: 'workflow',
-  version: 2,
+  version: 3,
   setup(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
@@ -25,9 +20,6 @@ export const workflowProjection: Projection = {
       CREATE TABLE IF NOT EXISTS stages (project TEXT NOT NULL, branch TEXT NOT NULL, stage TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (project, branch, stage));
       CREATE TABLE IF NOT EXISTS verdicts (id TEXT PRIMARY KEY, check_id TEXT NOT NULL, seq INTEGER NOT NULL, record TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS verdicts_check ON verdicts (check_id, seq);
-      CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, project TEXT NOT NULL, branch TEXT NOT NULL, gate TEXT NOT NULL, seq INTEGER NOT NULL, invalidated INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS approvals_gate ON approvals (project, branch, gate, seq);
-      CREATE TABLE IF NOT EXISTS waivers (id TEXT PRIMARY KEY, check_id TEXT NOT NULL, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS constraint_proposals (id TEXT PRIMARY KEY, project TEXT NOT NULL, check_id TEXT NOT NULL, status TEXT NOT NULL, seq INTEGER NOT NULL, record TEXT NOT NULL);
     `)
   },
@@ -65,31 +57,6 @@ export const workflowProjection: Projection = {
         db.prepare('INSERT INTO verdicts (id, check_id, seq, record) VALUES (?, ?, ?, ?)').run(verdict.id, verdict.check, event.seq, JSON.stringify(verdict))
         break
       }
-      case 'approval.recorded': {
-        const approval = p.approval as ApprovalRecord
-        db.prepare('INSERT INTO approvals (id, project, branch, gate, seq, record) VALUES (?, ?, ?, ?, ?, ?)').run(
-          approval.id,
-          approval.project,
-          approval.branch,
-          approval.gate,
-          event.seq,
-          JSON.stringify(approval),
-        )
-        break
-      }
-      case 'approval.condition_closed': {
-        const row = db.prepare('SELECT record FROM approvals WHERE id = ?').get(p.approval) as { record: string } | undefined
-        if (!row) break
-        const approval = JSON.parse(row.record) as ApprovalRecord
-        for (const condition of approval.conditions) {
-          if (condition.id === p.condition) condition.closed = { by: event.actor, at: event.ts, verdict: p.verdict }
-        }
-        db.prepare('UPDATE approvals SET record = ? WHERE id = ?').run(JSON.stringify(approval), approval.id)
-        break
-      }
-      case 'approval.invalidated':
-        db.prepare('UPDATE approvals SET invalidated = 1 WHERE id = ?').run(p.approval)
-        break
       case 'constraint.proposed': {
         const proposal = p.proposal as ConstraintProposal
         db.prepare('INSERT INTO constraint_proposals (id, project, check_id, status, seq, record) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -107,11 +74,6 @@ export const workflowProjection: Projection = {
         if (!row) break
         const proposal = { ...JSON.parse(row.record), status: p.decision } as ConstraintProposal
         db.prepare('UPDATE constraint_proposals SET status = ?, seq = ?, record = ? WHERE id = ?').run(p.decision, event.seq, JSON.stringify(proposal), proposal.id)
-        break
-      }
-      case 'waiver.recorded': {
-        const waiver = p.waiver as WaiverRecord
-        db.prepare('INSERT INTO waivers (id, check_id, record) VALUES (?, ?, ?)').run(waiver.id, waiver.check, JSON.stringify(waiver))
         break
       }
     }

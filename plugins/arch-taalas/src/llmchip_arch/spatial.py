@@ -316,7 +316,7 @@ def design(spec: dict, spec_hash: str, weights_hash: str, storage: dict, profile
 
 
 def verify(chip: dict, spec: dict, spec_hash: str, ppa: dict, arrays) -> dict:
-    """G2 evidence of a spatial chip spec: numeric spec, observation points, area, and the
+    """S3 evidence (check arch.spec) of a spatial chip spec: numeric spec, observation points, area, and the
     speed recomputed from the circuits the weights give (and the cycle target, if set)."""
     covered = set(chip.get("observability", {}).get("covers", []))
     needed = {p["id"] for p in spec["observationPoints"]}

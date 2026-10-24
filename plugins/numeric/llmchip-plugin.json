@@ -55,7 +55,7 @@
     },
     {
       "name": "evaluate",
-      "title": "Accuracy of L2 against L0 (G1 evidence)",
+      "title": "Accuracy of L2 against L0 (S2 evidence)",
       "inputs": [
         { "name": "ir", "types": ["model.ir"], "required": true },
         { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },

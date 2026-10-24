@@ -285,7 +285,7 @@ def design(
 
 
 def verify(chip: dict, spec: dict, spec_hash: str, ppa: dict, arrays: dict | None = None) -> dict:
-    """Consistency of a chip spec with its numeric spec and area limit (G2 evidence). With the
+    """Consistency of a chip spec with its numeric spec and area limit (S3 evidence, check arch.spec). With the
     numeric weights, the stated speed is recomputed from the microcode the chip spec implies
     (or, for the spatial template, from the circuits the weights give)."""
     if chip.get("architecture") == spatial.ARCHITECTURE:

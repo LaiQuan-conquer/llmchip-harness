@@ -1,30 +1,18 @@
 import { readFileSync } from 'node:fs'
-import {
-  type Actor,
-  type ApprovalRecord,
-  type ApprovalStatus,
-  type ApprovalsDecideParams,
-  type ArtifactMeta,
-  type CheckDefinition,
-  type CheckOverride,
-  type ConstraintProposal,
-  type Criterion,
-  type CriterionCondition,
-  type ExportResult,
-  type FlowGate,
-  type FlowPack,
-  type Label,
-  type Message,
-  type MigrationApplyResult,
-  type ProjectRecord,
-  type ProjectState,
-  type ReleaseResult,
-  type RunRecord,
-  type Snapshot,
-  type SnapshotMember,
-  type VerdictRecord,
-  type WaiverRecord,
-  type WaiversCreateParams,
+import type {
+  Actor,
+  CheckDefinition,
+  CheckOverride,
+  ConstraintProposal,
+  Criterion,
+  CriterionCondition,
+  FlowPack,
+  Message,
+  MigrationApplyResult,
+  ProjectRecord,
+  ProjectState,
+  RunRecord,
+  VerdictRecord,
 } from '@llmchip/kernel-api'
 import type { ArtifactStore } from '../artifacts/store.ts'
 import type { EventStore } from '../events/store.ts'
@@ -32,7 +20,6 @@ import type { PluginRegistry } from '../plugins/registry.ts'
 import type { Scheduler } from '../runs/scheduler.ts'
 import type { Incidents } from '../security/incidents.ts'
 import { canonicalJson, sha256 } from '../util/canonical.ts'
-import { tarArchive } from '../util/tar.ts'
 import { KernelError } from '../util/errors.ts'
 import { assertValid } from '../util/schema.ts'
 import { ulid } from '../util/ulid.ts'
@@ -40,22 +27,17 @@ import { slotsAt, workflowProjection } from './projection.ts'
 
 /** Artifact type of flow pack data files. */
 export const FLOW_PACK_TYPE = 'flow.pack'
-/** Artifact type of a foundry's written acknowledgement of a waiver. */
-export const FOUNDRY_ACK_TYPE = 'foundry.waiver_ack'
 /** Artifact type of a migration impact assessment (FR-MIG). */
 export const MIGRATION_REPORT_TYPE = 'migration.report'
-/** Artifact type of an export archive (FR-PKG-05). */
-export const EXPORT_TYPE = 'tapeout.export'
 /** Stages from which a migration needs the owner's approval (FR-MIG-04). */
 const OWNER_MIGRATION_STAGES = new Set(['S0', 'S1', 'S2', 'S3'])
 
-const KERNEL_ACTOR: Actor = { kind: 'kernel', id: 'workflow' }
-
 /**
- * Workflow, verdicts and approvals: K3 (projects, stages, slot bindings,
- * branches, invalidation), K6 (verdict engine) and K7 (snapshots, approvals,
- * conditions, waivers, the release check). Flow packs, which define stages,
- * gates and check definitions, come from data plugins (architecture AP-2).
+ * Workflow and verdicts: K3 (projects, stages, slot bindings, branches) and K6
+ * (verdict engine). Flow packs, which define stages and check definitions,
+ * come from data plugins (architecture AP-2). There are no approval gates and
+ * no waivers (owner decision 2026-10-24): a failed check stays failed until
+ * the cause is fixed and the work and its tests run again.
  */
 export class Workflow {
   private readonly events: EventStore
@@ -121,16 +103,7 @@ export class Workflow {
     }
     const subjects = [...new Set(run.inputs.map((i) => i.hash))].sort()
     const reasons: Message[] = []
-    let verdict = this.judge(check, run, reasons)
-    let waiver: string | null = null
-    if (verdict === 'fail' && check.waiver !== 'none') {
-      const applicable = this.findWaiver(check, subjects)
-      if (applicable) {
-        verdict = 'waived'
-        waiver = applicable.id
-        reasons.push({ code: 'WAIVED', params: { waiver: applicable.id, kind: applicable.kind } })
-      }
-    }
+    const verdict = this.judge(check, run, reasons)
     const record: VerdictRecord = {
       id: ulid(),
       check: check.id,
@@ -141,7 +114,6 @@ export class Workflow {
       verdict,
       reasons,
       reqRef: null,
-      waiver,
       createdAt: new Date().toISOString(),
     }
     const previous = this.verdicts({ check: check.id, limit: 1000 }).find((v) => canonicalJson(v.subjects) === canonicalJson(subjects))
@@ -309,13 +281,6 @@ export class Workflow {
     return this.verdicts({ check: `${pluginId}.qualify.${capability}`, limit: 1000 }).some((v) => v.verdict === 'pass')
   }
 
-  private findWaiver(check: CheckDefinition, subjects: string[]): WaiverRecord | undefined {
-    const rows = this.events.db.prepare('SELECT record FROM waivers WHERE check_id = ?').all(check.id) as { record: string }[]
-    return rows
-      .map((r) => JSON.parse(r.record) as WaiverRecord)
-      .find((w) => w.kind === check.waiver && canonicalJson([...w.subjects].sort()) === canonicalJson(subjects))
-  }
-
   // ---- K3: projects, stages, slots, branches -----------------------------
 
   createProject(id: string, title: string, flowId: string, actor: Actor): ProjectRecord {
@@ -334,7 +299,7 @@ export class Workflow {
   project(id: string, branch = 'main'): ProjectState {
     const project = this.requireProject(id)
     this.requireBranch(id, branch)
-    const pack = this.readFlow(project.flowHash)
+    const pack = this.projectFlow(project)
     const entered = new Set((this.events.db.prepare('SELECT stage FROM stages WHERE project = ? AND branch = ?').all(id, branch) as { stage: string }[]).map((r) => r.stage))
     return {
       project,
@@ -342,14 +307,10 @@ export class Workflow {
       branch,
       slots: Object.fromEntries(slotsAt(this.events.db, id, branch).map((s) => [s.slot, s.hash])),
       stages: pack.stages.map((s) => ({ id: s.id, entered: entered.has(s.id) })),
-      gates: (pack.gates ?? []).map((g) => this.release(id, branch, g.id)),
     }
   }
 
-  /**
-   * Binds a project slot to an artifact. Approvals whose design snapshot
-   * contained the slot become invalid (requirements §3.7.2, FR-TRC-05).
-   */
+  /** Binds a project slot to an artifact. */
   bind(projectId: string, branch: string, slot: string, hash: string, actor: Actor): void {
     this.requireProject(projectId)
     this.requireBranch(projectId, branch)
@@ -358,7 +319,7 @@ export class Workflow {
     // Hard constraints (for example the timing exception registry): an agent may propose
     // an artifact, only a human binds it (requirements §3.2, FR-SGN-02b).
     const project = this.requireProject(projectId)
-    if (actor.kind !== 'human' && (this.readFlow(project.flowHash).hardConstraintSlots ?? []).includes(slot)) {
+    if (actor.kind !== 'human' && (this.projectFlow(project).hardConstraintSlots ?? []).includes(slot)) {
       this.incidents.open({
         kind: 'hard_constraint_change',
         severity: 'warning',
@@ -370,10 +331,7 @@ export class Workflow {
       throw new KernelError('HARD_CONSTRAINT_REQUIRES_HUMAN', `slot ${slot} holds a hard constraint; only a human may bind it`, { slot })
     }
     if (previous === hash) return
-    this.events.transaction(() => {
-      this.events.append({ kind: 'project.slot_bound', payload: { project: projectId, branch, slot, hash, previous }, actor, project: projectId, label: meta.label })
-      this.invalidateApprovals(projectId, branch, slot)
-    })
+    this.events.append({ kind: 'project.slot_bound', payload: { project: projectId, branch, slot, hash, previous }, actor, project: projectId, label: meta.label })
   }
 
   /** Creates a branch from another branch's bindings at a checkpoint (FR-TRC-04, FR-PRJ-04). */
@@ -385,13 +343,12 @@ export class Workflow {
     this.events.append({ kind: 'project.branched', payload: { project: projectId, branch: name, from, atSeq: seq }, actor, project: projectId })
   }
 
-  /** Enters a stage if every gate its entry depends on is released. */
+  /** Enters a stage when every admission check of the stage passes on the artifact bound to its slot. */
   enterStage(projectId: string, branch: string, stageId: string, actor: Actor): void {
     const project = this.requireProject(projectId)
     this.requireBranch(projectId, branch)
-    const stage = this.readFlow(project.flowHash).stages.find((s) => s.id === stageId)
+    const stage = this.projectFlow(project).stages.find((s) => s.id === stageId)
     if (!stage) throw new KernelError('STAGE_NOT_FOUND', `flow ${project.flow} has no stage ${stageId}`, { stage: stageId })
-    const blocked = (stage.entry?.gates ?? []).map((gate) => this.release(projectId, branch, gate)).filter((r) => !r.released)
     // Stage admission checks on bound artifacts (requirements FR-PHY-08): the latest
     // verdict of each check on the artifact bound to the slot must pass.
     const bound = new Map(slotsAt(this.events.db, projectId, branch).map((s) => [s.slot, s.hash]))
@@ -407,189 +364,20 @@ export class Workflow {
       const details = Object.fromEntries(Object.entries(metrics).filter(([key, value]) => relevant(key) && value !== ''))
       failed.push({ check, slot, verdict: latest?.verdict ?? (hash ? 'missing' : 'unbound'), reasons: latest?.reasons ?? [], details })
     }
-    if (blocked.length > 0 || failed.length > 0) {
-      const parts = [
-        ...(blocked.length ? [`released gates: ${blocked.map((b) => b.gate).join(', ')}`] : []),
-        ...failed.map((f) => `${f.check} on ${f.slot} (${f.verdict}${Object.keys(f.details).length ? `; ${Object.values(f.details).join('; ')}` : ''})`),
-      ]
-      throw new KernelError('STAGE_ENTRY_BLOCKED', `stage ${stageId} needs ${parts.join(', ')}`, { stage: stageId, gates: blocked, checks: failed })
+    if (failed.length > 0) {
+      const parts = failed.map((f) => `${f.check} on ${f.slot} (${f.verdict}${Object.keys(f.details).length ? `; ${Object.values(f.details).join('; ')}` : ''})`)
+      throw new KernelError('STAGE_ENTRY_BLOCKED', `stage ${stageId} needs ${parts.join(', ')}`, { stage: stageId, checks: failed })
     }
     this.events.append({ kind: 'stage.entered', payload: { project: projectId, branch, stage: stageId }, actor, project: projectId })
-  }
-
-  // ---- K7: snapshots, approvals, waivers, release ------------------------
-
-  /** The design snapshot of a gate and its evidence manifest. */
-  snapshot(projectId: string, branch: string, gateId: string): Snapshot {
-    const gate = this.requireGate(projectId, gateId)
-    this.requireBranch(projectId, branch)
-    const bound = new Map(slotsAt(this.events.db, projectId, branch).map((s) => [s.slot, s.hash]))
-    const members: SnapshotMember[] = gate.members.filter((slot) => bound.has(slot)).map((slot) => ({ slot, hash: bound.get(slot)! }))
-    const missing = gate.members.filter((slot) => !bound.has(slot))
-    const hashes = new Set(members.map((m) => m.hash))
-    // A confirmed migration voids the evidence recorded before it for the gates it reaches.
-    const migration = this.migration(projectId, branch)
-    const since = migration?.gates.includes(gateId) ? migration.ts : ''
-    // Evidence: the latest verdict of each gate check whose subjects all belong to this snapshot.
-    const evidence = gate.checks
-      .map(
-        (check) =>
-          this.verdicts({ check, limit: 1000 }).find((v) => v.subjects.length > 0 && v.subjects.every((s) => hashes.has(s)) && v.createdAt > since)?.id,
-      )
-      .filter((id): id is string => id !== undefined)
-    return {
-      project: projectId,
-      branch,
-      gate: gateId,
-      members,
-      hash: sha256(canonicalJson(members)),
-      evidence,
-      evidenceHash: sha256(canonicalJson(evidence)),
-      missing,
-    }
-  }
-
-  decide(params: ApprovalsDecideParams, actor: Actor): ApprovalRecord {
-    if (actor.kind !== 'human') throw new KernelError('APPROVAL_REQUIRES_HUMAN', 'only a human can decide at a gate')
-    const branch = params.branch ?? 'main'
-    const gate = this.requireGate(params.project, params.gate)
-    const snapshot = this.snapshot(params.project, branch, params.gate)
-    if (snapshot.missing.length > 0) {
-      throw new KernelError('SNAPSHOT_INCOMPLETE', `gate ${params.gate} needs bound slots: ${snapshot.missing.join(', ')}`, { missing: snapshot.missing })
-    }
-    const conditions = params.conditions ?? []
-    if (params.decision === 'conditional' && conditions.length === 0) throw new KernelError('CONDITIONS_REQUIRED', 'a conditional approval needs at least one condition')
-    if (params.decision !== 'conditional' && conditions.length > 0) throw new KernelError('CONDITIONS_NOT_ALLOWED', 'only conditional approvals carry conditions')
-    for (const condition of conditions) this.requireCheck(condition.check)
-    if (params.decision !== 'rejected') {
-      const verdicts = new Map(snapshot.evidence.map((id) => [this.verdict(id).check, this.verdict(id)]))
-      const unmet = gate.checks.filter((check) => !['pass', 'waived'].includes(verdicts.get(check)?.verdict ?? ''))
-      if (unmet.length > 0) {
-        throw new KernelError('GATE_EVIDENCE_INCOMPLETE', `gate ${params.gate} needs passing or waived checks: ${unmet.join(', ')}`, { checks: unmet })
-      }
-    }
-    const approval: ApprovalRecord = {
-      id: ulid(),
-      project: params.project,
-      branch,
-      gate: params.gate,
-      decision: params.decision,
-      snapshotHash: snapshot.hash,
-      evidenceHash: snapshot.evidenceHash,
-      conditions: conditions.map((c) => ({ ...c, closed: null })),
-      comment: params.comment ?? '',
-      by: actor,
-      at: new Date().toISOString(),
-    }
-    this.events.append({ kind: 'approval.recorded', payload: { approval }, actor, project: params.project })
-    return approval
-  }
-
-  /**
-   * Closes a condition of a conditional approval with a passing verdict of the
-   * condition's check. Closing evidence must not change the design snapshot
-   * (requirements §3.7.3).
-   */
-  closeCondition(approvalId: string, conditionId: string, verdictId: string, actor: Actor): ApprovalRecord {
-    if (actor.kind !== 'human') throw new KernelError('APPROVAL_REQUIRES_HUMAN', 'only a human can close an approval condition')
-    const approval = this.approval(approvalId)
-    const condition = approval.conditions.find((c) => c.id === conditionId)
-    if (!condition) throw new KernelError('CONDITION_NOT_FOUND', `approval ${approvalId} has no condition ${conditionId}`)
-    if (condition.closed) return approval
-    const verdict = this.verdict(verdictId)
-    if (verdict.check !== condition.check || verdict.verdict !== 'pass') {
-      throw new KernelError('CONDITION_EVIDENCE_INVALID', `condition ${conditionId} needs a passing verdict of ${condition.check}`, {
-        check: verdict.check,
-        verdict: verdict.verdict,
-      })
-    }
-    const snapshot = this.snapshot(approval.project, approval.branch, approval.gate)
-    if (snapshot.hash !== approval.snapshotHash) {
-      throw new KernelError('CONDITION_SNAPSHOT_CHANGED', 'the design snapshot changed since the approval; approve the new snapshot instead')
-    }
-    const hashes = new Set(snapshot.members.map((m) => m.hash))
-    if (!verdict.subjects.every((s) => hashes.has(s))) {
-      throw new KernelError('CONDITION_EVIDENCE_INVALID', `verdict ${verdictId} does not judge the approved snapshot`)
-    }
-    this.events.append({ kind: 'approval.condition_closed', payload: { approval: approvalId, condition: conditionId, verdict: verdictId }, actor, project: approval.project })
-    return this.approval(approvalId)
-  }
-
-  approvals(projectId: string, branch?: string): ApprovalRecord[] {
-    const rows = (
-      branch
-        ? this.events.db.prepare('SELECT record FROM approvals WHERE project = ? AND branch = ? ORDER BY seq').all(projectId, branch)
-        : this.events.db.prepare('SELECT record FROM approvals WHERE project = ? ORDER BY seq').all(projectId)
-    ) as { record: string }[]
-    return rows.map((r) => JSON.parse(r.record))
-  }
-
-  /**
-   * The single release check before advancing the flow or exporting
-   * (architecture §4.7): the latest approval of the gate must be approved, or
-   * conditional with every condition closed, and bind the current snapshot.
-   */
-  release(projectId: string, branch: string, gateId: string): ReleaseResult {
-    this.requireGate(projectId, gateId)
-    const row = this.events.db
-      .prepare('SELECT record, invalidated FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
-      .get(projectId, branch, gateId) as { record: string; invalidated: number } | undefined
-    if (!row) return { gate: gateId, status: 'none', released: false, approval: null, reasons: [{ code: 'APPROVAL_MISSING', params: { gate: gateId } }] }
-    const approval = JSON.parse(row.record) as ApprovalRecord
-    const snapshot = this.snapshot(projectId, branch, gateId)
-    let status: ApprovalStatus
-    const reasons: Message[] = []
-    if (snapshot.hash !== approval.snapshotHash || row.invalidated) {
-      status = 'invalidated'
-      reasons.push({ code: 'APPROVAL_INVALIDATED', params: { gate: gateId, approval: approval.id } })
-    } else if (approval.decision === 'rejected') {
-      status = 'rejected'
-      reasons.push({ code: 'APPROVAL_REJECTED', params: { gate: gateId, approval: approval.id } })
-    } else if (approval.decision === 'conditional') {
-      const open = approval.conditions.filter((c) => !c.closed).map((c) => c.id)
-      status = open.length > 0 ? 'conditional_pending' : 'conditional_closed'
-      if (open.length > 0) reasons.push({ code: 'CONDITIONS_OPEN', params: { gate: gateId, conditions: open } })
-    } else status = 'approved'
-    return { gate: gateId, status, released: reasons.length === 0, approval: approval.id, reasons }
-  }
-
-  createWaiver(params: WaiversCreateParams, actor: Actor): WaiverRecord {
-    if (actor.kind !== 'human') throw new KernelError('WAIVER_REQUIRES_HUMAN', 'only a human can record a waiver')
-    const check = this.requireCheck(params.check)
-    if ((check.waiver ?? 'none') !== params.kind) {
-      throw new KernelError('WAIVER_NOT_ALLOWED', `check ${check.id} admits ${check.waiver ?? 'none'}, not ${params.kind}`, { allowed: check.waiver ?? 'none' })
-    }
-    let acknowledgement: string | null = null
-    if (params.kind === 'foundry_waiver') {
-      // Only the foundry can waive a manufacturing rule; its written acknowledgement must be on record.
-      if (!params.acknowledgement) throw new KernelError('FOUNDRY_ACK_REQUIRED', 'a foundry waiver needs the foundry\'s written acknowledgement')
-      const ack = this.artifacts.require(params.acknowledgement)
-      if (ack.type !== FOUNDRY_ACK_TYPE) throw new KernelError('FOUNDRY_ACK_REQUIRED', `acknowledgement must be an artifact of type ${FOUNDRY_ACK_TYPE}`)
-      acknowledgement = ack.hash
-    }
-    for (const subject of params.subjects) this.artifacts.require(subject)
-    const waiver: WaiverRecord = {
-      id: ulid(),
-      kind: params.kind,
-      check: check.id,
-      subjects: [...params.subjects].sort() as WaiverRecord['subjects'],
-      reason: params.reason,
-      ...(params.impact ? { impact: params.impact } : {}),
-      acknowledgement,
-      by: actor,
-      at: new Date().toISOString(),
-    }
-    this.events.append({ kind: 'waiver.recorded', payload: { waiver }, actor })
-    return waiver
   }
 
   // ---- FR-MIG: confirmed migration impact assessments ---------------------
 
   /**
-   * Applies a confirmed migration impact assessment: the approvals of every gate
-   * after the earliest stage to restart become invalid, and the evidence recorded
-   * before the migration no longer counts for them (FR-MIG-03). Restarting at S3
-   * or earlier is the owner's decision (FR-MIG-04).
+   * Records a confirmed migration impact assessment and the earliest stage to
+   * restart (FR-MIG-03): the work of that stage and every later one has to run
+   * again on the new process. Restarting at S3 or earlier is the owner's
+   * decision (FR-MIG-04).
    */
   applyMigration(projectId: string, branch: string, reportHash: string, comment: string, actor: Actor): MigrationApplyResult {
     const project = this.requireProject(projectId)
@@ -597,159 +385,38 @@ export class Workflow {
     const meta = this.artifacts.require(reportHash)
     if (meta.type !== MIGRATION_REPORT_TYPE) throw new KernelError('MIGRATION_REPORT_INVALID', `artifact ${reportHash} is not a ${MIGRATION_REPORT_TYPE}`)
     const report = JSON.parse(readFileSync(this.artifacts.objectPath(reportHash), 'utf8')) as { restartStage?: string | null }
-    const flow = this.readFlow(project.flowHash)
-    const stages = flow.stages.map((s) => s.id)
+    const stages = this.projectFlow(project).stages.map((s) => s.id)
     const restart = report.restartStage
-    if (!restart) return { restartStage: 'none', invalidatedGates: [] }
+    if (!restart) return { restartStage: 'none' }
     if (!stages.includes(restart)) throw new KernelError('MIGRATION_REPORT_INVALID', `unknown restart stage ${restart}`)
     if (OWNER_MIGRATION_STAGES.has(restart) && actor.kind !== 'human') {
       throw new KernelError('MIGRATION_REQUIRES_OWNER', `restarting at ${restart} needs the owner's approval`, { restartStage: restart })
     }
-    const gates = flow.gates.filter((g) => stages.indexOf(g.after) >= stages.indexOf(restart)).map((g) => g.id)
-    this.events.transaction(() => {
-      this.events.append({
-        kind: 'migration.applied',
-        payload: { project: projectId, branch, report: reportHash, restartStage: restart, gates, ...(comment ? { comment } : {}) },
-        actor,
-        project: projectId,
-      })
-      for (const gate of gates) {
-        const row = this.events.db
-          .prepare('SELECT id, invalidated FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
-          .get(projectId, branch, gate) as { id: string; invalidated: number } | undefined
-        if (!row || row.invalidated) continue
-        this.events.append({
-          kind: 'approval.invalidated',
-          payload: { approval: row.id, gate, reason: { code: 'MIGRATION_APPLIED', params: { restartStage: restart, report: reportHash } } },
-          actor: KERNEL_ACTOR,
-          project: projectId,
-        })
-      }
-    })
-    return { restartStage: restart, invalidatedGates: gates }
-  }
-
-  private migration(projectId: string, branch: string): { ts: string; gates: string[] } | undefined {
-    const rows = this.events.db
-      .prepare("SELECT ts, payload FROM events WHERE kind = 'migration.applied' AND project = ? ORDER BY seq DESC")
-      .all(projectId) as { ts: string; payload: string }[]
-    for (const row of rows) {
-      const p = JSON.parse(row.payload) as { branch: string; gates: string[] }
-      if (p.branch === branch) return { ts: row.ts, gates: p.gates }
-    }
-    return undefined
-  }
-
-  // ---- FR-PKG-02/04/05: export of a released package -----------------------
-
-  /**
-   * Exports the package bound to `slot` when the gate releases it and the package is
-   * the one in the approved snapshot. The archive holds the package, its lineage
-   * manifest (every artifact up to the weights: hash, type, label, producing run,
-   * plugin and tool version, verdicts) and the approval.
-   */
-  async exportPackage(projectId: string, branch: string, gateId: string, slot: string, actor: Actor): Promise<ExportResult> {
-    const release = this.release(projectId, branch, gateId)
-    if (!release.released) {
-      throw new KernelError('EXPORT_BLOCKED', `gate ${gateId} does not release the export (${release.status})`, { gate: gateId, status: release.status, reasons: release.reasons })
-    }
-    const snapshot = this.snapshot(projectId, branch, gateId)
-    const member = snapshot.members.find((m) => m.slot === slot)
-    if (!member) throw new KernelError('EXPORT_BLOCKED', `slot ${slot} is not a member of the ${gateId} snapshot`, { slot })
-    const lineage = this.artifacts.lineage(member.hash, 'up')
-    const label = lineage.nodes.reduce<Label>((max, n) => (labelRank(n.label) > labelRank(max) ? n.label : max), 'public')
-    if (label === 'nda' && actor.kind !== 'human') {
-      throw new KernelError('EXPORT_LABEL_DENIED', 'only a human may export a package that contains NDA material', { label })
-    }
-    const verdictsBySubject = new Map<string, string[]>()
-    for (const v of this.verdicts({ limit: 100000 })) {
-      for (const s of v.subjects) verdictsBySubject.set(s, [...(verdictsBySubject.get(s) ?? []), `${v.check}:${v.verdict}:${v.id}`])
-    }
-    const runs = new Map<string, Record<string, unknown>>()
-    for (const node of lineage.nodes) {
-      if (!node.run || runs.has(node.run)) continue
-      const run = this.scheduler.get(node.run)
-      const plugin = this.registry.get(run.plugin)?.manifest
-      runs.set(node.run, {
-        id: run.id,
-        plugin: run.plugin,
-        pluginVersion: plugin?.version ?? null,
-        handler: run.handler,
-        image: plugin?.entry?.image ?? null,
-        params: run.params,
-        execution: run.execution,
-        endedAt: run.endedAt,
-      })
-    }
-    const manifest = {
-      format: 'llmchip-lineage/1',
-      project: projectId,
-      branch,
-      gate: gateId,
-      approval: release.approval,
-      snapshot: { hash: snapshot.hash, members: snapshot.members, evidence: snapshot.evidence },
-      root: member.hash,
-      artifacts: lineage.nodes.map((n: ArtifactMeta) => ({
-        hash: n.hash,
-        type: n.type,
-        label: n.label,
-        size: n.size,
-        run: n.run,
-        creator: n.creator,
-        verdicts: verdictsBySubject.get(n.hash) ?? [],
-      })),
-      edges: lineage.edges,
-      runs: [...runs.values()],
-    }
-    const approval = this.approvals(projectId, branch).find((a) => a.id === release.approval)
-    const archive = tarArchive([
-      { name: `package/${slot}.tar`, data: readFileSync(this.artifacts.objectPath(member.hash)) },
-      { name: 'lineage.json', data: Buffer.from(JSON.stringify(manifest, null, 2)) },
-      { name: 'approval.json', data: Buffer.from(JSON.stringify(approval ?? null, null, 2)) },
-    ])
-    const meta = await this.artifacts.put(archive, {
-      type: EXPORT_TYPE,
-      mediaType: 'application/x-tar',
-      label,
-      inputs: [member.hash],
-      creator: actor.kind === 'human' ? { kind: 'human', id: actor.id } : { kind: 'kernel', id: 'workflow' },
-      project: projectId,
-    })
     this.events.append({
-      kind: 'package.exported',
-      payload: { project: projectId, branch, gate: gateId, approval: release.approval!, package: member.hash, archive: meta.hash },
+      kind: 'migration.applied',
+      payload: { project: projectId, branch, report: reportHash, restartStage: restart, ...(comment ? { comment } : {}) },
       actor,
       project: projectId,
-      label,
     })
-    return { archive: meta, package: member.hash, approval: release.approval!, lineageArtifacts: lineage.nodes.length }
+    return { restartStage: restart }
   }
 
   // ---- helpers -----------------------------------------------------------
 
-  private invalidateApprovals(projectId: string, branch: string, slot: string): void {
-    const project = this.requireProject(projectId)
-    const gates = (this.readFlow(project.flowHash).gates ?? []).filter((g) => g.members.includes(slot))
-    for (const gate of gates) {
-      const row = this.events.db
-        .prepare('SELECT id, invalidated, record FROM approvals WHERE project = ? AND branch = ? AND gate = ? ORDER BY seq DESC LIMIT 1')
-        .get(projectId, branch, gate.id) as { id: string; invalidated: number; record: string } | undefined
-      if (!row || row.invalidated) continue
-      const approval = JSON.parse(row.record) as ApprovalRecord
-      if (this.snapshot(projectId, branch, gate.id).hash === approval.snapshotHash) continue
-      this.events.append({
-        kind: 'approval.invalidated',
-        payload: { approval: approval.id, gate: gate.id, reason: { code: 'SNAPSHOT_MEMBER_CHANGED', params: { slot } } },
-        actor: KERNEL_ACTOR,
-        project: projectId,
-      })
-    }
+  /**
+   * Reads a stored flow pack. A registered pack must match the schema as it is (no gates, no
+   * waivers); the pack a project was created with may come from before approval gates and
+   * waivers were removed (owner decision 2026-10-24), so its history-only fields are dropped.
+   */
+  private readFlow(hash: string, history = false): FlowPack {
+    const pack = JSON.parse(readFileSync(this.artifacts.objectPath(hash), 'utf8'))
+    assertValid<FlowPack>('FlowPack', history ? withoutHistory(pack) : pack, 'FLOW_INVALID')
+    return pack
   }
 
-  private readFlow(hash: string): FlowPack {
-    const pack = JSON.parse(readFileSync(this.artifacts.objectPath(hash), 'utf8'))
-    assertValid<FlowPack>('FlowPack', pack, 'FLOW_INVALID')
-    return pack
+  /** The flow pack a project was created with. */
+  private projectFlow(project: ProjectRecord): FlowPack {
+    return this.readFlow(project.flowHash, true)
   }
 
   private findProject(id: string): ProjectRecord | undefined {
@@ -771,33 +438,29 @@ export class Workflow {
     if (!this.branchExists(project, branch)) throw new KernelError('BRANCH_NOT_FOUND', `project ${project} has no branch ${branch}`, { branch })
   }
 
-  private requireGate(projectId: string, gateId: string): FlowGate {
-    const project = this.requireProject(projectId)
-    const gate = this.readFlow(project.flowHash).gates?.find((g) => g.id === gateId)
-    if (!gate) throw new KernelError('GATE_NOT_FOUND', `flow ${project.flow} has no gate ${gateId}`, { gate: gateId })
-    return gate
-  }
-
   private requireCheck(id: string): CheckDefinition {
     const check = this.checkDefs.get(id)
     if (!check) throw new KernelError('CHECK_NOT_FOUND', `check ${id} is not defined by any flow pack`, { check: id })
     return check
   }
-
-  private verdict(id: string): VerdictRecord {
-    const row = this.events.db.prepare('SELECT record FROM verdicts WHERE id = ?').get(id) as { record: string } | undefined
-    if (!row) throw new KernelError('VERDICT_NOT_FOUND', `verdict ${id} does not exist`, { verdict: id })
-    return JSON.parse(row.record)
-  }
-
-  private approval(id: string): ApprovalRecord {
-    const row = this.events.db.prepare('SELECT record FROM approvals WHERE id = ?').get(id) as { record: string } | undefined
-    if (!row) throw new KernelError('APPROVAL_NOT_FOUND', `approval ${id} does not exist`, { approval: id })
-    return JSON.parse(row.record)
-  }
 }
 
-/** true / false, or undefined when the metric is missing or not comparable. */
+/**
+ * A flow pack written before approval gates and waivers were removed, without its history-only
+ * fields: `gates`, the stages' `entry.gates`, and the checks' `waiver`. Mutates and returns `pack`.
+ */
+function withoutHistory(pack: Record<string, any>): Record<string, any> {
+  delete pack.gates
+  for (const stage of pack.stages ?? []) {
+    if (stage.entry) {
+      delete stage.entry.gates
+      if (Object.keys(stage.entry).length === 0) delete stage.entry
+    }
+  }
+  for (const check of pack.checks ?? []) delete check.waiver
+  return pack
+}
+
 /**
  * Whether a conditional criterion applies (`when`). A condition that does not hold is recorded
  * as CRITERION_NOT_APPLIED; a missing condition metric is a missing metric (indeterminate).
@@ -821,6 +484,7 @@ function comparison(criterion: Criterion): CriterionCondition {
   return { metric: criterion.metric, op: criterion.op, value: criterion.value }
 }
 
+/** true / false, or undefined when the metric is missing or not comparable. */
 function evaluateCriterion(criterion: Criterion | CriterionCondition, metrics: RunRecord['metrics']): boolean | undefined {
   const actual = metrics[criterion.metric]
   if (actual === undefined) return undefined
@@ -837,10 +501,4 @@ function evaluateCriterion(criterion: Criterion | CriterionCondition, metrics: R
       if (criterion.op === '>') return actual > expected
       return actual >= expected
   }
-}
-
-const LABELS = ['public', 'internal', 'nda']
-function labelRank(label: string): number {
-  const k = LABELS.indexOf(label)
-  return k < 0 ? LABELS.length : k
 }
