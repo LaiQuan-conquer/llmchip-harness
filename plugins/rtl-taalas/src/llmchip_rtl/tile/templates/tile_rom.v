@@ -7,6 +7,7 @@ module tile_rom #(
   parameter         INIT = "rom.hex"
 ) (
   input  wire                clk,
+  input  wire                rst_n,
   input  wire                en,
   input  wire [ADDR-1:0]     addr,
   output reg  [WIDTH-1:0]    dout
@@ -18,8 +19,10 @@ module tile_rom #(
     $readmemh(INIT, mem);
   end
 
-  always @(posedge clk) begin
-    if (en) begin
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      dout <= {WIDTH{1'b0}};
+    end else if (en) begin
       dout <= mem[addr];
     end
   end

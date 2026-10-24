@@ -35,6 +35,33 @@
       "outputs": [{ "name": "report", "type": "isa.check", "mediaType": "application/json" }],
       "params": { "type": "object", "additionalProperties": false },
       "timeoutMs": 3600000
+    },
+    {
+      "name": "tile_generate",
+      "title": "The taalas-tile/1 RTL bundle of a slice: templates, view-1 ROM contents, manifest",
+      "inputs": [
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true },
+        { "name": "slice", "types": ["arch.slice"], "required": true }
+      ],
+      "outputs": [
+        { "name": "rtl", "type": "rtl.bundle", "mediaType": "application/x-tar" },
+        { "name": "manifest", "type": "rtl.manifest", "mediaType": "application/json" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "macsPerEngine": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 128 } }
+      },
+      "timeoutMs": 1800000
+    },
+    {
+      "name": "tile_check",
+      "title": "The RTL checks of a tile bundle: ROM round trip, rules, Verilator lint, Yosys",
+      "inputs": [{ "name": "rtl", "types": ["rtl.bundle"], "required": true }],
+      "outputs": [{ "name": "report", "type": "rtl.checks", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 3600000
     }
   ]
 }

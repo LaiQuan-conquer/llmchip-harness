@@ -19,7 +19,7 @@ from llmchip_model.census import census
 from llmchip_model.formats import WeightLoader, read_layout
 from llmchip_model.graph import recover
 from llmchip_numeric import graph_l2
-from llmchip_rtl.tile import generator, rom
+from llmchip_rtl.tile import checks, generator, rom
 
 TOOLS = Path(os.environ.get("LLMCHIP_TOOLS", Path.home() / "projects" / "deepseek-harness" / "tools"))
 VERILATOR = TOOLS / "oss-cad-suite" / "bin" / "verilator"
@@ -115,3 +115,35 @@ def test_the_generated_rtl_elaborates_in_yosys(built, tmp_path):
     )
     result = subprocess.run([str(YOSYS), "-q", "-p", script], capture_output=True, text=True, cwd=tmp_path)
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+
+
+def test_the_bundle_passes_the_rtl_checks(built, tmp_path):
+    graph, spec, arrays = built
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    report = checks.all_checks(tmp_path, VERILATOR if VERILATOR.is_file() else None, YOSYS if YOSYS.is_file() else None)
+    assert report["roundtrip"]["roundtrip_mismatches"] == 0
+    assert report["rules"]["violations"] == 0
+    if "warnings" in report["lint"]:
+        assert report["lint"]["warnings"] == 0, report["lint"]["output"]
+    if "returncode" in report["synthesizable"]:
+        assert report["synthesizable"]["returncode"] == 0, report["synthesizable"]["output"]
+
+
+def test_a_corrupted_bank_fails_the_roundtrip(built, tmp_path):
+    graph, spec, arrays = built
+    manifest = generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    bank = manifest["banks"][0]
+    path = tmp_path / bank["hex"]
+    lines = path.read_text().split()
+    lines[-1] = "0" * len(lines[-1])
+    path.write_text("\n".join(lines) + "\n")
+    assert checks.roundtrip(tmp_path)["roundtrip_mismatches"] == 1
+
+
+def test_a_rule_violation_is_reported(built, tmp_path):
+    graph, spec, arrays = built
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    top = tmp_path / "rtl" / "tile_top.v"
+    top.write_text(top.read_text() + "\n/* verilator lint_off UNUSED */\n")
+    report = checks.rules(tmp_path)
+    assert report["violations"] >= 1

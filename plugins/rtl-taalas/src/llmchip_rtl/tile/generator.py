@@ -71,6 +71,9 @@ def generate(
             }
         )
 
+    # Tools that read the ROM module with its default parameter (Yosys does) take this copy;
+    # simulators use each instance's INIT from the generated top.
+    (out / "rom.hex").write_text((data / f"{banks[0]['matrix']}.hex").read_text())
     (rtl / "tile_rom.v").write_text((_templates_dir() / "tile_rom.v").read_text())
     (rtl / "tile_mac.v").write_text((_templates_dir() / "tile_mac.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()

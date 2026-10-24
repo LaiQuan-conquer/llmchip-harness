@@ -1,6 +1,8 @@
 """IF-2 entry point of the rtl-taalas plugin: RTL generation (S4) and compiler verification."""
 
 import json
+import os
+import tarfile
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +18,8 @@ from .spatial.bundle import bundle_files as spatial_bundle_files
 from .spatial.generator import ARCHITECTURE as SPATIAL
 from .spatial.generator import Spatial
 from .spatial.sp_model import Machine as SpatialModel
+from .tile import checks as tile_checks
+from .tile import generator as tile_generator
 
 SPATIAL_RULE = (
     "taalas-spatial/1: each matrix row is a bit-serial adder tree; weight q at input i adds the input "
@@ -173,5 +177,65 @@ def check_isa(ctx: InvokeContext) -> Result:
     )
 
 
+def tile_generate(ctx: InvokeContext) -> Result:
+    """The `taalas-tile/1` RTL bundle of a slice: templates, view-1 ROM contents, manifest (FR-RTL-01/02)."""
+    spec = json.loads(Path(ctx.input("spec").path).read_text())
+    slice_report = json.loads(Path(ctx.input("slice").path).read_text())
+    with np.load(ctx.input("weights").path, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files if k != "meta"}
+    bundle = Path(ctx.work_dir, "bundle")
+    manifest = tile_generator.generate(
+        spec, arrays, slice_report, macs=ctx.params.get("macsPerEngine", 128), out=bundle
+    )
+    Path(ctx.out_dir, "design.json").write_text(json.dumps(manifest, indent=2))
+    tar = Path(ctx.out_dir, "tile-rtl.tar")
+    with tarfile.open(tar, "w") as archive:
+        archive.add(bundle, arcname=".")
+    return Result(
+        outputs=[
+            Output("rtl", "tile-rtl.tar", "rtl.bundle", "application/x-tar"),
+            Output("manifest", "design.json", "rtl.manifest", "application/json", "internal"),
+        ],
+        metrics={
+            "banks": len(manifest["banks"]),
+            "words": sum(bank["words"] for bank in manifest["banks"]),
+            "weights": manifest["slice"]["weights"],
+            "macs": manifest["mapping"]["macs"],
+            "bits": manifest["mapping"]["bits"],
+        },
+        parse={"status": "complete", "parser": "llmchip-rtl/tile-generate"},
+    )
+
+
+def tile_check(ctx: InvokeContext) -> Result:
+    """The RTL checks of a tile bundle: roundtrip, rules, Verilator lint, Yosys (FR-RTL-03)."""
+    bundle = Path(ctx.work_dir, "bundle")
+    bundle.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(ctx.input("rtl").path) as archive:
+        archive.extractall(bundle)
+    tools = Path(os.environ.get("LLMCHIP_TOOLS", Path.home() / "projects" / "deepseek-harness" / "tools"))
+    verilator = tools / "oss-cad-suite" / "bin" / "verilator"
+    yosys = tools / "oss-cad-suite" / "bin" / "yosys"
+    report = tile_checks.all_checks(
+        bundle, verilator if verilator.is_file() else None, yosys if yosys.is_file() else None
+    )
+    Path(ctx.out_dir, "rtl-checks.json").write_text(json.dumps(report, indent=2))
+    return Result(
+        outputs=[Output("report", "rtl-checks.json", "rtl.checks", "application/json")],
+        metrics={
+            "roundtrip_mismatches": report["roundtrip"]["roundtrip_mismatches"],
+            "rule_violations": report["rules"]["violations"],
+            "lint_warnings": report["lint"].get("warnings", -1),
+            "synthesizable": int(report["synthesizable"].get("returncode", -1) == 0),
+            "checked": int(bool(report["passed"])),
+        },
+        parse={"status": "complete", "parser": "llmchip-rtl/tile-check"},
+    )
+
+
 if __name__ == "__main__":
-    run_plugin("rtl-taalas", "0.1.0", {"generate": generate, "check_isa": check_isa})
+    run_plugin(
+        "rtl-taalas",
+        "0.2.0",
+        {"generate": generate, "check_isa": check_isa, "tile_generate": tile_generate, "tile_check": tile_check},
+    )

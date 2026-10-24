@@ -81,7 +81,7 @@ module tile_top #(
   wire [ADDR-1:0]      last_address = {ADDR{1'b1}};
 
   tile_rom #(.WIDTH(MACS*BITS), .DEPTH(1 << ADDR), .ADDR(ADDR), .INIT(INIT)) rom (
-    .clk(clk), .en(rom_en), .addr(address), .dout(rom_data)
+    .clk(clk), .rst_n(rst_n), .en(rom_en), .addr(address), .dout(rom_data)
   );
 
   tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC)) mac (
