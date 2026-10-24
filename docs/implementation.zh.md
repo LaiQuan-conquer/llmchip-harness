@@ -638,11 +638,11 @@ yarn llmchip pipeline list --project demo
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 212 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 7 分 37 秒（2026-10-25，R3）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 213 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 7 分 35 秒（2026-10-25，R3）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
 | `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、2 个跳过（m4-flow、qwen-spec）；126 个测试通过、3 个跳过（m4-flow、`pipelines-flow` 的 S0–S7 与 qwen-spec，都须显式开启；2026-10-24，R2a） |
-| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 7 分 37 秒、Vitest 813 秒（R3） |
+| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 7 分 35 秒、Vitest 806 秒（R3） |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S7，以及从 GDS 到权重的血缘 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | 用测试环境测一颗芯片：在提示词集上生成，质量与速度，按芯片策略判定，写出运行目录 | stories260K 的数值（int8）芯片对照其参考芯片，20 个提示词生成到 64 token 上下文结束：下一 token 一致率 0.992，生成完全相同 0.65，困惑度 3.167（参考 3.159），11 秒（2026-10-22）。`vchip conform` 在 stories260K 的参考与数值芯片、tiny Qwen3 的参考芯片上均通过 |
@@ -669,7 +669,7 @@ yarn llmchip pipeline list --project demo
 | `tests/pipelines.spec.ts` | 计划与缺少输入、`all` 中前面节点绑定的槽位、研发流水线（进入阶段、运行、绑定、判定）、测试复用研发运行、失败保持失败且依赖被跳过、改正后继续、取消、取消后立即继续；同一阶段只能有一条运行中的流水线；硬约束槽位不被流水线覆盖；依赖成环的流程包被拒绝；内核正常停止或被杀掉后流水线继续，被中断的节点从检查点续跑 | FR-PRJ-07/08、FR-TRC-10、AC-15 | 总是 |
 | `plugins/numeric/tests/test_l2_torch.py` | 快速 L2 与参考 L2 逐位相同：logits、全部观测点与溢出次数，三种舍入、两种溢出处理与窄累加器下，llama2.c、Qwen2、Qwen3 计算图；有 GPU 时在 GPU 上；KV 缓存逐 token 与整段一次相同（两种实现）；成批计算每个序列与单独计算相同，含槽位重用；精确乘法对极值等于整数乘法，TF32 关闭 | FR-QNT-03 | 总是；GPU 用例无 CUDA 时跳过 |
 | `plugins/arch-taalas/tests/test_slice.py` | 解码层的切片级别：S-1 一个 Q 头，S-2 加一个 KV 头与整个头的 O 列，S-3 加 MLP 通道；各级的权重与位数、可复现的观测点，以及列范围不是整组时的拒绝 | FR-MDL-06 | 始终 |
-| `plugins/rtl-taalas/tests/test_tile.py` | `taalas-tile/1` 的 RTL bundle：ROM 映射规则（`taalas-tile-rom/1`）对 int4/int8 矩阵逐位往返，覆盖行数不是 MAC 块整数倍、以及字宽超过 64 位的情况；生成的 S-1 切片为每个矩阵写一个 bank 及其 `$readmemh` 内容、含全部哈希的清单；`tile_check` 的五项检查全部通过——ROM 往返、规则（不得 `lint_off`、每个时钟块都有复位、不得有函数）、Verilator `-Wall` 零警告、Yosys `check -assert`、两个 ROM 视图由 Yosys 等价引擎证明相等（`equiv_make`/`equiv_simple`/`equiv_induct`，先 `async2sync`）；被改坏的 bank、注入的 `lint_off`、或来自另一个 bundle 的视图②都会被报出 | FR-RTL-01/02/03/04、FR-SGN-07 | 始终；没有工具目录时 lint 与综合部分可见地跳过 |
+| `plugins/rtl-taalas/tests/test_tile.py` | `taalas-tile/1` 的 RTL bundle：ROM 映射规则（`taalas-tile-rom/1`）对 int4/int8 矩阵逐位往返，覆盖行数不是 MAC 块整数倍、以及字宽超过 64 位的情况；生成的 S-1 切片为每个矩阵写一个 bank 及其 `$readmemh` 内容、含全部哈希的清单；`tile_check` 的五项检查全部通过——ROM 往返、规则（不得 `lint_off`、每个时钟块都有复位、不得有函数）、Verilator `-Wall` 零警告、Yosys `check -assert`、两个 ROM 视图由 Yosys 等价引擎证明相等（`equiv_make`/`equiv_simple`/`equiv_induct`，先 `async2sync`）；被改坏的 bank、注入的 `lint_off`、或来自另一个 bundle 的视图②都会被报出；bundle 还带着数值规格的 rsqrt、exp、sigmoid 表（`tile_lut` 的 `$readmemh` 文件），按条目数与摘要校验 | FR-RTL-01/02/03/04、FR-SGN-07 | 始终；没有工具目录时 lint 与综合部分可见地跳过 |
 | `plugins/arch-taalas/tests/test_tlm.py` | `taalas-tile/1` 的事务级模型：按调度表的相位走一个 token 序列，记录每个产生观测点的相位的 L2 观测点（q、k、v、h1、h3、x），是确定性的，且周期数等于芯片规格的周期数；周期不符的芯片会被发现 | FR-ARC-03、计划 7.1（TLM = L2） | 始终 |
 | `plugins/arch-taalas/tests/test_tile.py` | `taalas-tile/1`：调度表就是周期模型（每周期读一个含 `macs` 个权重的 ROM 字，矩阵需 `列数 x ceil(行数/macs)` 个周期）、每层一个引擎或切片用一个引擎、输出投影在各引擎间分段、不能整除形状的 MAC 数被拒绝、被篡改的调度表会被 `verify_spec` 发现 | FR-ARC-01/02 | 始终 |
 | `plugins/numeric/tests/test_gptq.py` | 校准量化：PyTorch 浮点图给出 NumPy 解释器的 logits；GPTQ 保持规格的权重量化格式（电平、15 位尾数、每个矩阵一个指数），并在相关输入上使乘积 XW 的变化小于同一网格上的舍入；带逐矩阵格式的校准规格可作为 L2 加载、运行，并按各自位宽统计存储 | FR-QNT-01 | 始终（torch，CPU） |

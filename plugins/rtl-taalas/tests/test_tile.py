@@ -39,6 +39,10 @@ def built():
     return graph, spec, arrays
 
 
+def _graph(built):
+    return built[0]
+
+
 def test_the_rom_mapping_round_trips():
     rng = np.random.default_rng(0)
     for bits in (4, 8):
@@ -51,6 +55,17 @@ def test_the_rom_mapping_round_trips():
             assert np.array_equal(rom.from_words(words, rows, columns, macs, bits), q)
             lines = rom.hexfile(words, macs, bits)
             assert all(len(line) == -(-macs * bits // 4) for line in lines)
+
+
+def test_the_generated_bundle_carries_the_lookup_tables(built, tmp_path):
+    _, spec, arrays = built
+    manifest = generator.generate(spec, arrays, slice_spec(_graph(built), spec, "S-1"), macs=8, out=tmp_path)
+    assert set(manifest["luts"]) == {"rsqrt", "exp", "sigmoid"}
+    for name, entry in manifest["luts"].items():
+        lines = (tmp_path / entry["hex"]).read_text().split()
+        assert len(lines) == entry["entries"] == int(arrays[f"lut.{name}"].size)
+        assert all(len(line) == 8 for line in lines)
+    assert (tmp_path / "rtl" / "tile_lut.v").is_file()
 
 
 def test_the_full_model_writes_one_bank_per_matrix_and_the_classifier(built, tmp_path):
@@ -79,7 +94,7 @@ def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     lines = (tmp_path / bank["hex"]).read_text().split()
     assert len(lines) == bank["words"]
     assert (tmp_path / "rtl" / "tile_top.v").is_file()
-    assert len(manifest["files"]) == 3
+    assert len(manifest["files"]) == 4
 
 
 @pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")

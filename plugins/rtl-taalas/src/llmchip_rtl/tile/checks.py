@@ -35,11 +35,18 @@ def roundtrip(bundle: Path) -> dict:
     return {"banks": len(m["banks"]), "roundtrip_mismatches": len(bad), "bad": bad}
 
 
+def _code(text: str) -> str:
+    """The Verilog without comments: the rules are about code, not about prose."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
 def rules(bundle: Path) -> dict:
     violations: list[str] = []
     for path in sorted((bundle / "rtl").glob("*.v")):
-        text = path.read_text()
-        if "lint_off" in text:
+        raw = path.read_text()
+        text = _code(raw)
+        if "lint_off" in raw:
             violations.append(f"{path.name}: lint_off")
         if re.search(r"\bfunction\b", text):
             violations.append(f"{path.name}: function")

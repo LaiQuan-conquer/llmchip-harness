@@ -109,11 +109,29 @@ def generate(
             }
         )
 
+    luts = {}
+    for name in ("rsqrt", "exp", "sigmoid"):
+        array = arrays.get(f"lut.{name}")
+        if array is None:
+            continue
+        values = [int(value) & 0xFFFFFFFF for value in np.asarray(array).ravel()]
+        (data / f"lut.{name}.hex").write_text("\n".join(f"{value:08x}" for value in values) + "\n")
+        luts[name] = {
+            "entries": len(values),
+            "hex": f"rom/lut.{name}.hex",
+            "digest": hashlib.sha256(np.asarray(array).tobytes()).hexdigest(),
+        }
+
+    if luts:
+        first_lut = next(iter(luts))
+        (out / "lut.hex").write_text((data / f"lut.{first_lut}.hex").read_text())
+
     # Tools that read the ROM module with its default parameter (Yosys does) take this copy;
     # simulators use each instance's INIT from the generated top.
     (out / "rom.hex").write_text((data / f"{banks[0]['matrix']}.hex").read_text())
     (rtl / "tile_rom.v").write_text((_templates_dir() / "tile_rom.v").read_text())
     (rtl / "tile_mac.v").write_text((_templates_dir() / "tile_mac.v").read_text())
+    (rtl / "tile_lut.v").write_text((_templates_dir() / "tile_lut.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     top = top.replace('parameter         INIT = "rom.hex"', f'parameter         INIT = "{banks[0]["hex"]}"')
@@ -138,6 +156,7 @@ def generate(
             }
         ),
         "banks": banks,
+        "luts": luts,
         "views": {
             "1": "behavioural $readmemh (this bundle)",
             "2": "standard-cell ROM netlist, synthesised by views.py",
