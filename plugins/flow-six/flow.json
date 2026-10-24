@@ -1,6 +1,6 @@
 {
   "id": "six",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "stages": [
     {
       "id": "SPEC",
@@ -49,6 +49,7 @@
             "handler": "slice",
             "params": { "level": "S-1" },
             "inputs": { "graph": "node:recover.graph", "spec": "node:calibrate.spec" },
+            "bind": { "slice": "slice-definition" },
             "judge": ["spec.slice"]
           },
           {
@@ -184,6 +185,40 @@
             "weights": "slot:l2-weights"
           }
         }
+      ]
+    },
+    {
+      "id": "RTL",
+      "title": "RTL: the taalas-tile/1 bundle of the slice, and its checks",
+      "develop": {
+        "nodes": [
+          {
+            "id": "generate",
+            "plugin": "rtl-taalas",
+            "handler": "tile_generate",
+            "params": { "macsPerEngine": 128 },
+            "inputs": {
+              "spec": "slot:numeric-spec",
+              "weights": "slot:l2-weights",
+              "slice": "slot:slice-definition"
+            },
+            "bind": { "rtl": "rtl-bundle", "manifest": "rtl-manifest" }
+          },
+          {
+            "id": "check",
+            "plugin": "rtl-taalas",
+            "handler": "tile_check",
+            "inputs": { "rtl": "node:generate.rtl" },
+            "judge": ["rtl.tile.lint", "rtl.tile.synthesizable", "rtl.tile.roundtrip", "rtl.tile.rules", "rtl.tile.rom.views"]
+          }
+        ]
+      },
+      "tests": [
+        { "check": "rtl.tile.lint", "inputs": { "rtl": "slot:rtl-bundle" } },
+        { "check": "rtl.tile.synthesizable", "inputs": { "rtl": "slot:rtl-bundle" } },
+        { "check": "rtl.tile.roundtrip", "inputs": { "rtl": "slot:rtl-bundle" } },
+        { "check": "rtl.tile.rules", "inputs": { "rtl": "slot:rtl-bundle" } },
+        { "check": "rtl.tile.rom.views", "inputs": { "rtl": "slot:rtl-bundle" } }
       ]
     }
   ],
@@ -332,6 +367,51 @@
         { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
       ],
       "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "rtl.tile.lint",
+      "version": "1",
+      "title": "Verilator -Wall lints the generated RTL with zero warnings, and no warning is disabled",
+      "plugin": "rtl-taalas",
+      "handler": "tile_check",
+      "completeness": [{ "metric": "banks", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "lint_warnings", "op": "==", "value": 0 }, { "metric": "rule_violations", "op": "==", "value": 0 }]
+    },
+    {
+      "id": "rtl.tile.synthesizable",
+      "version": "1",
+      "title": "Yosys elaborates the bundle and check -assert passes before and after proc",
+      "plugin": "rtl-taalas",
+      "handler": "tile_check",
+      "completeness": [{ "metric": "banks", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "synthesizable", "op": "==", "value": 1 }]
+    },
+    {
+      "id": "rtl.tile.roundtrip",
+      "version": "1",
+      "title": "Every ROM bank restores to the quantized weights (the mapping rule is reversible)",
+      "plugin": "rtl-taalas",
+      "handler": "tile_check",
+      "completeness": [{ "metric": "banks", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "roundtrip_mismatches", "op": "==", "value": 0 }]
+    },
+    {
+      "id": "rtl.tile.rules",
+      "version": "1",
+      "title": "The generated RTL follows the register and clock rules (no lint_off, a reset in every clocked block, no functions)",
+      "plugin": "rtl-taalas",
+      "handler": "tile_check",
+      "completeness": [{ "metric": "banks", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "rule_violations", "op": "==", "value": 0 }]
+    },
+    {
+      "id": "rtl.tile.rom.views",
+      "version": "1",
+      "title": "The behavioural ROM and the synthesised standard-cell ROM are formally equivalent",
+      "plugin": "rtl-taalas",
+      "handler": "tile_check",
+      "completeness": [{ "metric": "banks", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "rom_views", "op": "==", "value": 1 }]
     },
     {
       "id": "spec.design",

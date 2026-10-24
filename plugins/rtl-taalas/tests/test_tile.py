@@ -53,6 +53,18 @@ def test_the_rom_mapping_round_trips():
             assert all(len(line) == -(-macs * bits // 4) for line in lines)
 
 
+def test_the_full_model_writes_one_bank_per_matrix_and_the_classifier(built, tmp_path):
+    _, spec, arrays = built
+    manifest = generator.generate(spec, arrays, macs=8, out=tmp_path)
+    assert manifest["slice"]["level"] == "Q-full"
+    assert len(manifest["banks"]) == 7 * spec["hyper"]["layers"] + 1
+    assert manifest["banks"][-1]["matrix"] == "embed"
+    assert manifest["banks"][-1]["rows"] == spec["hyper"]["vocab"]
+    assert all(bank["restored"] for bank in manifest["banks"])
+    weights = sum(bank["rows"] * bank["columns"] for bank in manifest["banks"])
+    assert manifest["slice"]["weights"] == weights
+
+
 def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     graph, spec, arrays = built
     report = slice_spec(graph, spec, "S-1")

@@ -223,10 +223,12 @@ def tile_check(ctx: InvokeContext) -> Result:
     return Result(
         outputs=[Output("report", "rtl-checks.json", "rtl.checks", "application/json")],
         metrics={
+            "banks": len(tile_checks.manifest(bundle)["banks"]),
             "roundtrip_mismatches": report["roundtrip"]["roundtrip_mismatches"],
             "rule_violations": report["rules"]["violations"],
             "lint_warnings": report["lint"].get("warnings", -1),
             "synthesizable": int(report["synthesizable"].get("returncode", -1) == 0),
+            "rom_views": int(bool(report["romViews"].get("equivalent"))),
             "checked": int(bool(report["passed"])),
         },
         parse={"status": "complete", "parser": "llmchip-rtl/tile-check"},

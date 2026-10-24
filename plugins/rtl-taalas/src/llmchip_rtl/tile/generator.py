@@ -5,7 +5,11 @@ The generator writes files, never patches them (DP-3): the hand-written template
 and the top level with the host frames, the schedule marcher and the observation readback) plus
 the generated ROM contents of view 1 (the behavioural model of FR-SGN-07) and a manifest with
 the mapping rule's version and every file's hash. View 2 (the standard-cell ROM netlist) is the
-synthesis of view 1 (R5); view 3 (via-programmed) is not built.
+synthesis of view 1 (`views.py`); view 3 (via-programmed) is not built.
+
+A slice writes its matrices of one layer; `layers=None` writes the banks of every decoder layer
+plus the tied classifier (Q-full). The assembled top level of Q-full (one engine per layer,
+pipelined) is not generated yet: the template is the single-engine top of a slice.
 """
 
 from __future__ import annotations
@@ -19,6 +23,22 @@ import numpy as np
 from . import rom
 
 TEMPLATE_VERSION = "taalas-tile-templates/1"
+CLASSIFIER = "embed"  # the tied classifier: the embedding table's integers
+
+
+def _shape(h: dict, node: str) -> tuple[int, int]:
+    hd, hidden, inter = h["headDim"], h["hidden"], h["intermediate"]
+    kv = h["kvHeads"] * hd
+    return {
+        "q_proj": (hidden, hidden),
+        "k_proj": (kv, hidden),
+        "v_proj": (kv, hidden),
+        "o_proj": (hidden, h["heads"] * hd),
+        "gate_proj": (inter, hidden),
+        "up_proj": (inter, hidden),
+        "down_proj": (hidden, inter),
+        CLASSIFIER: (h["vocab"], hidden),
+    }[node]
 
 
 def _templates_dir() -> Path:
@@ -29,16 +49,39 @@ def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _entries(
+    spec: dict, slice_report: dict | None, layers: list[int] | None
+) -> list[tuple[int, str, int, int, int, int]]:
+    """(layer, node, r0, r1, c0, c1) of the banks: the slice's pieces, or every matrix of a layer."""
+    h = spec["hyper"]
+    if slice_report is not None:
+        layer = int(slice_report.get("layer", 0))
+        return [
+            (layer, entry["node"], entry["rows"][0], entry["rows"][1], entry["columns"][0], entry["columns"][1])
+            for entry in slice_report["matrices"]
+        ]
+    chosen = layers if layers is not None else list(range(h["layers"]))
+    out = []
+    names = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
+    for layer in chosen:
+        for node in names:
+            rows, columns = _shape(h, node)
+            out.append((layer, node, 0, rows, 0, columns))
+    rows, columns = _shape(h, CLASSIFIER)
+    out.append((int(chosen[-1]), CLASSIFIER, 0, rows, 0, columns))
+    return out
+
+
 def generate(
     spec: dict,
     arrays: dict[str, np.ndarray],
-    slice_report: dict,
+    slice_report: dict | None = None,
     macs: int = 128,
+    layers: list[int] | None = None,
     out: Path | None = None,
 ) -> dict:
-    """Writes the RTL and ROM files of a slice (`arch-taalas/slice`) and returns the manifest."""
+    """Writes the RTL and ROM files of the slice (or of the whole layer set) and returns the manifest."""
     bits = spec["weights"]["storageBits"]
-    layer = int(slice_report.get("layer", 0))
     out = out or Path(".")
     rtl = out / "rtl"
     data = out / "rom"
@@ -46,18 +89,13 @@ def generate(
     data.mkdir(parents=True, exist_ok=True)
 
     banks = []
-    for entry in slice_report["matrices"]:
-        node = entry["node"]
-        key = f"{layer}.{node}"
-        q = arrays[f"{key}.q"].astype(np.int64)
-        r0, r1 = entry["rows"]
-        c0, c1 = entry["columns"]
-        q = q[r0:r1, c0:c1]
+    for layer, node, r0, r1, c0, c1 in _entries(spec, slice_report, layers):
+        key = CLASSIFIER if node == CLASSIFIER else f"{layer}.{node}"
+        q = arrays[f"{key}.q"].astype(np.int64)[r0:r1, c0:c1]
         rows, columns = q.shape
         words = rom.to_words(q, macs, bits)
         name = f"{key}.hex"
-        lines = rom.hexfile(words, macs, bits)
-        (data / name).write_text("\n".join(lines) + "\n")
+        (data / name).write_text("\n".join(rom.hexfile(words, macs, bits)) + "\n")
         banks.append(
             {
                 "matrix": key,
@@ -86,11 +124,23 @@ def generate(
         "architecture": "taalas-tile/1",
         "mapping": {"rule": rom.MAPPING_VERSION, "macs": macs, "bits": bits},
         "templates": {"version": TEMPLATE_VERSION, "files": ["tile_rom.v", "tile_mac.v", "tile_top.v"]},
-        "slice": {"level": slice_report["level"], "layer": layer, "weights": slice_report["total"]["weights"]},
+        "slice": (
+            {
+                "level": slice_report["level"],
+                "layer": int(slice_report.get("layer", 0)),
+                "weights": slice_report["total"]["weights"],
+            }
+            if slice_report is not None
+            else {
+                "level": "Q-full",
+                "layers": (len(banks) - 1) // 7,
+                "weights": int(sum(b["rows"] * b["columns"] for b in banks)),
+            }
+        ),
         "banks": banks,
         "views": {
             "1": "behavioural $readmemh (this bundle)",
-            "2": "standard-cell ROM netlist, from synthesis (R5)",
+            "2": "standard-cell ROM netlist, synthesised by views.py",
             "3": "via-programmed, not built",
         },
         "files": {str(p.relative_to(out)): _hash(p) for p in sorted(rtl.iterdir()) if p.suffix == ".v"},
