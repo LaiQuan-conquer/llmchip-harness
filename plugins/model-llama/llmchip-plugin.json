@@ -181,6 +181,11 @@
           "name": "census",
           "type": "model.census",
           "mediaType": "application/json"
+        },
+        {
+          "name": "model",
+          "type": "model.archive",
+          "mediaType": "application/x-tar"
         }
       ],
       "params": {
@@ -208,6 +213,11 @@
           "name": {
             "type": "string",
             "minLength": 1
+          },
+          "archive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also keep the whole model as one artifact (model.archive), for stage pipelines"
           }
         }
       },
@@ -224,6 +234,13 @@
           "name": "tokenizer",
           "types": [
             "model.tokenizer.llama2c"
+          ],
+          "required": false
+        },
+        {
+          "name": "model",
+          "types": [
+            "model.archive"
           ],
           "required": false
         }
@@ -267,11 +284,18 @@
           "required": true
         },
         {
+          "name": "model",
+          "types": [
+            "model.archive"
+          ],
+          "required": false
+        },
+        {
           "name": "bundle",
           "types": [
             "model.bundle"
           ],
-          "required": true
+          "required": false
         },
         {
           "name": "files",
@@ -280,7 +304,7 @@
             "model.weights.llama2c",
             "model.tokenizer.llama2c"
           ],
-          "required": true,
+          "required": false,
           "multiple": true
         }
       ],
@@ -326,11 +350,18 @@
           "required": true
         },
         {
+          "name": "model",
+          "types": [
+            "model.archive"
+          ],
+          "required": false
+        },
+        {
           "name": "bundle",
           "types": [
             "model.bundle"
           ],
-          "required": true
+          "required": false
         },
         {
           "name": "files",
@@ -339,7 +370,7 @@
             "model.weights.llama2c",
             "model.tokenizer.llama2c"
           ],
-          "required": true,
+          "required": false,
           "multiple": true
         },
         {

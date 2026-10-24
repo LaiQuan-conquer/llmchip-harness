@@ -1,7 +1,10 @@
 """Handlers of the weights-to-graph pipeline: import (S0), recover, run_graph, compare (S1).
 
 - `import_model` reads a downloaded model (file or directory) from this machine, keeps
-  its files as artifacts and takes the tensor census from their headers.
+  its files as artifacts and takes the tensor census from their headers. With `archive`
+  it also keeps the whole model as one artifact (`model.archive`: a tar of the files and
+  `bundle.json`), which a stage pipeline can pass from a slot to every handler that reads
+  the model (`open_model`); importing that archive again gives the same files and census.
 - `recover_graph` turns the census into the computation graph (`graph.recover`).
 - `run_graph` executes the recovered graph (L0) on prompts and reports readable text.
 - `compare_upstream` executes it again next to the official implementation and
@@ -11,9 +14,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
+import tarfile
 import time
 from pathlib import Path
 
@@ -94,12 +99,67 @@ def _from_artifacts(ctx: InvokeContext) -> Path:
     return directory
 
 
+ARCHIVE_BUNDLE = "bundle.json"
+
+
+def _extract(archive: Path, directory: Path) -> dict:
+    """Unpacks a model archive (once) and returns its bundle."""
+    if not (directory / ARCHIVE_BUNDLE).exists():
+        directory.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive) as tar:
+            tar.extractall(directory, filter="data")
+    bundle = json.loads((directory / ARCHIVE_BUNDLE).read_text())
+    if bundle.get("format") != "llmchip-model-bundle/1":
+        raise ValueError("not a model archive")
+    return bundle
+
+
+def open_model(ctx: InvokeContext) -> tuple[Path, dict]:
+    """The model a run reads, as a directory of its files under their own names, and its bundle:
+    from the input `model` (an archive) or from the inputs `bundle` and `files`."""
+    directory = Path(ctx.work_dir, "model-files")
+    archive = next((i for i in ctx.inputs if i.name == "model"), None)
+    if archive is not None:
+        return directory, _extract(Path(archive.path), directory)
+    bundle = json.loads(Path(ctx.input("bundle").path).read_text())
+    by_hash = {i.hash: Path(i.path) for i in ctx.inputs if i.name == "files"}
+    directory.mkdir(exist_ok=True)
+    for f in bundle["files"]:
+        if f["sha256"] not in by_hash:
+            raise ValueError(f"file {f['name']} of the bundle is not among the run's inputs")
+        link = directory / f["name"]
+        if not link.exists():
+            link.symlink_to(by_hash[f["sha256"]])
+    return directory, bundle
+
+
+def _write_archive(path: Path, files: list[Path], bundle: dict) -> None:
+    """A tar of the model files and the bundle, in a fixed order with fixed metadata."""
+    with tarfile.open(path, "w") as tar:
+        for f in sorted(files, key=lambda p: p.name):
+            info = tar.gettarinfo(str(f), arcname=f.name)
+            info.mtime, info.uid, info.gid, info.uname, info.gname, info.mode = 0, 0, 0, "", "", 0o644
+            with f.open("rb") as fh:
+                tar.addfile(info, fh)
+        data = json.dumps(bundle, indent=2, ensure_ascii=False).encode()
+        info = tarfile.TarInfo(ARCHIVE_BUNDLE)
+        info.size, info.mode = len(data), 0o644
+        tar.addfile(info, io.BytesIO(data))
+
+
 def import_model(ctx: InvokeContext) -> Result:
-    """Imports a model from a path on this machine, or from a project's llama2.c weight artifacts."""
-    from_artifacts = "path" not in ctx.params
+    """Imports a model from a path on this machine, from a model archive, or from a project's
+    llama2.c weight artifacts."""
+    archive_input = next((i for i in ctx.inputs if i.name == "model"), None)
+    from_artifacts = "path" not in ctx.params and archive_input is None
     if from_artifacts and not any(i.name == "weights" for i in ctx.inputs):
-        raise ValueError("give either `path` or the `weights` and `tokenizer` artifacts")
-    source = _from_artifacts(ctx) if from_artifacts else Path(ctx.params["path"]).expanduser()
+        raise ValueError("give `path`, a model archive, or the `weights` and `tokenizer` artifacts")
+    if archive_input is not None:
+        source = Path(ctx.work_dir, "model-archive")
+        _extract(Path(archive_input.path), source)
+        (source / ARCHIVE_BUNDLE).unlink()
+    else:
+        source = _from_artifacts(ctx) if from_artifacts else Path(ctx.params["path"]).expanduser()
     if not source.exists():
         raise ValueError(f"{source} does not exist on this machine")
     candidates = sorted(p for p in ([source] if source.is_file() else source.iterdir()) if p.is_file())
@@ -149,7 +209,11 @@ def import_model(ctx: InvokeContext) -> Result:
     result = census(layouts, config, int(ctx.params.get("context", 64)), paths={p.name: p for p in weights})
     bundle = {
         "format": "llmchip-model-bundle/1",
-        "source": f"artifact {ctx.input('weights').hash}" if from_artifacts else str(source),
+        "source": f"artifact {ctx.input('weights').hash}"
+        if from_artifacts
+        else f"archive {archive_input.hash}"
+        if archive_input is not None
+        else str(source),
         "name": ctx.params.get("name") or (source.name if source.is_dir() else source.stem),
         "weightFormat": chosen,
         "files": listed,
@@ -161,6 +225,9 @@ def import_model(ctx: InvokeContext) -> Result:
         Output("bundle", "bundle.json", "model.bundle", "application/json", label),
         Output("census", "census.json", "model.census", "application/json", label),
     ]
+    if ctx.params.get("archive"):
+        _write_archive(out / "model.tar", [out / f["name"] for f in listed], bundle)
+        outputs.append(Output("model", "model.tar", "model.archive", "application/x-tar", label))
     checks = {c["id"]: c["ok"] for c in result["checks"]}
     return Result(
         outputs=outputs,
@@ -226,13 +293,9 @@ class LoadedModel:
         self.graph = json.loads(Path(ctx.input("graph").path).read_text())
         if not self.graph.get("supported"):
             raise ValueError(f"the graph was not recovered: {self.graph.get('reason')}")
-        self.bundle = json.loads(Path(ctx.input("bundle").path).read_text())
-        by_hash = {i.hash: Path(i.path) for i in ctx.inputs if i.name == "files"}
-        self.paths: dict[str, Path] = {}
-        for f in self.bundle["files"]:
-            if f["sha256"] not in by_hash:
-                raise ValueError(f"file {f['name']} of the bundle is not among the run's inputs")
-            self.paths[f["name"]] = by_hash[f["sha256"]]
+        directory, self.bundle = open_model(ctx)
+        self.directory = directory
+        self.paths: dict[str, Path] = {f["name"]: directory / f["name"] for f in self.bundle["files"]}
         self.weight_files = [f["name"] for f in self.bundle["files"] if f["role"] == "weights"]
         self.layouts: list[FileLayout] = [self._layout(name) for name in self.weight_files]
         self.weights = WeightLoader(self.layouts, {name: self.paths[name] for name in self.weight_files})

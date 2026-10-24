@@ -1,13 +1,16 @@
-"""IF-2 entry point of the numeric plugin: quantize (S2), L2 inference, evaluation (S2 accuracy), and the
-analysis of any recovered graph (quantize_graph, evaluate_graph)."""
+"""IF-2 entry point of the numeric plugin: quantize (S2), L2 inference, evaluation (S2 accuracy), the
+analysis of any recovered graph (quantize_graph, evaluate_graph), and model quality by open
+benchmarks (benchmark_data, benchmark, benchmark_compare)."""
 
 import json
+import os
+import signal
 from pathlib import Path
 
 import numpy as np
 from llmchip_model import Model, Tokenizer, load_ir
 from llmchip_model.evalset import load_evalset
-from llmchip_model.pipeline import LoadedModel
+from llmchip_model.pipeline import LoadedModel, open_model
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
 from . import graph_eval, graph_l2
@@ -212,15 +215,197 @@ def evaluate_graph(ctx: InvokeContext) -> Result:
     )
 
 
+def benchmark_data(ctx: InvokeContext) -> Result:
+    """Packs the open benchmarks downloaded on this machine into one artifact, with the quick set."""
+    from .benchdata import pack
+
+    source = Path(ctx.params["path"]).expanduser()
+    if not source.is_dir():
+        raise ValueError(f"{source} is not a directory on this machine")
+    out = Path(ctx.out_dir)
+    index = pack(source, out / "benchmark-data.tar", lambda message: ctx.log("info", message))
+    sets = {k: v for k, v in index.items() if k != "tasks"} | {
+        "tasks": {t: {k: v for k, v in info.items() if k != "files"} for t, info in index["tasks"].items()}
+    }
+    (out / "benchmark-sets.json").write_text(json.dumps(sets, indent=1, ensure_ascii=False))
+    metrics: dict = {"benchmarks": len(index["benchmarks"]), "tasks": len(index["tasks"])}
+    for bench, info in index["benchmarks"].items():
+        metrics |= {f"questions.{bench}": info["questions"], f"quick.{bench}": info["quick"]}
+    metrics["quick_total"] = sum(info["quick"] for info in index["benchmarks"].values())
+    return Result(
+        outputs=[
+            Output("data", "benchmark-data.tar", "benchmark.data", "application/x-tar", "internal"),
+            Output("sets", "benchmark-sets.json", "benchmark.sets", "application/json", "internal"),
+        ],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "llmchip-numeric/benchmark-data"},
+    )
+
+
+def _model_dir(ctx: InvokeContext) -> Path:
+    """The imported model's files under their own names (what transformers and lm-eval load)."""
+    return open_model(ctx)[0]
+
+
+def benchmark(ctx: InvokeContext) -> Result:
+    """Answers the quick set or the full set of the benchmarks with L0 or L2 (FR-QNT-04/08)."""
+    import torch
+
+    from . import bench
+    from .benchdata import BENCHMARKS, Data
+    from .benchlm import L2LM, l0_model
+
+    p = ctx.params
+    layer, chosen = p["layer"], p.get("set", "quick")
+    benchmarks = p.get("benchmarks") or BENCHMARKS
+    batch = p.get("batchSize", 32)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    data = Data(Path(ctx.input("data").path), Path(ctx.work_dir))
+    model_dir = _model_dir(ctx)
+    source = next(i for i in ctx.inputs if i.name in ("model", "bundle"))
+    identity: dict = {source.name: source.hash, "precision": "bfloat16" if layer == "L0" else "numeric spec"}
+    if layer == "L2":
+        from .l2_torch import TorchL2
+
+        graph = json.loads(Path(ctx.input("graph").path).read_text())
+        spec = json.loads(Path(ctx.input("spec").path).read_text())
+        if spec.get("model", {}).get("graphHash") not in ("", ctx.input("graph").hash):
+            raise ValueError("the numeric spec was built from a different graph")
+        with np.load(ctx.input("weights").path, allow_pickle=False) as z:
+            arrays = {k: z[k] for k in z.files if k != "meta"}
+        l2 = TorchL2(graph_l2.GraphL2(graph, spec, arrays), device)
+        max_length = l2.context
+        if p.get("contextLength") not in (None, max_length):
+            raise ValueError(f"L2 runs at the context of its numeric spec ({max_length})")
+        lm = L2LM(str(model_dir), l2, max_length, batch, lambda message: ctx.log("info", message))
+        identity |= {"spec": ctx.input("spec").hash, "weights": ctx.input("weights").hash, "device": device}
+    elif layer == "L0":
+        max_length = p.get("contextLength", 2048)
+        lm = l0_model(str(model_dir), max_length, batch, device)
+        identity |= {"device": device}
+    else:
+        raise ValueError(f"unknown layer {layer}")
+    head = {
+        "format": bench.REPORT_FORMAT,
+        "layer": layer,
+        "set": chosen,
+        "maxLength": max_length,
+        "data": ctx.input("data").hash,
+        "model": identity,
+        "benchmarkList": benchmarks,
+    }
+    done = None
+    if ctx.resume is not None:
+        saved = json.loads(Path(ctx.resume.path).read_text())
+        if {k: saved.get(k) for k in head} == head:
+            done = saved["benchmarks"]
+            ctx.log("info", f"continuing after {sorted(done)}")
+
+    def after_each(report: dict) -> None:
+        tmp = Path(ctx.work_dir, "checkpoint.tmp")
+        tmp.write_text(json.dumps(head | report, ensure_ascii=False))
+        tmp.replace(Path(ctx.work_dir, "checkpoint.json"))
+        ctx.checkpoint("checkpoint.json", "benchmarks")
+        ctx.progress(len(report["benchmarks"]) / len(benchmarks), f"{len(report['benchmarks'])} benchmarks done")
+
+    report = bench.run(
+        lm, data, benchmarks, chosen == "quick", Path(ctx.work_dir), done, after_each, lambda m: ctx.log("info", m)
+    )
+    import evalplus
+    import lm_eval
+    import transformers
+
+    report = head | report
+    report["versions"] = {
+        "lm_eval": lm_eval.__version__,
+        "evalplus": evalplus.__version__,
+        "torch": torch.__version__,
+        "transformers": transformers.__version__,
+    }
+    if layer == "L2":
+        report["saturations"] = l2.saturations
+    Path(ctx.out_dir, "benchmark.json").write_text(json.dumps(report, ensure_ascii=False))
+    metrics: dict = {"layer": layer, "set": chosen, "max_length": max_length, "benchmarks": len(report["benchmarks"])}
+    for name, r in report["benchmarks"].items():
+        metrics |= {f"n.{name}": r["questions"], f"seconds.{name}": r["seconds"]}
+        if r["score"] is not None:
+            metrics[f"score.{name}"] = 100 * r["score"]
+    return Result(
+        outputs=[Output("report", "benchmark.json", "benchmark.report", "application/json", "internal")],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "llmchip-numeric/benchmark"},
+    )
+
+
+def benchmark_compare(ctx: InvokeContext) -> Result:
+    """L2 against L0 on the same questions: drop and paired-bootstrap interval per benchmark."""
+    from . import bench
+
+    reference = json.loads((Path(__file__).parents[2] / "data" / "benchmark-reference.json").read_text())
+    comparison, metrics = bench.compare(bench.load(ctx.input("l0").path), bench.load(ctx.input("l2").path), reference)
+    Path(ctx.out_dir, "comparison.json").write_text(json.dumps(comparison, indent=1, ensure_ascii=False))
+    return Result(
+        outputs=[Output("comparison", "comparison.json", "benchmark.comparison", "application/json", "internal")],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "llmchip-numeric/benchmark-compare"},
+    )
+
+
+def l2_fast_check(ctx: InvokeContext) -> Result:
+    """Evidence for `spec.l2.fast`: the fast L2 against the reference L2 on the quick-set questions."""
+    from transformers import AutoTokenizer
+
+    from .benchdata import Data
+    from .l2_torch import TorchL2, check_against_reference
+
+    graph = json.loads(Path(ctx.input("graph").path).read_text())
+    spec = json.loads(Path(ctx.input("spec").path).read_text())
+    if spec.get("model", {}).get("graphHash") not in ("", ctx.input("graph").hash):
+        raise ValueError("the numeric spec was built from a different graph")
+    with np.load(ctx.input("weights").path, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files if k != "meta"}
+    ref = graph_l2.GraphL2(graph, spec, arrays)
+    fast = TorchL2(ref)
+    tokenizer = AutoTokenizer.from_pretrained(str(_model_dir(ctx)))
+    questions = Data(Path(ctx.input("data").path), Path(ctx.work_dir)).quick_questions()
+    prompts = [
+        tokenizer.apply_chat_template([{"role": "user", "content": q}], add_generation_prompt=True, tokenize=False)
+        for q in questions
+    ]
+    ids = [tokenizer(p, add_special_tokens=False)["input_ids"] for p in prompts]
+    steps = ctx.params.get("steps", 64)
+    report = check_against_reference(ref, fast, ids, steps, lambda m: ctx.log("info", m))
+    Path(ctx.out_dir, "l2-fast.json").write_text(json.dumps(report, indent=1))
+    return Result(
+        outputs=[Output("report", "l2-fast.json", "l2.fast-check", "application/json")],
+        metrics=report["metrics"],
+        parse={"status": "complete", "parser": "llmchip-numeric/l2-fast-check"},
+    )
+
+
+def _stop(signum, _frame) -> None:
+    """The kernel cancels a run with SIGTERM: remove the code sandboxes first, or they would
+    outlive the run (they are containers of their own)."""
+    from .benchcode import remove_sandboxes
+
+    remove_sandboxes(grace=1.0)
+    os._exit(128 + signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _stop)
     run_plugin(
         "numeric",
-        "0.2.0",
+        "0.3.0",
         {
             "quantize": quantize,
             "infer": infer,
             "evaluate": handle_evaluate,
             "quantize_graph": quantize_graph,
             "evaluate_graph": evaluate_graph,
+            "benchmark_data": benchmark_data,
+            "benchmark": benchmark,
+            "benchmark_compare": benchmark_compare,
+            "l2_fast_check": l2_fast_check,
         },
     )

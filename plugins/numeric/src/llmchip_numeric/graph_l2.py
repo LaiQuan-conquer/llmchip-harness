@@ -13,8 +13,10 @@ Additions to the operators of the chip L2:
 - head_rmsnorm (QK norm): the rmsnorm of each head of q or k, input fraction bits of q / k;
 - rope "half" (Hugging Face layout): element j of a head is rotated with element j + hd/2.
 
-The whole sequence is executed at once with a causal mask (no KV cache): per position
-this is the same arithmetic as the chip's token-by-token execution. Matrix products are
+A call executes a run of positions at once with a causal mask. With a `KVCache` the keys
+and values of earlier calls are kept, so a prompt can be fed once and then extended token by
+token as the chip does: per position the arithmetic is the same either way, so the results
+are identical (`tests/test_l2_torch.py`, `test_the_kv_cache_gives_the_same_results_as_one_pass`). Matrix products are
 computed exactly with float32 BLAS: x = 256 * hi + lo splits each int16 activation into
 parts of at most 8 bits, so every product and partial sum over a group of at most 256
 weights stays an integer below 2^24, which float32 represents exactly.
@@ -77,6 +79,15 @@ EXACT_GROUP_MAX = 256  # 127 * 255 * 256 < 2^24: float32 sums of a group are exa
 ROW_CHUNK_ELEMENTS = 1 << 24  # groups x positions x rows of one product chunk
 
 Weights = Callable[[str], np.ndarray]
+
+
+class KVCache:
+    """Keys (after RoPE) and values of the positions fed so far, per decoder layer."""
+
+    def __init__(self) -> None:
+        self.k: dict[int, np.ndarray] = {}
+        self.v: dict[int, np.ndarray] = {}
+        self.length = 0
 
 
 def array_hash(a: np.ndarray) -> str:
@@ -428,13 +439,13 @@ class GraphL2:
         shift = (self.fn + 15 + e2 // 2 - f_out)[:, None]
         return self._narrow(self._rsh(x * weight.astype(np.int64)[None, :] * r[:, None], shift), 16, "norm")
 
-    def rope(self, v: np.ndarray, heads: int, hd: int, style: str, kind: str) -> np.ndarray:
+    def rope(self, v: np.ndarray, heads: int, hd: int, style: str, kind: str, p0: int = 0) -> np.ndarray:
         T = v.shape[0]
-        if self.context < T:
-            raise ValueError(f"{T} positions exceed the context of {self.context}")
+        if self.context < p0 + T:
+            raise ValueError(f"{p0 + T} positions exceed the context of {self.context}")
         t = v.reshape(T, heads, hd)
-        c = self.a["lut.rope_cos"].astype(np.int64)[:T][:, None, :]
-        s = self.a["lut.rope_sin"].astype(np.int64)[:T][:, None, :]
+        c = self.a["lut.rope_cos"].astype(np.int64)[p0 : p0 + T][:, None, :]
+        s = self.a["lut.rope_sin"].astype(np.int64)[p0 : p0 + T][:, None, :]
         out = np.empty_like(t)
         if style == "half":
             a, b = t[..., : hd // 2], t[..., hd // 2 :]
@@ -447,16 +458,19 @@ class GraphL2:
         return out.reshape(T, heads * hd)
 
     def attention(self, q, k, v, fq: int, fk: int, heads: int, kv_heads: int, hd: int, window) -> np.ndarray:
-        T = q.shape[0]
+        """Queries of the positions p0.. (T of them) against the keys and values of positions 0..S-1,
+        S = p0 + T (k and v hold the cached positions followed by the new ones)."""
+        T, S = q.shape[0], k.shape[0]
+        p0 = S - T
         group = heads // kv_heads
         qh = q.reshape(T, heads, hd).transpose(1, 0, 2)
-        kh = np.repeat(k.reshape(T, kv_heads, hd).transpose(1, 0, 2), group, axis=0)
-        vh = np.repeat(v.reshape(T, kv_heads, hd).transpose(1, 0, 2), group, axis=0)
-        i, j = np.arange(T)[:, None], np.arange(T)[None, :]
+        kh = np.repeat(k.reshape(S, kv_heads, hd).transpose(1, 0, 2), group, axis=0)
+        vh = np.repeat(v.reshape(S, kv_heads, hd).transpose(1, 0, 2), group, axis=0)
+        i, j = np.arange(p0, S)[:, None], np.arange(S)[None, :]
         allowed = j <= i
         if window:
             allowed &= j > i - window
-        allowed = np.broadcast_to(allowed[None], (heads, T, T))
+        allowed = np.broadcast_to(allowed[None], (heads, T, S))
         raw = self._rsh(np.matmul(qh, kh.transpose(0, 2, 1)) * self.att_scale, fq + fk + 15 - SCORE_FRAC)
         s = self._narrow(raw, 32, "score", allowed)
         smax = np.where(allowed, s, np.iinfo(np.int64).min).max(axis=-1, keepdims=True)
@@ -480,11 +494,21 @@ class GraphL2:
             return self.layer_frac[layer][kind]
         return self.f[kind]
 
-    def forward(self, tokens: list[int], hidden: list[np.ndarray] | None = None) -> np.ndarray:
-        """Integer logits (T, vocab; int32 values, fraction bits `logits.frac`) of every position.
+    def forward(
+        self,
+        tokens: list[int],
+        hidden: list[np.ndarray] | None = None,
+        cache: KVCache | None = None,
+        rows: list[int] | None = None,
+    ) -> np.ndarray:
+        """Integer logits (int32 values, fraction bits `logits.frac`) of the positions of `tokens`:
+        all of them (T, vocab), or only the given `rows` (indices into `tokens`).
         `hidden` receives the residual stream (fraction bits of x) after the embedding and each
-        layer, and the output of the final norm (fraction bits of xn), as `execute.forward`."""
+        layer, and the output of the final norm (fraction bits of xn), as `execute.forward`.
+        With `cache`, `tokens` continue the positions already fed into it, and their keys and
+        values are added to it."""
         ids = np.asarray(tokens, dtype=np.int64)
+        p0 = cache.length if cache is not None else 0
         bx = self.bits.get("x", 16)
         env: dict[str, np.ndarray] = {}
         fr: dict[str, int] = {}
@@ -505,7 +529,8 @@ class GraphL2:
             elif op == "linear":
                 wkey = self.tied[_name(node, "weight", layer)]
                 if node["id"] == "lm_head":
-                    env[outs[0]] = self.linear(wkey, env[ins[0]], fr[ins[0]], self.fl, "logits", bits=32)
+                    h = env[ins[0]] if rows is None else env[ins[0]][rows]
+                    env[outs[0]] = self.linear(wkey, h, fr[ins[0]], self.fl, "logits", bits=32)
                     fr[outs[0]] = self.fl
                 else:
                     kind = KIND_OF[node["id"]]
@@ -514,18 +539,23 @@ class GraphL2:
                     fr[outs[0]] = fo
             elif op == "head_rmsnorm":
                 x = env[ins[0]]
-                rows = x.reshape(-1, a["headDim"])
+                heads = x.reshape(-1, a["headDim"])
                 kind = KIND_OF[node["id"]]
                 fo = self.frac(kind, layer)
-                env[outs[0]] = self.rmsnorm(rows, self.a[f"{key}.w"], fr[ins[0]], fo, a["eps"]).reshape(x.shape)
+                env[outs[0]] = self.rmsnorm(heads, self.a[f"{key}.w"], fr[ins[0]], fo, a["eps"]).reshape(x.shape)
                 fr[outs[0]] = fo
             elif op == "rope":
                 hd = a["headDim"]
-                env[outs[0]] = self.rope(env[ins[0]], a["heads"], hd, a["style"], "q")
-                env[outs[1]] = self.rope(env[ins[1]], a["kvHeads"], hd, a["style"], "k")
+                env[outs[0]] = self.rope(env[ins[0]], a["heads"], hd, a["style"], "q", p0)
+                env[outs[1]] = self.rope(env[ins[1]], a["kvHeads"], hd, a["style"], "k", p0)
                 fr[outs[0]], fr[outs[1]] = fr[ins[0]], fr[ins[1]]
             elif op == "attention":
                 q, k, v = (env[n] for n in ins)
+                if cache is not None:
+                    if layer in cache.k:
+                        k = np.concatenate([cache.k[layer], k])
+                        v = np.concatenate([cache.v[layer], v])
+                    cache.k[layer], cache.v[layer] = k, v
                 env[outs[0]] = self.attention(
                     q, k, v, fr[ins[0]], fr[ins[1]], a["heads"], a["kvHeads"], a["headDim"], a.get("window")
                 )
@@ -553,4 +583,6 @@ class GraphL2:
                     hidden.append(env["x"])
                 elif node["id"] == "final_norm":
                     hidden.append(env[outs[0]])
+        if cache is not None:
+            cache.length = p0 + len(tokens)
         return env["logits"]

@@ -3,7 +3,18 @@ name = "llmchip-numeric"
 version = "0.1.0"
 description = "Numeric spec, quantization, L2 bit-exact model and accuracy evaluation of llmchip-harness (requirements FR-QNT)"
 requires-python = ">=3.12"
-dependencies = ["llmchip-sdk", "llmchip-model", "numpy>=2.0"]
+dependencies = [
+  "llmchip-sdk",
+  "llmchip-model",
+  "numpy>=2.0",
+  # the fast L2 and the calibration (GPU when there is one)
+  "torch>=2.6",
+  "transformers>=4.51",
+  # model quality by open benchmarks (FR-QNT-04): GSM8K, MMLU, CMMLU, C-Eval, IFEval; HumanEval+, MBPP+
+  "lm-eval[hf,ifeval]==0.4.13",
+  "evalplus==0.3.1",
+  "datasets>=3",
+]
 
 [tool.uv.sources]
 llmchip-sdk = { workspace = true }

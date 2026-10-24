@@ -1,0 +1,9 @@
+{
+  "id": "flow-six",
+  "version": "0.1.0",
+  "title": "The six steps before tapeout for Qwen2.5-0.5B-Instruct: SPEC, RTL, VER, SYN, PD, SGN (owner decision 2026-10-24)",
+  "kinds": ["flow-pack"],
+  "runtime": "data",
+  "kernelApi": "^0.3",
+  "data": [{ "id": "flow-six", "type": "flow.pack", "path": "flow.json" }]
+}

@@ -1,0 +1,17 @@
+{
+  "source": "https://qwenlm.github.io/blog/qwen2.5-llm/ (Qwen team, Qwen2.5 release, read 2026-10-24)",
+  "model": "Qwen2.5-0.5B-Instruct",
+  "note": "Published scores in percent, for checking the L0 evaluation settings (requirements FR-QNT-04): a large gap means the settings differ, not that L0 is wrong. Qwen gives no prompt or shot settings for its instruction models. MMLU, CMMLU and C-Eval are not published for the instruction model; MMLU 47.5 (5-shot) is the base model Qwen2.5-0.5B.",
+  "scores": {
+    "gsm8k": 49.6,
+    "ifeval": 27.9,
+    "humaneval": 35.4,
+    "mbpp": 49.6
+  },
+  "scoresOfOtherSettings": {
+    "humaneval": "HumanEval (base tests); the benchmark here scores HumanEval+ (base and plus tests)",
+    "mbpp": "MBPP (base tests); the benchmark here scores MBPP+ (base and plus tests)",
+    "ifeval": "strict prompt-level accuracy, as here",
+    "mmlu": "47.5, base model Qwen2.5-0.5B, 5-shot"
+  }
+}

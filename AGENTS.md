@@ -76,7 +76,7 @@ Current packages (responsibilities, entry points and allowed dependencies: imple
 
 Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2); `python/llmchip-vchip`, the test harness for virtual chips (`vchip`: loads a chip from its `chip.json`, drives generation from prompts, measures quality and speed against reference and golden chips; standalone, see its README, and inside the kernel as the plugin `vchip`).
 
-Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
+Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `flow-six` (data; the six steps for Qwen2.5-0.5B-Instruct, so far SPEC), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
@@ -181,6 +181,8 @@ A package that imports a vendored package follows the same rules: declare it as 
 - The EDA image is large (about 13 GB). Pull it once with `podman pull <entry.image of plugins/eda-gf180>`; tests that need an image are skipped, visibly, when it is absent.
 - The full S0–S7 flow test (`tests/m4-flow.spec.ts`) runs the physical tools for about 40 minutes (36 min measured on 2026-10-20) and is opt-in; it also needs the EDA image: `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts`. Run it after any change to the RTL generator, `eda-gf180` or the signoff checks. `LLMCHIP_ARCH=spatial` runs it on the spatial engine instead; run that after any change to the spatial generator.
 - Hard constraint (owner decision 2026-10-22): after any change to the spatial generator (`plugins/rtl-taalas/src/llmchip_rtl/spatial/`) or to the test harness's bridge to the RTL (`python/llmchip-vchip/src/llmchip_vchip/bridges/`, including the testbench in `bridges/tb/`), run the full conformance check once and report its result: `yarn vchip new rtl --proxy --id spatial-5k`, then `yarn vchip conform spatial-5k` without `--quick` (T-01–T-19, about 13 min), or the L3 tests with `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py` (all 20 prompts, about 11 min). Both need the EDA image; a skipped run is not a pass.
+- The SPEC step of Qwen2.5-0.5B-Instruct (`tests/qwen-spec.spec.ts`) is opt-in: `LLMCHIP_QWEN=1 yarn test tests/qwen-spec.spec.ts` (about 20 minutes with a GPU). It needs the model, the benchmark data and the code sandbox image of the tools directory (`../tools`, or `LLMCHIP_TOOLS`). Run it after any change to the numeric plugin's L2, fast L2 or benchmark code, or to the SPEC step of `flow-six`.
+- Podman 3.4 (this machine) has no `podman rm -t`: remove a running container with `podman kill`, then `podman rm -f`.
 - In WSL, Podman's default container networking does not work; that is irrelevant because plugin containers never get a network.
 
 ### Adding a plugin

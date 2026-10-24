@@ -30,8 +30,16 @@ describe('estimator (AC-M1-10)', () => {
     const { client } = await setup()
     const { plugins, problems } = await client.call('plugins.list')
     expect(problems).toEqual([])
-    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'model-llama', 'numeric', 'process-library', 'rtl-taalas', 'sim-verilator', 'vchip'])
-    expect((await client.call('checks.list')).checks.map((c) => c.id)).toContain('estimate.feasibility')
+    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'flow-six', 'model-llama', 'numeric', 'process-library', 'rtl-taalas', 'sim-verilator', 'vchip'])
+    const checks = (await client.call('checks.list')).checks.map((c) => c.id)
+    expect(checks).toContain('estimate.feasibility')
+    // A broken flow pack shows up neither in `plugins.list` (its problems are only logged) nor in
+    // a check id alone: its checks and its SPEC pipeline plan prove that it loaded whole.
+    expect(checks).toEqual(expect.arrayContaining(['spec.l2.fast', 'spec.accuracy.quick.mmlu', 'spec.accuracy.mmlu']))
+    await client.call('projects.create', { id: 'six', title: 'Six steps', flow: 'six' })
+    const plan = await client.call('pipelines.plan', { project: 'six', stage: 'SPEC', kind: 'develop' })
+    expect(plan.nodes).toBeGreaterThanOrEqual(8)
+    expect(new Set(plan.missing.map((m: { ref: string }) => m.ref))).toEqual(new Set(['slot:model', 'slot:benchmark-data']))
   })
 
   it('estimates stories260K, 0.5B and 8B on the 180nm target with a full breakdown', { timeout: 60_000 }, async () => {

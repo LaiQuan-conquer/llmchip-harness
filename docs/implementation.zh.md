@@ -6,7 +6,7 @@
 |---|---|
 | 文档版本 | v0.3 |
 | 日期 | 2026-10-24 |
-| 对应代码 | R1：阶段流水线（每一步的“运行研发流程”与“运行全部测试”）、按 CPU/内存/GPU 调度、运行检查点与续跑；R0（提交 `d771bb9`，负责人决定，2026-10-24）：取消审批门、豁免、导出与 `packager`，流程为 S0–S7；在此之前的提交 `9434f86`：M4 的 `9cc76a0`，以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
+| 对应代码 | R2a：Qwen2.5-0.5B-Instruct 的 SPEC 步骤的第一部分：快速 L2（GPU，与参考 L2 逐位一致）与 KV 缓存、开源基准评测（快速集与完整集）、六步流程包 `flow-six` 的 SPEC 步骤；R1（提交 `11d0dcd`）：阶段流水线（每一步的“运行研发流程”与“运行全部测试”）、按 CPU/内存/GPU 调度、运行检查点与续跑；R0（提交 `d771bb9`，负责人决定，2026-10-24）：取消审批门、豁免、导出与 `packager`，流程为 S0–S7；在此之前的提交 `9434f86`：M4 的 `9cc76a0`，以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
 | 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.7、[微内核架构](<../Microkernel Architecture.zh.md>) v0.12 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
@@ -35,7 +35,8 @@
 | M4 物理实现与签核（S6–S7） | `9cc76a0` | 在占位模型上完成，芯片 1.2×2 mm；当时的 S8 流片包已随 R0 删除 | `tests/m4-flow.spec.ts`（须显式开启，实测 39 分钟） |
 | M5 迁移到流片工艺、M6 回片测试 | — | 已删除（负责人决定，2026-10-24：不流片）。迁移影响评估（FR-MIG）仍可用 | `tests/m4-kernel.spec.ts`、`plugins/estimator/tests/test_migration.py` |
 | R0 取消审批门与豁免 | `d771bb9` | 完成：没有审批门、快照、审批、放行、豁免与导出；删除 `packager`；需求 v0.7、架构 v0.11 | `tests/workflow.spec.ts`、`tests/m4-kernel.spec.ts`、各流程测试 |
-| R1 流水线与资源 | 本提交 | 完成：阶段流水线（`pipelines.*`、CLI `pipeline`、演示流程页的两个入口与流水线面板），`flow-default` 为 S0–S7 声明研发流水线与必需测试；按 CPU、内存、GPU 调度；运行检查点与续跑（IF-2 `checkpoint`、输入 `resume`）；架构 v0.12 | `tests/pipelines.spec.ts`、`tests/pipelines-flow.spec.ts`、`tests/resources.spec.ts`、`tests/checkpoint.spec.ts` |
+| R1 流水线与资源 | `11d0dcd` | 完成：阶段流水线（`pipelines.*`、CLI `pipeline`、演示流程页的两个入口与流水线面板），`flow-default` 为 S0–S7 声明研发流水线与必需测试；按 CPU、内存、GPU 调度；运行检查点与续跑（IF-2 `checkpoint`、输入 `resume`）；架构 v0.12 | `tests/pipelines.spec.ts`、`tests/pipelines-flow.spec.ts`、`tests/resources.spec.ts`、`tests/checkpoint.spec.ts` |
+| R2a 快速 L2 与基准 | 本提交 | 部分完成（R2 的第一部分）：计算图 L2 的 KV 缓存；GPU 上的快速 L2（`TorchL2`），逐位等于参考 L2；七个开源基准在 L0 与 L2 上的快速集和完整集，代码题在无网络容器中判分；配对 bootstrap 比较；六步流程包 `flow-six` 的 SPEC 步骤（研发流水线与必需测试）。数值规格暂用逐元素舍入（RTN）的 W4，校准量化、KV int8、回溯诊断、`taalas-tile/1` 与 sky130/IHP 档案在 R2 的后续部分 | `plugins/numeric/tests/test_l2_torch.py`、`test_bench.py`、`test_benchcode.py`、`tests/qwen-spec.spec.ts`（须显式开启） |
 
 因此 M1 整体**未**通过验收：缺少 AC-M1-01（安装器）和桌面外壳，见 §7。
 
@@ -60,6 +61,7 @@
 | CLI 与 MCP | `llmchip` 命令（含 `pipeline plan/start/list/show/cancel/resume`）、通用 `call`、stdio 上的 MCP | [cli/src/main.ts](../packages/cli/src/main.ts)、[cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
 | Web UI | 九个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S7 路径、结果和检查；全部阶段与每个阶段各有“运行研发流程”和“运行全部测试”两个入口，流水线面板列出每次运行的节点、运行、判定与原因 | [apps/web/src](../apps/web/src) |
 | 领域流程 | 内置插件跑通 S0–S7，每个阶段由其检查判定（见 §2.4 的表） | [plugins/](../plugins) |
+| 模型质量（开源基准） | 七个开源基准（MMLU、CMMLU、C-Eval、GSM8K、IFEval、HumanEval+、MBPP+）的快速集（900 题，固定种子 20261024）与完整集，在 L0（transformers，bf16，GPU）与 L2（快速 L2）上作答，按各基准的规则判对错；代码题只在无网络、只读的容器中运行；L2 对 L0 每个基准的下降与配对 bootstrap 95% 区间，由每个基准一项检查判定 | [bench.py](../plugins/numeric/src/llmchip_numeric/bench.py)、[l2_torch.py](../plugins/numeric/src/llmchip_numeric/l2_torch.py)、[flow-six](../plugins/flow-six/flow.json) |
 | 真实模型导入与图还原 | 按本机路径导入已下载的模型目录（safetensors + config.json + tokenizer.json，或 llama2.c），从文件头做张量普查并估算，还原计算图（Llama 家族：Llama、Mistral、SmolLM、Qwen2、Qwen3、llama2.c），执行为 L0，并与 transformers / run.c 移植逐项测试：权重逐位、结构参数、参数总量、每层中间结果、每个提示的 logits、top-1 与贪心生成、单 token 与长序列边界用例。项目自带的 llama2.c 权重（如占位模型）直接从产物导入。S1 页面可选择任一已导入模型或新路径，填写自定义提示，并展示每个测试项 | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
 ### 1.3 只有接口（已声明，无行为）
@@ -160,10 +162,11 @@ plugins/                   额外的插件搜索路径
 | 插件 | 运行方式 | 处理器 | 用于 | 单元测试 |
 |---|---|---|---|---|
 | `flow-default` | data | 流程包：S0–S7、20 项检查、阶段准入检查、硬约束槽位、每个阶段的研发流水线与必需测试；数据 `estimate-request-proxy`、`timing-exceptions-none` | 全部 | 经由 `tests/*-flow.spec.ts` |
+| `flow-six` | data | 六步流程包（Qwen2.5-0.5B-Instruct，负责人决定 2026-10-24）：目前只有 SPEC 步骤，18 项检查 | SPEC | 经由 `tests/qwen-spec.spec.ts` |
 | `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`signoff-gf180mcu` | S0、S3、S6–S7 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
-| `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
-| `numeric` | process（Python） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph` | S2 | `test_numeric.py`、`test_graph_l2.py` |
+| `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`（可另存为一个模型归档）、`recover`、`run_graph`、`compare` | S0（导入）、S1、SPEC | `test_model.py`、`test_graph.py` |
+| `numeric` | process（Python；`benchmark` 与 `l2_fast_check` 用 GPU） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`evaluate_graph`、`benchmark_data`、`benchmark`、`benchmark_compare`、`l2_fast_check` | S2、SPEC | `test_numeric.py`、`test_graph_l2.py`、`test_l2_torch.py`、`test_bench.py`、`test_benchcode.py` |
 | `arch-taalas` | process（Python） | `design`、`verify_spec`、`explore` | S3 | `test_arch.py`、`test_spatial.py` |
 | `rtl-taalas` | process（Python） | `generate`、`check_isa` | S4、S5 | `test_rtl.py`、`test_spatial.py` |
 | `sim-verilator` | container | `lint`、`qualify`、`verify`、`gatesim`、`sdfsim`、`generate` | S5、S7、Playground | `test_simlib.py` |
@@ -181,12 +184,17 @@ plugins/                   额外的插件搜索路径
 - **estimator**：可行性、面积、成本与性能估算（FR-EST），给出下限/典型/上限值、每项的来源与置信度，以及缺失的参数。`check_views` 按阶段报告已标定存储实现具备哪些集成视图。`migrate` 依据设计对工艺能力的依赖评估迁移影响（FR-MIG）。
 - **process-library**：工艺档案（含迁移所需的工艺数据）、实现库与 GF180 签核规则。每个数值都记录来源与置信度，经验值在标定前始终是经验值。
 - **flow-default**（流程版本 0.12.0）：阶段 S0–S7 及其检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。没有审批门（负责人决定，2026-10-24）。每个阶段声明研发流水线 `develop` 与必需测试 `tests`，驱动 5K 占位模型走与 `yarn demo` 相同的正向路径：参数固定在流程包中（占位模型结构、三值数值方案、1.2×2 mm 晶粒上的向量引擎）；默认产物（占位模型的估算请求 `estimate-request-proxy`、空的时序例外登记表 `timing-exceptions-none`、工艺档案、评估集、验证计划、签核规则）只在槽位为空时绑定。S1 没有必需测试（占位模型的导入没有检查）。
+- **flow-six**（流程版本 0.1.0）：负责人 2026-10-24 决定的六步（SPEC、RTL、VER、SYN、PD、SGN），设计对象 Qwen2.5-0.5B-Instruct；没有审批门。目前只有 SPEC 步骤，其余五步随 R3–R7 加入。SPEC 的输入有两项由负责人提供：槽位 `model`（`model-llama import` 带 `archive: true` 产出的模型归档）与 `benchmark-data`（`numeric benchmark_data` 打包的本机基准数据）。它们是普通槽位，不是硬约束，流水线或智能体都可以绑定；只有模型与本机基准数据是负责人独有的。`model.census`、`model.graph`、`model.upstream` 三项检查在 `flow-default` 中也有定义：加载器要求跨流程包的定义完全一致（§5.2），所以改一处必须两处都改，否则该流程包会被丢弃。研发流水线依次是：导入（判定 `model.census`）、图还原（`model.graph`）、与 transformers 对拍（`model.upstream`）、量化（暂为 RTN 的 W4、分组 128、上下文 2048、逐层小数位、残差流 24 位）、快速 L2 对参考 L2（`spec.l2.fast`）、L0 与 L2 的快速集、二者比较（7 项 `spec.accuracy.quick.<基准>`）。必需测试对绑定的槽位判定 `model.upstream`、`spec.l2.fast` 和 7 项快速集检查；完整集的 7 项 `spec.accuracy.<基准>` 判定 `set: full` 的比较，目前只能用 `runs.start` 启动（§7.2）。
+  - `spec.accuracy.quick.<基准>` / `spec.accuracy.<基准>`：每个基准一项，按需求 FR-QNT-04：下降（L0 − L2，百分点）大于允许值（MMLU、CMMLU、C-Eval 2，GSM8K、IFEval 3，HumanEval+、MBPP+ 5）为 fail；不大于允许值但 95% 区间的上界大于它为 indeterminate（用带 `when` 的完整性条件表达）；否则 pass。每个基准各占一项检查，是因为判定引擎先判完整性：若写在一项检查里，一个基准的区间太宽会把另一个基准明确的 fail 盖成 indeterminate（评审发现，2026-10-24）。
 - **model-llama**：
-  - 模型导入与图还原（见下文）。
+  - 模型导入与图还原（见下文）。`import` 带 `archive: true` 时另存整个模型为一个产物 `model.archive`（模型文件与 `bundle.json` 的 tar），流水线经槽位把它交给每个读模型的处理器（`open_model`；它们也仍接受 `bundle` 与 `files`）。
   - 把 llama2.c 检查点与分词器导入为 S2–S7 使用的 llama2.c 模型 IR。
   - 生成占位模型：采用某个规划模型的结构，固定种子，未训练，附带 `evalset-proxy`。
   - 提供 L0 FP32 参考，即 `run.c` 的 NumPy 移植。它与 `plugins/model-llama/upstream/` 中随仓库提供并编译的 `run.c` 对照检查。
 - **numeric**：量化（int8/int4/int3/三值，分组缩放）、数值规格（需求 §3.4.2），以及带观测点轨迹的 L2 逐位精确整数模型。它还做 L2 对 L0 的精度评估（S2 的证据），并附带评估集。舍入（`half-up`、`half-even`、`truncate`）、溢出处理（`saturate`、`wrap`）和累加器位宽（已证明不溢出的位宽，或更窄的位宽）是规格中的结构化字段，统一定义在 [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py)；默认值得到的 L2 与引入这些选项之前逐位相同。`quantize_graph` / `evaluate_graph` 对任何已还原的计算图做同样的事（[graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py)，规格格式 `llmchip-numeric-graph-spec/1`）：这是对向量引擎无法实现的模型的分析，默认逐层确定小数位、残差流 24 位，由 `numeric.accuracy` 判定。在 llama2.c 计算图上，它与芯片 L2 逐位相同。
+  - **KV 缓存**：`GraphL2.forward` 可带 `KVCache`，先送入提示，再逐 token 继续，结果与整段一次计算逐位相同；`rows` 只计算指定位置的 logits（15 万词表时整段 logits 太大）。
+  - **快速 L2**（[l2_torch.py](../plugins/numeric/src/llmchip_numeric/l2_torch.py)，`TorchL2`）：同样的整数运算，在 PyTorch 上（有 GPU 时用 GPU）。矩阵乘是唯一的浮点运算，并且精确：操作数拆成 8 位分段，每 256 项一组求和，部分和都小于 2^24，float32 能精确表示；关闭 TF32。多个序列右补齐后成批计算，补齐位置不影响结果，也不计入溢出次数；KV 缓存按槽位存放。Qwen2.5-0.5B（W4，分组 128）：单序列每 token 约 150 ms（瓶颈在启动内核），32 个序列一批时折合每 token 6.8 ms；300 token 的提示一次约 0.35 秒（2026-10-24）。`l2_fast_check`（检查 `spec.l2.fast`）比较三件事：经 KV 缓存成批生成的每一步 logits、整段计算的全部观测点与溢出次数、给答案打分用的成批补齐路径（logits 与溢出次数）。
+  - **基准评测**：`benchmark_data` 把本机已下载的基准（工具目录的布局：`hf/`、`datasets/cmmlu`、`datasets/evalplus`、`nltk_data`）打包为一个产物 `benchmark.data`（按 lm-eval 任务与切分存的 parquet、EvalPlus 题目文件、NLTK 数据；标签 `internal`，CMMLU 与 C-Eval 是非商业许可），并按固定种子 20261024 选出快速集：选择题每科 5 题、生成类每个基准 5 题，共 900 题（`benchmark.sets`）。评测只读这个产物：把 lm-eval 的数据加载转到打包的文件（[benchdata.py](../plugins/numeric/src/llmchip_numeric/benchdata.py)），所以题面、少样本示例、过滤与指标都是 lm-eval 自己的。`benchmark`（参数 `layer: L0|L2`、`set: quick|full`）：L0 是 lm-eval 的 Hugging Face 模型（bf16，上游原生精度）；L2 是同一个模型类，只把两处模型调用换成快速 L2（[benchlm.py](../plugins/numeric/src/llmchip_numeric/benchlm.py)）：对数似然取芯片整数 logits 乘 2^-frac 后在主机上 float64 的 log-softmax，生成用 KV 缓存贪心解码。两者都只用贪心解码（模型自带的重复惩罚 1.1 与采样设置被替换，评审发现）和同样的 `max_length`（数值规格的上下文）。判对错：选择题取对数似然最大的选项；GSM8K 取最后一个 `\boxed{}` 中的数（零样本，Qwen 自己评测用的指令；lm-eval 默认的 5-shot 在 256 token 处截断指令模型的回答）；IFEval 用严格的提示级准确率；HumanEval+ / MBPP+ 按 EvalPlus 的提示、停止串与清理生成代码，在 `podman run --network=none --read-only` 中由 `evalplus.evaluate` 运行基础测试与扩充测试，两者都过才算对（[benchcode.py](../plugins/numeric/src/llmchip_numeric/benchcode.py)，镜像按摘要固定）。每完成一个基准存一次检查点，中断后从下一个基准继续。`benchmark_compare` 逐题配对两份报告（同一批题、同一模型、同样设置，否则拒绝），给出每个基准的下降与配对 bootstrap（10,000 次，固定种子）95% 区间，以及只有一方答对的题。L0 的结果按（模型、题目、评测设置）缓存的方式是运行复用：输入与参数相同的 L0 运行不重算（需求 FR-QNT-08）。
 - **arch-taalas**：Taalas 风格的硬连线模板。由冻结的数值规格推出芯片规格与 PPA，并检查二者一致（S3 的检查 `arch.spec`）。它的速度不是公式：它编译出引擎的微码（`Compiled`），再用 [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py) 数周期。这是核心状态机和存储端口的逐状态模型，其忙碌周期与 RTL 仿真逐步相等（[performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py)；`verify_spec` 会重新计算，所以芯片规格不能声称另一个速度）。芯片规格的微架构选项有：通道数、`memoryInterface`（`spi`，或 `sqi`：四根双向线的四线 SPI）、`operandBuffers`（`none`；`attention`：注意力头的 q 和输出累加器，用循环移位寄存器实现；`all`：再加一个供矩阵乘和 RMSNorm 用的向量缓冲）。`explore` 计算所有组合（精确周期、估算面积、能否放下、帕累托前沿），也能按形状分析导入模型的计算图数值规格。
 - **rtl-taalas**：把数值规格编译成微码化向量引擎，产出一个确定性的 `rtl.bundle`。其中包含：
   - Verilog 核心（数据放在片外 SPI 或四线 SPI SRAM，可选片上操作数缓冲），以及 SPI 主机接口；
@@ -526,6 +534,15 @@ yarn llmchip pipeline list --project demo
 3. 在 [sp_model.py](../plugins/rtl-taalas/src/llmchip_rtl/spatial/sp_model.py) 中对应实现，并保持 `test_the_model_of_the_circuits_equals_l2` 通过。
 4. 运行 [tests/spatial-flow.spec.ts](../tests/spatial-flow.spec.ts)：RTL 与 L2 逐位一致，每一步的周期等于时序表。算子增加了逻辑时，用综合重新实测面积，并更新 `spatialCells`。
 
+### 5.3e 开源基准
+
+示例：GSM8K 用自定义的 lm-eval 任务 `GSM8K_QWEN`（[bench.py](../plugins/numeric/src/llmchip_numeric/bench.py)），其他选择题与生成题基准用 lm-eval 自带的任务，代码题用 EvalPlus。
+
+1. 数据：在 [benchdata.py](../plugins/numeric/src/llmchip_numeric/benchdata.py) 的 `CHOICE`（每科 5 题入快速集）、`GENERATION` 或 `CODE`（每个基准 5 题）中加入基准与它的 lm-eval 组名或题目文件，并写许可证。`pack` 从本机的 Hugging Face 缓存读出 lm-eval 任务实际用到的切分；只能离线读取的数据（如 CMMLU 的 CSV）像 `_cmmlu_loader` 那样转换。
+2. 判对错：在 `bench.METRIC` 中写该基准判对错用的 lm-eval 指标与过滤器；自定义任务写成配置字典，由 `task_specs` 返回。
+3. 检查：在 [flow-six](../plugins/flow-six/flow.json) 中为快速集与完整集各加一项 `spec.accuracy(.quick).<基准>`，题数取 `benchmark_data` 的指标，允许下降由负责人定（需求 FR-QNT-04）。
+4. 测试：照 [test_bench.py](../plugins/numeric/tests/test_bench.py)（比较与 L2 的作答）与 [tests/qwen-spec.spec.ts](../tests/qwen-spec.spec.ts)（真实模型，须显式开启）。
+
 ### 5.4 内核 API 方法
 
 示例：`kernel.pause`（FR-AGT-23）。可以按以下各层追踪：
@@ -621,11 +638,11 @@ yarn llmchip pipeline list --project demo
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 165 passed、1 skipped，有 EDA 镜像时 6 分 43 秒（2026-10-24，R1）；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 184 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 7 分 4 秒（2026-10-24，R2a）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
-| `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、1 个跳过（m4-flow）；125 个测试通过、2 个跳过（m4-flow 与 `pipelines-flow` 的 S0–S7，都须显式开启；2026-10-24） |
-| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 6 分 43 秒、Vitest 740 秒 |
+| `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、2 个跳过（m4-flow、qwen-spec）；126 个测试通过、3 个跳过（m4-flow、`pipelines-flow` 的 S0–S7 与 qwen-spec，都须显式开启；2026-10-24，R2a） |
+| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 7 分 4 秒、Vitest 754 秒（R2a） |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S7，以及从 GDS 到权重的血缘 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | 用测试环境测一颗芯片：在提示词集上生成，质量与速度，按芯片策略判定，写出运行目录 | stories260K 的数值（int8）芯片对照其参考芯片，20 个提示词生成到 64 token 上下文结束：下一 token 一致率 0.992，生成完全相同 0.65，困惑度 3.167（参考 3.159），11 秒（2026-10-22）。`vchip conform` 在 stories260K 的参考与数值芯片、tiny Qwen3 的参考芯片上均通过 |
@@ -650,6 +667,10 @@ yarn llmchip pipeline list --project demo
 | `tests/resources.spec.ts` | 按容量调度：放不下的运行按队列顺序等待（后面的也等）、小运行并行、GPU 一次只给一个运行（有两块 GPU 时也是）且其他运行看不到它、超过全部容量的运行单独运行 | NFR-15 | 总是 |
 | `tests/checkpoint.spec.ts` | 检查点在运行中立即作为运行的产物入库；崩溃的运行留下检查点，重试以 `resume` 输入续跑；工作目录之外的检查点被拒绝 | FR-TRC-10、IF-2 | 总是 |
 | `tests/pipelines.spec.ts` | 计划与缺少输入、`all` 中前面节点绑定的槽位、研发流水线（进入阶段、运行、绑定、判定）、测试复用研发运行、失败保持失败且依赖被跳过、改正后继续、取消、取消后立即继续；同一阶段只能有一条运行中的流水线；硬约束槽位不被流水线覆盖；依赖成环的流程包被拒绝；内核正常停止或被杀掉后流水线继续，被中断的节点从检查点续跑 | FR-PRJ-07/08、FR-TRC-10、AC-15 | 总是 |
+| `plugins/numeric/tests/test_l2_torch.py` | 快速 L2 与参考 L2 逐位相同：logits、全部观测点与溢出次数，三种舍入、两种溢出处理与窄累加器下，llama2.c、Qwen2、Qwen3 计算图；有 GPU 时在 GPU 上；KV 缓存逐 token 与整段一次相同（两种实现）；成批计算每个序列与单独计算相同，含槽位重用；精确乘法对极值等于整数乘法，TF32 关闭 | FR-QNT-03 | 总是；GPU 用例无 CUDA 时跳过 |
+| `plugins/numeric/tests/test_bench.py` | 比较：下降与配对区间、只有一方答对的题、拒绝不同题目 / 题集 / 数据 / 模型 / 设置的报告；L2 回答 lm-eval：对数似然等于参考 L2 的结果，贪心生成与参考相同并在停止串处停止；`spec.l2.fast` 的证据在正确的快速 L2 上没有不一致，在舍入错误的快速 L2 上（阴性对照）三类比较都报告不一致 | FR-QNT-03/04 | 总是（小 Qwen3） |
+| `plugins/numeric/tests/test_benchcode.py` | 代码沙箱：参考解通过、错误解失败、试图写主机文件的代码失败且主机上没有文件；取消（SIGTERM）在 2 秒宽限期内移除容器 | FR-QNT-04、AGENTS.md “Adding a plugin” 6 | 需 Podman、沙箱镜像与工具目录中的 EvalPlus 题目，否则可见地跳过 |
+| `tests/qwen-spec.spec.ts` | Qwen2.5-0.5B-Instruct 的 SPEC 步骤：负责人给出模型与基准数据后，研发流水线全部节点运行，`model.*` 与 `spec.l2.fast` 通过，7 项快速集检查都有判定；必需测试复用研发运行 | FR-MDL、FR-QNT-03/04/08 | 须 `LLMCHIP_QWEN=1`、一块 GPU，以及工具目录中的模型、基准数据与沙箱镜像；1 passed，1277 秒（2026-10-24） |
 | `tests/pipelines-flow.spec.ts` | 内置插件：全新项目上 S0–S3 每一步的研发与测试都通过，测试复用研发运行；`all` 跑完 S0–S7 的研发与全部测试 | FR-PRJ-07/08 | S0–S3 总是运行（需要 `.venv`）；S0–S7 须同时满足 `LLMCHIP_FULL_FLOW=1` 和 EDA 镜像；1 passed，1967 秒（2026-10-24） |
 | `tests/recovery.spec.ts` | 已确认的写入在反复 SIGKILL 后仍然存在 | NFR-04 | 总是 |
 | `tests/workflow.spec.ts` | 解析不完整、崩溃或能力未认证时判 indeterminate；没有豁免：失败保持失败并打开事故，改正后的新设计才通过，历史保留；没有审批门时进入阶段、旧方法不存在；R0 之前写下的主目录（旧流程包上的项目、审批/豁免/导出事件、`waived` 判定、带 `gates` 的迁移事件）仍能打开、重放并通过哈希链校验；新注册的流程包若仍声明审批门则被拒绝；分支 | AC-M1-03、架构 ADR-011 | 总是 |
@@ -681,6 +702,32 @@ yarn llmchip pipeline list --project demo
 
 修改空间引擎生成器（`llmchip_rtl/spatial/`）或测试环境通往 RTL 的桥（`llmchip_vchip/bridges/`）之后，必须运行一次完整的 L3 一致性检查（硬约束，负责人 2026-10-22 决定；见 AGENTS.md “Containers”）：先 `yarn vchip new rtl --proxy --id spatial-5k`，再不带 `--quick` 运行 `yarn vchip conform spatial-5k`；或运行 `LLMCHIP_VCHIP_L3=1 uv run --frozen pytest python/llmchip-vchip/tests/test_rtl_vchip.py`。2026-10-22 的结果见 §6.1 中 `vchip` 的各行。
 
+`LLMCHIP_QWEN=1 yarn test tests/qwen-spec.spec.ts` 端到端运行 Qwen2.5-0.5B-Instruct 的 SPEC 步骤：研发流水线（导入、图还原、与 transformers 对拍、量化、快速 L2 对参考 L2、L0 与 L2 的快速集、二者比较），随后是必需测试，再次判定研发运行。2026-10-24 在 RTX 5060 Ti 上的结果：通过（1 个测试，1277 秒，约 21 分钟）。7 项快速集检查全部失败；这是暂定量化（RTN 的 W4，未校准）的预期结果，不是修改检查的理由：
+
+| 快速集（900 题） | L0 % | L2 % |
+|---|---|---|
+| MMLU | 40.7 | 36.1 |
+| CMMLU | 50.4 | 34.0 |
+| C-Eval | 43.8 | 39.2 |
+| GSM8K | 40 | 0 |
+| IFEval | 40 | 20 |
+| HumanEval+ | 40 | 0 |
+| MBPP+ | 60 | 0 |
+
+生成类基准在快速集中各只有 5 题，因此百分数按 20 点一档变化。完整集于 2026-10-24 在 L0 上运行（2098 秒：MMLU 327、CMMLU 237、C-Eval 36、GSM8K 662、IFEval 562、HumanEval+ 105、MBPP+ 170；bf16，上下文 2048 token），与 Qwen 为同一模型公布的数值并列：
+
+| 基准 | 题数 | L0 % | Qwen % | 设置 |
+|---|---|---|---|---|
+| MMLU | 14042 | 42.1 | 47.5 | Qwen 的是基座模型、5-shot；指令模型未公布 |
+| CMMLU | 11582 | 47.4 | — | 未公布 |
+| C-Eval | 1346 | 43.9 | — | 验证集；未公布 |
+| GSM8K | 1319 | 48.9 | 49.6 | 零样本，用 Qwen 的 instruction，取 boxed 答案，贪心 |
+| IFEval | 541 | 26.8 | 27.9 | 严格 prompt 级准确率 |
+| HumanEval+ | 164 | 34.1 | 35.4 | Qwen 的是 HumanEval，仅基础测试 |
+| MBPP+ | 378 | 41.5 | 49.6 | Qwen 的是 MBPP，仅基础测试 |
+
+GSM8K、IFEval 与 HumanEval+ 与公布值相差约 1 点以内。MBPP+ 低 8 点，是因为 EvalPlus 的 plus 测试比 Qwen 计分的基础测试更严；两者不是同一个基准。MMLU、CMMLU 与 C-Eval 没有指令模型的公布值。这些 L0 数值是完整集比较判定 L2 的基线；L2 的完整集尚未运行（§7.2）。
+
 ---
 
 ## 7. 当前限制
@@ -709,15 +756,18 @@ yarn llmchip pipeline list --project demo
 - **空间引擎**（2026-10-21 实测，占位模型，8 MHz）：每个 token 1,327 周期（6,029 tok/s）；加上主机的 START 与 STATUS 帧为 2,059 周期（约 3,900 tok/s）。综合后单元面积 5.96 mm²：KV 环形缓存 2.09，矩阵电路 1.94（串行加法器 0.80、行输出 0.75、延迟线 0.39），核心逻辑 0.97 及其 16 个 softmax 除法器 0.05，核心寄存器 0.42，注意力乘法器 0.41，查找表 0.07，主机接口 0.02。其他形状的核心逻辑（按维度）和查找表面积是外推值。KV 寄存器的复位值来自复位后的清零过程（AGENTS.md，负责人决定，2026-10-21），门级仿真的证明随物理实现一起完成。生成器实现维度为 2 的幂（头大小至少 4）、2 个头、1 个 KV 头、上下文 64、任意层数、隐藏维度不超过 255 的模型；其他形状会被拒绝并给出原因。不给 `die`（或 `targetAreaMm2`）时，面积上限是工艺档案的 prerun 面积（2.4 mm²），空间引擎放不下；PPA 会给出建议的晶粒（`suggestedDie`），在 prerun 约束更新之前（P4），设计使用这个晶粒。
 - **迁移**：评估可用，确认后记录重新开始的阶段。下游产物与判定不会被标记为失效（FR-MIG-03、FR-TRC-05）。从 S3 或更早重新开始须由人类确认（FR-MIG-04），这一点没有测试：唯一不是人类的调用方是外部令牌，而 `migration.apply` 不在外部方法白名单中。没有能自动打标签的 NDA PDK 导入通道（FR-INT-04、FR-SEC-01）。
 - **智能体**：变更集没有大小阈值（FR-AGT-06）。没有软约束流程（FR-AGT-09）。没有按角色区分的工具集或 LLM（FR-AGT-14/19）。去密接手包只作为建议给出，不会实际生成（FR-AGT-13a）。
-- **调度与流水线**（R1）：内置插件还没有声明 `resources`，所以都按默认需求调度（进程插件 1 核、1 GiB；容器插件 4 核、8 GiB）；真实需求在各插件实测后补上。因此在 15 GB 内存的开发机上，两个按默认上限（8 GiB）的容器运行不再并行，而是先后运行（此前会超额使用内存）；`tests/ui-latency.spec.ts` 为了制造负载，把容量声明为 32 GiB。队列严格按顺序：放不下的运行会挡住后面的运行，利用率因此偏低，但不会有运行被饿死。容器插件不分配 GPU。测试复用以前的运行时只比较处理器、参数和输入，不比较插件版本（运行记录不保存插件版本）。没有测试“运行全部测试”在内核被杀掉后的续跑（研发流水线的续跑有测试，两者走同一条路径）。流水线是否可以写入硬约束槽位（目前：只在为空时写入）待负责人决定。`flow-default` 的流水线参数固定在流程包里，只驱动 5K 占位模型；Qwen 的流水线随 R2 起的六步流程包提供。
+- **调度与流水线**（R1）：内置插件只在需要超过默认值时声明 `resources`：`numeric` 的 `benchmark` 与 `l2_fast_check` 要求 4 核、8 GiB 和一块 GPU（有 GPU 时用 GPU，否则回退到 CPU；机器没有 GPU 时它们独占运行，因为超出整机容量的运行可以单独运行）；其余处理器仍按默认需求调度（进程插件 1 核、1 GiB；容器插件 4 核、8 GiB）。因此在 15 GB 内存的开发机上，两个按默认上限（8 GiB）的容器运行不再并行，而是先后运行（此前会超额使用内存）；`tests/ui-latency.spec.ts` 为了制造负载，把容量声明为 32 GiB。队列严格按顺序：放不下的运行会挡住后面的运行，利用率因此偏低，但不会有运行被饿死。容器插件不分配 GPU。测试复用以前的运行时只比较处理器、参数和输入，不比较插件版本（运行记录不保存插件版本）。没有测试“运行全部测试”在内核被杀掉后的续跑（研发流水线的续跑有测试，两者走同一条路径）。流水线是否可以写入硬约束槽位（目前：只在为空时写入）待负责人决定。`flow-default` 的流水线参数固定在流程包里，只驱动 5K 占位模型；Qwen 的流水线随 R2 起的六步流程包提供。
 - **UI**：没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-10/11/13、FR-AGT-25/26）。流水线面板列出节点的状态、运行、判定与原因，但没有每个节点的用时、资源和实时日志（FR-UI-14 的节点图只部分实现）。演示流程页的“完成”仍是近似：阶段内每项已判定检查的最新判定都通过、每个处理器的最新运行都成功，并且已进入下一阶段（最后一个阶段除外）；它还没有改为按流程包的必需测试判断。
 - **工具版本的追溯**：运行记录只保存插件和处理器，不保存当次运行使用的容器镜像；镜像只能从插件清单中查到（摘要固定），清单改变后无法从运行本身得知旧镜像（FR-TRC-02、AC-08）。
 - **R0 之前的判定**：在旧主目录中，`accuracy.budget` 或 `phy.drc` 的版本 1 判定若为 `waived`，之后版本 2 的通过会打开 `standard_lowered` 事故，尽管标准实际上变严了（取消了豁免）。关闭事故时说明即可。
 - **CLI**：去密、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
 - **TypeScript 插件 SDK** 没有自己的测试，只通过 `stub-tool` 间接覆盖。
-- **导入的 Hugging Face 模型**只能以分析的形式进入 S2：S3–S7 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。L0 和计算图 L2 执行时没有 KV 缓存（每步重算整个序列），大模型长生成会很慢。
+- **导入的 Hugging Face 模型**在 `flow-default` 中只能以分析的形式进入 S2：S3–S7 使用 llama2.c 模型 IR（`model.ir`），arch-taalas 会带着原因拒绝计算图数值规格。NumPy 的 L0 解释器没有 KV 缓存（每步重算整个序列）；计算图 L2 与快速 L2 有。
+- **Qwen 的 SPEC 步骤**（R2a）：数值规格暂用逐元素舍入（RTN）的 W4，没有校准；校准量化（GPTQ）、混合精度、KV int8、回溯诊断（FR-QNT-09）、`taalas-tile/1` 的设计、切片与事务级模型、sky130/IHP 档案在 R2 的后续部分。完整集还没有单独的入口（需求 FR-QNT-08）：`benchmark` 带 `set: full` 只能用 `runs.start` 或 CLI 启动，再用 `verdicts.evaluate` 按比较报告判定 `spec.accuracy.<基准>`。快速集中每个生成类基准只有 5 题：此时分差是 20 点的整数倍，所以只有 L0 与 L2 在完全相同的题上答对时快速集检查才通过（分差 0、区间 [0, 0]；例如双方都是 0/5），分差超过允许值时失败，其余情况判 indeterminate——5 题也可能出现这种“通过”（冲突 C8，§7.3）；正式结论只来自完整集。L0 的得分与 Qwen 公布的数值（[benchmark-reference.json](../plugins/numeric/data/benchmark-reference.json)）只在比较报告中并列，不判定；它是插件自带的数据，不是运行输入。GSM8K 的评测设置由前 200 题的 L0 实测选定（带重复惩罚时：lm-eval 默认 33.5%、8-shot CoT 36.5%、零样本 CoT 42.0%、`GSM8K_QWEN` 44.5%；Qwen 公布 49.6%），去掉重复惩罚后的完整集数值见 §6.3。代码沙箱把工作目录可写地挂载，被测代码理论上能改写自己的结果文件；被测代码来自本工作台的模型，不是对抗性的，记为已知风险。`l2_fast_check` 的参考 L2 在 CPU 上运行，20 个提示约 3 分钟，没有检查点。负责人 2026-10-24 的决定：上述 GSM8K 设置继续沿用；R2c 的校准量化（GPTQ）在 WikiText-2 上校准，数据已下载到工具目录（`tools/hf/datasets/Salesforce___wikitext`），不进仓库；L2 的完整集尚未运行，完整集检查因此还不能给出判定。
+- **按 CUDA 构建的 torch**：Linux x86-64 上 `.venv` 安装 CUDA 13 版 torch（没有 GPU 时退回 CPU），安装体积比 CPU 版大约 3 GB。
 - **S3 的速度和面积**（参考模型的占位模型，三值，2 条通道，8 MHz，2026-10-20 实测）：旧公式给出 10.1 tok/s；旧设计（SPI、无缓冲）的精确周期是每 token 1,024,601，即 7.8 tok/s。四线 SPI 为 352,505 个周期、22.7 tok/s（2.9 倍）；加注意力缓冲 34.6 tok/s；全部缓冲 43.8 tok/s。即便用四线 SPI，仍有 77.7% 的周期在等片外存储。在 1.2 × 2 mm 晶粒上只有“四线 SPI、无缓冲”能放下：综合出的单元面积 287k µm²，核心区 497k µm²。布局已到极限，而且对密度设置不单调：同一网表在 70% 和 85% 时放下并满足时序（建立时间余量 +22 ns，约 9.7 MHz 也能满足），在 75% 和 80% 时详细布局失败；预流片取 70%（`PRERUN.placementDensityPct`）。旧的 SPI 设计在原来的 62% 时也已无法布线。加注意力缓冲（332k µm²）或全部缓冲（398k µm²）在试过的每个密度（62–85%）下详细布局都失败；把两条通道改成一条也无法布线。四线 SPI 的焊盘是双向 `bi_t` 单元，只在不驱动时打开输入（IE = ¬OE）：焊盘库只在 IE 为低时定义 A → PAD 的时序弧，IE 固定为高时输出方向不受时序约束，STA 报告这四个引脚未约束。门级仿真用的焊盘功能模型（`plugins/eda-gf180/sim/pads.v`）原先把 `bi_t` 的输入通路固定为 0，这只在没有双向引脚时成立；现在 IE 为高时它输出焊盘上的值。SDF 时序仿真的测试平台按设计的实际引脚（SPI 或四线 SPI）描述片外存储。工艺库的面积估算看不出这一点：它的控制逻辑是 0.05 mm²（经验值），综合结果约 0.19 mm²；利用率取 0.7（经验值），实测 0.58 能放下、0.67 放不下。在用这些实现结果校准工艺库之前，`explore` 给出的“放得下”偏乐观；设计能否放下只能由 `eda-gf180 implement` 证明。
 - **数值分析结果**（int8、分组 32、四舍五入、饱和、逐层小数位、残差流 24 位；4 个提示 × 8 个 token、3 段文本；开发机，2026-10-19）：stories260K 困惑度 3.16 → 3.17，下一 token 一致率 98.6%，1 秒；SmolLM2-135M 12.64 → 12.76，94.3%，30 秒；Qwen3-0.6B 23.00 → 22.39，88.8%，136 秒；DeepSeek-R1-Distill-Qwen-1.5B 41.41 → 35.92，88.8%，584 秒。int4 时 SmolLM2 升到 22.6，Qwen3 升到 28.6。每类张量只用一个 16 位格式时 SmolLM2 会崩溃（困惑度约 290 万）：少数层的残差流值接近 20000。`numeric.accuracy` 要求下一 token 一致率 ≥ 0.9，Qwen3 和 DeepSeek 在 int8 时略差一点没有达到。
+- **虚拟芯片的容器清理**（R2a 中发现，未修复，已上报）：`llmchip_vchip/bridges/` 用 `podman rm -f -t 0` 移除仿真容器，而本机的 Podman 3.4 没有 `rm -t` 选项，这条命令直接报错退出，容器没有被移除；`tests/vchip.spec.ts` 给容器 30 秒自行结束，所以没有发现。基准沙箱改用 `podman kill` 再 `podman rm -f`（约 0.4 秒，有测试）。修复桥须按硬约束重新运行完整的 L3 一致性检查；负责人 2026-10-24 的决定：单独提交，与 R2a 分开。
 - **虚拟芯片测试环境**（`llmchip-vchip`，负责人草案设计的 L1 与 L3）：后端为 `reference`、`numeric`、`process`、`rtl`。RTL 路径只覆盖一个生成器 `taalas-spatial/1`（5K 占位模型；受该生成器的形状限制）；`taalas-rom/1` 还没有 RTL 生成器。没有门级后端（设计 T-20，L3+），也没有性能模型后端。完整的 20 个提示词 L3 运行须显式开启（`LLMCHIP_VCHIP_L3=1`，约 11 分钟）；有镜像时默认测试只跑 4 个提示词。困惑度需要 `logits` 能力。独立运行（`vchip`）时，运行不是产物，按芯片策略自行判定（ADR-010）；经内核插件 `vchip`（L4）运行时，运行与报告是产物，由流程的检查判定，但这些检查不属于流程的任何阶段。插件只从 `llmchip-numeric-spec/1` 规格构建芯片（llama2.c 模型的 S2；导入模型的计算图数值规格会被拒绝），也只运行 `taalas-spatial/1` 的 bundle。它的仿真器在自己的会话和容器中运行：运行被取消时会被移除，但内核崩溃后，内核的遗留进程清理只杀插件的进程组，仿真容器可能留下（`podman ps --filter name=llmchip-vchip`）。Web UI 页面发起运行并显示报告；没有单独的 HTTP API（内核 API 就是 API），也没有采样。
 - **分析检查不通过也会开事故单**，与所有不通过的检查一样（FR-VER-06），所以在 S2 试验台上尝试较差的方案会让事故列表变长。
 
@@ -732,5 +782,6 @@ yarn llmchip pipeline list --project demo
 | C5 | 架构 §3、§6.1：智能体运行时与 LLM 提供方是内核内系统插件 | `AgentRuntime` 是 `Kernel` 构造函数直接创建的普通类；提供方是内核代码；都不经过 `PluginHost` | §6、ADR-001 |
 | C6 | 架构 §4.3：运行成功结束后，才把它的输出一次性登记为产物（检查点除外，R1） | 输出逐个入库；后面的输出无效时，前面的输出留在库中，运行记录却不列出它们 | K3/K4 |
 | C7 | 架构 §5 第 5 条：关闭时先停止智能体运行时，再刷写事件库 | `Kernel.shutdown` 从不停止 `AgentRuntime`，也不先结束正在运行的 `tasks.run` 循环。它能否在数据库关闭后追加事件，尚未核实 | K1、§6 |
+| C8 | FR-QNT-08：快速集判定“题少时如实判无法判定” | FR-QNT-04 的规则按分差及其区间判定。只有 5 题时分差是 20 点的整数倍，所以 L0 与 L2 在完全相同的题上答对时（分差 0、区间 [0, 0]，例如双方都是 0/5），快速集检查会通过，而不是无法判定 | FR-QNT-04/08、检查标准 |
 
 负责人决定之前，保持代码现状，不要基于这些条目的任何一方继续开发。

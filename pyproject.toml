@@ -24,8 +24,18 @@ llmchip-arch = { workspace = true }
 llmchip-rtl = { workspace = true }
 llmchip-vchip = { workspace = true }
 llmchip-vchip-plugin = { workspace = true }
-# CPU-only PyTorch, used by model-llama to compare recovered graphs with the official implementation.
-torch = { index = "pytorch-cpu" }
+# PyTorch: the official implementation recovered graphs are compared against (model-llama), the L0 of
+# the benchmarks, the fast L2 and the calibration (numeric). CUDA 13 build on Linux x86-64 (it falls
+# back to the CPU where there is no GPU), CPU build elsewhere.
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux' or platform_machine != 'x86_64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

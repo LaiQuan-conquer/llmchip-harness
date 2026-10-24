@@ -1,14 +1,15 @@
 {
   "id": "numeric",
-  "version": "0.2.0",
-  "title": "Numeric co-design: quantization, numeric spec, L2 bit-exact model, accuracy (S2)",
+  "version": "0.3.0",
+  "title": "Numeric co-design: quantization, numeric spec, L2 bit-exact model, accuracy, benchmarks (S2)",
   "kinds": ["quantizer", "numeric-spec"],
   "runtime": "process",
   "entry": { "command": ["${python}", "-m", "llmchip_numeric"] },
   "kernelApi": "^0.3",
   "data": [
     { "id": "evalset-tinystories", "type": "eval.set", "path": "data/evalset-tinystories.json", "label": "public" },
-    { "id": "evalset-general", "type": "eval.set", "path": "data/evalset-general.json", "label": "public" }
+    { "id": "evalset-general", "type": "eval.set", "path": "data/evalset-general.json", "label": "public" },
+    { "id": "benchmark-reference", "type": "benchmark.reference", "path": "data/benchmark-reference.json", "label": "public" }
   ],
   "handlers": [
     {
@@ -72,8 +73,9 @@
       "title": "Quantize a recovered graph (any model) and write its numeric spec (analysis)",
       "inputs": [
         { "name": "graph", "types": ["model.graph"], "required": true },
-        { "name": "bundle", "types": ["model.bundle"], "required": true },
-        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": true, "multiple": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": false, "multiple": true },
         { "name": "evalset", "types": ["eval.set"], "required": false }
       ],
       "outputs": [
@@ -101,8 +103,9 @@
       "title": "Accuracy of a recovered graph's L2 against L0 (analysis)",
       "inputs": [
         { "name": "graph", "types": ["model.graph"], "required": true },
-        { "name": "bundle", "types": ["model.bundle"], "required": true },
-        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": true, "multiple": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file", "model.weights.llama2c", "model.tokenizer.llama2c"], "required": false, "multiple": true },
         { "name": "evalset", "types": ["eval.set"], "required": false },
         { "name": "spec", "types": ["numeric.spec"], "required": true },
         { "name": "weights", "types": ["numeric.weights"], "required": true }
@@ -117,6 +120,90 @@
           "passageTokens": { "type": "integer", "minimum": 8, "maximum": 1024, "default": 128 }
         }
       },
+      "timeoutMs": 7200000
+    },
+    {
+      "name": "benchmark_data",
+      "title": "Pack the open benchmarks downloaded on this machine, with the quick set",
+      "inputs": [],
+      "outputs": [
+        { "name": "data", "type": "benchmark.data", "mediaType": "application/x-tar" },
+        { "name": "sets", "type": "benchmark.sets", "mediaType": "application/json" }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory with hf/, datasets/cmmlu, datasets/evalplus and nltk_data (the layout of the workbench tools directory)"
+          }
+        }
+      },
+      "timeoutMs": 1800000
+    },
+    {
+      "name": "benchmark",
+      "title": "Answer the benchmark questions with L0 or L2 (model quality, FR-QNT-04)",
+      "inputs": [
+        { "name": "data", "types": ["benchmark.data"], "required": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file"], "required": false, "multiple": true },
+        { "name": "graph", "types": ["model.graph"], "required": false },
+        { "name": "spec", "types": ["numeric.spec"], "required": false },
+        { "name": "weights", "types": ["numeric.weights"], "required": false },
+        { "name": "resume", "types": ["run.checkpoint"], "required": false }
+      ],
+      "outputs": [{ "name": "report", "type": "benchmark.report", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer"],
+        "properties": {
+          "layer": { "enum": ["L0", "L2"] },
+          "set": { "enum": ["quick", "full"], "default": "quick" },
+          "benchmarks": {
+            "type": "array",
+            "items": { "enum": ["mmlu", "cmmlu", "ceval", "gsm8k", "ifeval", "humaneval", "mbpp"] },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "batchSize": { "type": "integer", "minimum": 1, "maximum": 256, "default": 32 },
+          "contextLength": { "type": "integer", "minimum": 256, "maximum": 32768 }
+        }
+      },
+      "resources": { "cpu": 4, "memGb": 8, "gpu": 1 },
+      "timeoutMs": 43200000
+    },
+    {
+      "name": "benchmark_compare",
+      "title": "L2 against L0 on the same questions: drop and 95% interval per benchmark",
+      "inputs": [{ "name": "l0", "types": ["benchmark.report"], "required": true }, { "name": "l2", "types": ["benchmark.report"], "required": true }],
+      "outputs": [{ "name": "comparison", "type": "benchmark.comparison", "mediaType": "application/json" }],
+      "params": { "type": "object", "additionalProperties": false },
+      "timeoutMs": 600000
+    },
+    {
+      "name": "l2_fast_check",
+      "title": "The fast L2 (GPU) against the reference L2, bit for bit (spec.l2.fast)",
+      "inputs": [
+        { "name": "data", "types": ["benchmark.data"], "required": true },
+        { "name": "model", "types": ["model.archive"], "required": false },
+        { "name": "bundle", "types": ["model.bundle"], "required": false },
+        { "name": "files", "types": ["model.file"], "required": false, "multiple": true },
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true },
+        { "name": "weights", "types": ["numeric.weights"], "required": true }
+      ],
+      "outputs": [{ "name": "report", "type": "l2.fast-check", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "steps": { "type": "integer", "minimum": 1, "maximum": 512, "default": 64 } }
+      },
+      "resources": { "cpu": 4, "memGb": 8, "gpu": 1 },
       "timeoutMs": 7200000
     }
   ]

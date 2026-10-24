@@ -1,0 +1,355 @@
+{
+  "id": "six",
+  "version": "0.1.0",
+  "stages": [
+    {
+      "id": "SPEC",
+      "title": "Specification: model, numeric spec and L2, benchmarks",
+      "develop": {
+        "nodes": [
+          {
+            "id": "import",
+            "plugin": "model-llama",
+            "handler": "import",
+            "params": { "name": "Qwen2.5-0.5B-Instruct" },
+            "inputs": { "model": "slot:model" },
+            "bind": { "census": "model-census" },
+            "judge": ["model.census"]
+          },
+          {
+            "id": "recover",
+            "plugin": "model-llama",
+            "handler": "recover",
+            "inputs": { "census": "node:import.census" },
+            "bind": { "graph": "model-graph" },
+            "judge": ["model.graph"]
+          },
+          {
+            "id": "upstream",
+            "plugin": "model-llama",
+            "handler": "compare",
+            "inputs": { "graph": "node:recover.graph", "census": "node:import.census", "model": "slot:model" },
+            "judge": ["model.upstream"]
+          },
+          {
+            "id": "quantize",
+            "plugin": "numeric",
+            "handler": "quantize_graph",
+            "params": { "weightFormat": "int4", "groupSize": 128, "contextLength": 2048, "perLayer": true, "residualBits": 24 },
+            "inputs": { "graph": "node:recover.graph", "model": "slot:model" },
+            "bind": { "spec": "numeric-spec", "weights": "l2-weights" }
+          },
+          {
+            "id": "l2-fast",
+            "plugin": "numeric",
+            "handler": "l2_fast_check",
+            "inputs": {
+              "data": "slot:benchmark-data",
+              "graph": "node:recover.graph",
+              "spec": "node:quantize.spec",
+              "weights": "node:quantize.weights",
+              "model": "slot:model"
+            },
+            "judge": ["spec.l2.fast"]
+          },
+          {
+            "id": "bench-l0",
+            "plugin": "numeric",
+            "handler": "benchmark",
+            "params": { "layer": "L0", "set": "quick", "contextLength": 2048 },
+            "inputs": { "data": "slot:benchmark-data", "model": "slot:model" },
+            "bind": { "report": "benchmark-l0-quick" }
+          },
+          {
+            "id": "bench-l2",
+            "plugin": "numeric",
+            "handler": "benchmark",
+            "params": { "layer": "L2", "set": "quick" },
+            "inputs": {
+              "data": "slot:benchmark-data",
+              "graph": "node:recover.graph",
+              "spec": "node:quantize.spec",
+              "weights": "node:quantize.weights",
+              "model": "slot:model"
+            },
+            "bind": { "report": "benchmark-l2-quick" }
+          },
+          {
+            "id": "accuracy",
+            "plugin": "numeric",
+            "handler": "benchmark_compare",
+            "inputs": { "l0": "node:bench-l0.report", "l2": "node:bench-l2.report" },
+            "judge": [
+              "spec.accuracy.quick.mmlu",
+              "spec.accuracy.quick.cmmlu",
+              "spec.accuracy.quick.ceval",
+              "spec.accuracy.quick.gsm8k",
+              "spec.accuracy.quick.ifeval",
+              "spec.accuracy.quick.humaneval",
+              "spec.accuracy.quick.mbpp"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        { "check": "model.upstream", "inputs": { "graph": "slot:model-graph", "census": "slot:model-census", "model": "slot:model" } },
+        {
+          "check": "spec.l2.fast",
+          "inputs": {
+            "data": "slot:benchmark-data",
+            "graph": "slot:model-graph",
+            "spec": "slot:numeric-spec",
+            "weights": "slot:l2-weights",
+            "model": "slot:model"
+          }
+        },
+        { "check": "spec.accuracy.quick.mmlu", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.cmmlu", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.ceval", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.gsm8k", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.ifeval", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.humaneval", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } },
+        { "check": "spec.accuracy.quick.mbpp", "inputs": { "l0": "slot:benchmark-l0-quick", "l2": "slot:benchmark-l2-quick" } }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "model.census",
+      "version": "1",
+      "title": "Tensor census of the imported weights is self-consistent",
+      "plugin": "model-llama",
+      "handler": "import",
+      "completeness": [{ "metric": "tensors", "op": ">", "value": 0 }],
+      "criteria": [
+        { "metric": "all_tensors_classified", "op": "==", "value": true },
+        { "metric": "header_consistent", "op": "==", "value": true },
+        { "metric": "layers_uniform", "op": "==", "value": true },
+        { "metric": "config_agrees", "op": "==", "value": true },
+        { "metric": "output_consistent", "op": "==", "value": true }
+      ]
+    },
+    {
+      "id": "model.graph",
+      "version": "1",
+      "title": "Computation graph recovered with every tensor bound",
+      "plugin": "model-llama",
+      "handler": "recover",
+      "criteria": [
+        { "metric": "family_supported", "op": "==", "value": true },
+        { "metric": "tensors_unmatched", "op": "==", "value": 0 },
+        { "metric": "tensors_missing", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "id": "model.upstream",
+      "version": "2",
+      "title": "Recovered graph passes the full test suite against the official implementation",
+      "plugin": "model-llama",
+      "handler": "compare",
+      "completeness": [{ "metric": "prompts", "op": ">=", "value": 1 }, { "metric": "tests_total", "op": ">=", "value": 1 }],
+      "criteria": [
+        { "metric": "tests_failed", "op": "==", "value": 0 },
+        { "metric": "greedy_match", "op": "==", "value": true },
+        { "metric": "top1_agreement", "op": ">=", "value": 0.99 },
+        { "metric": "max_rel_logit_diff", "op": "<=", "value": 0.001 }
+      ]
+    },
+    {
+      "id": "spec.l2.fast",
+      "version": "1",
+      "title": "The fast L2 equals the reference L2 bit for bit: generation through the KV cache, every observation point, the batched scoring path, the overflow counts",
+      "plugin": "numeric",
+      "handler": "l2_fast_check",
+      "completeness": [{ "metric": "prompts", "op": ">=", "value": 20 }, { "metric": "steps", "op": ">=", "value": 64 }],
+      "criteria": [
+        { "metric": "logit_mismatches", "op": "==", "value": 0 },
+        { "metric": "point_mismatches", "op": "==", "value": 0 },
+        { "metric": "batch_mismatches", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "id": "spec.accuracy.quick.mmlu",
+      "version": "1",
+      "title": "MMLU, quick set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.mmlu", "op": "==", "value": 285 },
+        { "metric": "drop_high.mmlu", "op": "<=", "value": 2, "when": { "metric": "drop.mmlu", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.mmlu", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.quick.cmmlu",
+      "version": "1",
+      "title": "CMMLU, quick set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.cmmlu", "op": "==", "value": 335 },
+        { "metric": "drop_high.cmmlu", "op": "<=", "value": 2, "when": { "metric": "drop.cmmlu", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.cmmlu", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.quick.ceval",
+      "version": "1",
+      "title": "C-Eval, quick set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.ceval", "op": "==", "value": 260 },
+        { "metric": "drop_high.ceval", "op": "<=", "value": 2, "when": { "metric": "drop.ceval", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.ceval", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.quick.gsm8k",
+      "version": "1",
+      "title": "GSM8K, quick set: L2 drops at most 3 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.gsm8k", "op": "==", "value": 5 },
+        { "metric": "drop_high.gsm8k", "op": "<=", "value": 3, "when": { "metric": "drop.gsm8k", "op": "<=", "value": 3 } }
+      ],
+      "criteria": [{ "metric": "drop.gsm8k", "op": "<=", "value": 3 }]
+    },
+    {
+      "id": "spec.accuracy.quick.ifeval",
+      "version": "1",
+      "title": "IFEval, quick set: L2 drops at most 3 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.ifeval", "op": "==", "value": 5 },
+        { "metric": "drop_high.ifeval", "op": "<=", "value": 3, "when": { "metric": "drop.ifeval", "op": "<=", "value": 3 } }
+      ],
+      "criteria": [{ "metric": "drop.ifeval", "op": "<=", "value": 3 }]
+    },
+    {
+      "id": "spec.accuracy.quick.humaneval",
+      "version": "1",
+      "title": "HumanEval+, quick set: L2 drops at most 5 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.humaneval", "op": "==", "value": 5 },
+        { "metric": "drop_high.humaneval", "op": "<=", "value": 5, "when": { "metric": "drop.humaneval", "op": "<=", "value": 5 } }
+      ],
+      "criteria": [{ "metric": "drop.humaneval", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.accuracy.quick.mbpp",
+      "version": "1",
+      "title": "MBPP+, quick set: L2 drops at most 5 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "quick" },
+        { "metric": "n.mbpp", "op": "==", "value": 5 },
+        { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
+      ],
+      "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.accuracy.mmlu",
+      "version": "1",
+      "title": "MMLU, full set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.mmlu", "op": "==", "value": 14042 },
+        { "metric": "drop_high.mmlu", "op": "<=", "value": 2, "when": { "metric": "drop.mmlu", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.mmlu", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.cmmlu",
+      "version": "1",
+      "title": "CMMLU, full set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.cmmlu", "op": "==", "value": 11582 },
+        { "metric": "drop_high.cmmlu", "op": "<=", "value": 2, "when": { "metric": "drop.cmmlu", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.cmmlu", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.ceval",
+      "version": "1",
+      "title": "C-Eval, full set: L2 drops at most 2 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.ceval", "op": "==", "value": 1346 },
+        { "metric": "drop_high.ceval", "op": "<=", "value": 2, "when": { "metric": "drop.ceval", "op": "<=", "value": 2 } }
+      ],
+      "criteria": [{ "metric": "drop.ceval", "op": "<=", "value": 2 }]
+    },
+    {
+      "id": "spec.accuracy.gsm8k",
+      "version": "1",
+      "title": "GSM8K, full set: L2 drops at most 3 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.gsm8k", "op": "==", "value": 1319 },
+        { "metric": "drop_high.gsm8k", "op": "<=", "value": 3, "when": { "metric": "drop.gsm8k", "op": "<=", "value": 3 } }
+      ],
+      "criteria": [{ "metric": "drop.gsm8k", "op": "<=", "value": 3 }]
+    },
+    {
+      "id": "spec.accuracy.ifeval",
+      "version": "1",
+      "title": "IFEval, full set: L2 drops at most 3 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.ifeval", "op": "==", "value": 541 },
+        { "metric": "drop_high.ifeval", "op": "<=", "value": 3, "when": { "metric": "drop.ifeval", "op": "<=", "value": 3 } }
+      ],
+      "criteria": [{ "metric": "drop.ifeval", "op": "<=", "value": 3 }]
+    },
+    {
+      "id": "spec.accuracy.humaneval",
+      "version": "1",
+      "title": "HumanEval+, full set: L2 drops at most 5 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.humaneval", "op": "==", "value": 164 },
+        { "metric": "drop_high.humaneval", "op": "<=", "value": 5, "when": { "metric": "drop.humaneval", "op": "<=", "value": 5 } }
+      ],
+      "criteria": [{ "metric": "drop.humaneval", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.accuracy.mbpp",
+      "version": "1",
+      "title": "MBPP+, full set: L2 drops at most 5 points against L0",
+      "plugin": "numeric",
+      "handler": "benchmark_compare",
+      "completeness": [
+        { "metric": "set", "op": "==", "value": "full" },
+        { "metric": "n.mbpp", "op": "==", "value": 378 },
+        { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
+      ],
+      "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    }
+  ],
+  "hardConstraintSlots": ["constraints", "timing-exceptions", "signoff-rules"]
+}

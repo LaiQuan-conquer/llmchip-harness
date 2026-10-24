@@ -132,4 +132,15 @@ describe('model import and graph recovery', () => {
     expect(failed.execution).toBe('exited_nonzero')
     expect(failed.error).toContain('does not exist')
   })
+
+  it('keeps the whole model as one archive and imports it back', { timeout: 120_000 }, async () => {
+    const client = await setup()
+    const imported = await run(client, 'model-llama', 'import', [], { path: TINY_QWEN3, archive: true })
+    const archive = out(imported, 'model')[0]!
+    const again = await run(client, 'model-llama', 'import', [['model', archive]])
+    expect(again.metrics).toMatchObject({ files: 4, tensors: 24, parameters: 22_720, weight_format: 'safetensors', model_type: 'qwen3' })
+    expect(out(again, 'census')[0]).toBe(out(imported, 'census')[0])
+    const graph = await run(client, 'model-llama', 'recover', [['census', out(again, 'census')[0]!]])
+    expect(graph.metrics).toMatchObject({ family: 'qwen3', tensors_missing: 0 })
+  })
 })
