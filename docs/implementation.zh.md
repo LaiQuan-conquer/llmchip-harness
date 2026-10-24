@@ -163,7 +163,7 @@ plugins/                   额外的插件搜索路径
 |---|---|---|---|---|
 | `flow-default` | data | 流程包：S0–S7、20 项检查、阶段准入检查、硬约束槽位、每个阶段的研发流水线与必需测试；数据 `estimate-request-proxy`、`timing-exceptions-none` | 全部 | 经由 `tests/*-flow.spec.ts` |
 | `flow-six` | data | 六步流程包（Qwen2.5-0.5B-Instruct，负责人决定 2026-10-24）：目前只有 SPEC 步骤，21 项检查 | SPEC | 经由 `tests/qwen-spec.spec.ts` |
-| `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`signoff-gf180mcu` | S0、S3、S6–S7 | 经由估算器与流程测试 |
+| `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`、`sky130`、`ihp-sg13g2`；实现库 `library-180nm`、`library-130nm`；`signoff-gf180mcu` | S0、S3、S6–S7 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`（可另存为一个模型归档）、`recover`、`run_graph`、`compare` | S0（导入）、S1、SPEC | `test_model.py`、`test_graph.py` |
 | `numeric` | process（Python；`benchmark`、`l2_fast_check`、`calibrate_graph`、`diagnose` 用 GPU） | `quantize`、`infer`、`evaluate`、`quantize_graph`、`calibrate_graph`、`calibration_data`、`evaluate_graph`、`benchmark_data`、`benchmark`、`benchmark_compare`、`diagnose`、`l2_fast_check` | S2、SPEC | `test_numeric.py`、`test_graph_l2.py`、`test_l2_torch.py`、`test_bench.py`、`test_benchcode.py`、`test_gptq.py`、`test_diagnose.py` |
@@ -638,11 +638,11 @@ yarn llmchip pipeline list --project demo
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 201 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 7 分 33 秒（2026-10-25，R2c）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 202 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 7 分 33 秒（2026-10-25，R2c）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
 | `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、2 个跳过（m4-flow、qwen-spec）；126 个测试通过、3 个跳过（m4-flow、`pipelines-flow` 的 S0–S7 与 qwen-spec，都须显式开启；2026-10-24，R2a） |
-| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 7 分 33 秒、Vitest 805 秒（R2c） |
+| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 7 分 33 秒、Vitest 817 秒（R2c） |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S7，以及从 GDS 到权重的血缘 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | 用测试环境测一颗芯片：在提示词集上生成，质量与速度，按芯片策略判定，写出运行目录 | stories260K 的数值（int8）芯片对照其参考芯片，20 个提示词生成到 64 token 上下文结束：下一 token 一致率 0.992，生成完全相同 0.65，困惑度 3.167（参考 3.159），11 秒（2026-10-22）。`vchip conform` 在 stories260K 的参考与数值芯片、tiny Qwen3 的参考芯片上均通过 |
@@ -756,7 +756,7 @@ GSM8K、IFEval 与 HumanEval+ 与公布值相差约 1 点以内。MBPP+ 低 8 �
 ### 7.2 部分实现
 
 - **估算器**：多芯片只给出芯片数（FR-EST-06）。没有参数扫描或 Pareto（FR-EST-08）。标定结果不会自动更新模型（FR-EST-10）。
-- **标定**：SRAM 的四种配置中只覆盖 512×8（FR-EST-13）。
+- **标定**：SRAM 的四种配置中只覆盖 512×8（FR-EST-13）。sky130 与 IHP sg13g2 的档案是新增的（2026-10-25）：单元面积取自各 PDK 的 liberty 文件，但 `library-130nm` 里的 ROM/SRAM 密度是按 GF180MCU 标定值缩放的**经验值**，两个档案都写明 `calibration: not run`。57,344 个权重的切片在 128 MAC 下估算为 sky130 2.65–5.21 mm²（典型 3.79）、IHP 4.05–7.25 mm²（典型 5.66），对照 3.0 mm² 的占位 prerun 晶粒：sky130 有条件可行，IHP 在密度标定之前不可行。
 - **验证**：只有 `rtl-functional-sim` 是已声明并认证的能力，门级仿真没有能力门控。SDF 仿真能运行，但 `sdf.timing` 无法通过（§1.3、FR-VER-01/03、AC-12 正例）。
 - **存储内容检查**（FR-SGN-07）：映射可逆，生成时做往返检查。由于设计使用标准单元 ROM，没有比较宏内容的签核检查。
 - **物理实现**：芯片为 1.2×2 mm，不是 2 mm²（负责人决定，需求 v0.6）。设计对象是未训练的占位模型。空间引擎放不进这个晶粒，按实测单元面积需要 5.0 × 3 mm（负责人决定，2026-10-20：晶粒按需加大；布局确认尺寸后再更新需求文档 §11.1）。它还没有做物理实现。

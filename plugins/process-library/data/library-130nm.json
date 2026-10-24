@@ -1,0 +1,94 @@
+{
+  "id": "library-130nm",
+  "description": "Implementation library entries for the 130 nm open PDKs (sky130A, IHP sg13g2). Densities are empirical: the ROM and SRAM values are scaled from the calibrated GF180MCU value because no calibration has run on these PDKs yet (FR-EST-13); they are placeholders for relative comparisons, not signoff numbers.",
+  "entries": [
+    {
+      "id": "sky130.stdcell-rom",
+      "process": "sky130",
+      "kind": "rom",
+      "title": "Standard-cell logic ROM (sky130_fd_sc_hd)",
+      "availability": "available",
+      "densityUm2PerBit": {
+        "low": 1.2,
+        "typ": 1.6,
+        "high": 2.2,
+        "confidence": "empirical",
+        "source": "GF180MCU calibrated 2.578 um2/bit scaled by (180/130)^2 and rounded up; not calibrated on sky130 (FR-EST-13)"
+      },
+      "peripheryFactor": {
+        "low": 0.0,
+        "typ": 0.0,
+        "high": 0.0,
+        "confidence": "empirical",
+        "source": "decoding counted as logic, as in the GF180MCU calibration"
+      },
+      "form": "stdcell"
+    },
+    {
+      "id": "sky130.sram-512x8",
+      "process": "sky130",
+      "kind": "sram",
+      "title": "Single-port SRAM (sky130, empirical)",
+      "availability": "available",
+      "densityUm2PerBit": {
+        "low": 0.5,
+        "typ": 0.7,
+        "high": 1.0,
+        "confidence": "empirical",
+        "source": "typical 130 nm single-port SRAM bitcell with periphery; not calibrated (FR-EST-13)"
+      },
+      "peripheryFactor": {
+        "low": 0.2,
+        "typ": 0.3,
+        "high": 0.4,
+        "confidence": "empirical",
+        "source": "decoders and sense amplifiers"
+      },
+      "form": "macro"
+    },
+    {
+      "id": "ihp-sg13g2.stdcell-rom",
+      "process": "ihp-sg13g2",
+      "kind": "rom",
+      "title": "Standard-cell logic ROM (sg13g2_stdcell)",
+      "availability": "available",
+      "densityUm2PerBit": {
+        "low": 2.0,
+        "typ": 2.6,
+        "high": 3.4,
+        "confidence": "empirical",
+        "source": "a sg13g2 D flip-flop (52.6 um2) is 2.6x the sky130 one (20.0 um2), so the ROM is estimated at least as dense-expensive as GF180MCU's 2.578 um2/bit; not calibrated (FR-EST-13)"
+      },
+      "peripheryFactor": {
+        "low": 0.0,
+        "typ": 0.0,
+        "high": 0.0,
+        "confidence": "empirical",
+        "source": "decoding counted as logic"
+      },
+      "form": "stdcell"
+    },
+    {
+      "id": "ihp-sg13g2.sram-512x8",
+      "process": "ihp-sg13g2",
+      "kind": "sram",
+      "title": "Single-port SRAM (sg13g2, empirical)",
+      "availability": "available",
+      "densityUm2PerBit": {
+        "low": 0.6,
+        "typ": 0.8,
+        "high": 1.1,
+        "confidence": "empirical",
+        "source": "typical 130 nm single-port SRAM bitcell with periphery; not calibrated (FR-EST-13)"
+      },
+      "peripheryFactor": {
+        "low": 0.2,
+        "typ": 0.3,
+        "high": 0.4,
+        "confidence": "empirical",
+        "source": "decoders and sense amplifiers"
+      },
+      "form": "macro"
+    }
+  ]
+}

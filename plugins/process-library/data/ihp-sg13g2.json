@@ -1,0 +1,132 @@
+{
+  "id": "ihp-sg13g2",
+  "title": "IHP sg13g2 open PDK (prerun; ROM densities not calibrated)",
+  "nodeNm": 130,
+  "source": "ihp-sg13g2 in the pinned iic-osic-tools image; cell areas measured from its liberty files on 2026-10-25; every other value is empirical",
+  "foundry": null,
+  "prerunConstraint": {
+    "dieMm": {
+      "x": 1.5,
+      "y": 2
+    },
+    "areaMm2": 3.0,
+    "dieYOptionsMm": [
+      2,
+      3,
+      5
+    ],
+    "dieXMinMm": 1,
+    "note": "Placeholder prerun die for a slice; no owner decision has set it."
+  },
+  "ring": {
+    "ioRingWidthMm": {
+      "low": 0.25,
+      "typ": 0.3,
+      "high": 0.35,
+      "confidence": "empirical",
+      "source": "sg13g2_io pads with the standard edge spacing; to be measured on a real pad ring"
+    },
+    "sealRingWidthMm": {
+      "low": 0.01,
+      "typ": 0.02,
+      "high": 0.03,
+      "confidence": "empirical",
+      "source": "typical seal ring"
+    }
+  },
+  "logic": {
+    "macAreaUm2": {
+      "low": 2500,
+      "typ": 4500,
+      "high": 6500,
+      "confidence": "empirical",
+      "source": "8x4-bit MAC with a 20-bit accumulator; a sg13g2 flip-flop (52.6 um2) is 2.6x the sky130 one, so cells are larger than at sky130"
+    },
+    "flopBitAreaUm2": {
+      "low": 52.6176,
+      "typ": 65.0,
+      "high": 80.0,
+      "confidence": "datasheet",
+      "source": "sg13g2_dfrbp_1 area 52.6176 um2 (Liberty typ_1p20V_25C, measured 2026-10-25); typ/high add enable and read multiplexing"
+    },
+    "controlAreaMm2": {
+      "low": 0.03,
+      "typ": 0.05,
+      "high": 0.1,
+      "confidence": "empirical",
+      "source": "sequencer, interfaces, debug readback"
+    },
+    "utilization": {
+      "low": 0.7,
+      "typ": 0.75,
+      "high": 0.85,
+      "confidence": "empirical",
+      "source": "typical standard-cell placement density; to be measured"
+    },
+    "powerOverhead": {
+      "low": 0.05,
+      "typ": 0.07,
+      "high": 0.1,
+      "confidence": "empirical",
+      "source": "power grid share of the core area, as in the GF180MCU profile"
+    }
+  },
+  "implementations": [
+    "ihp-sg13g2.stdcell-rom",
+    "ihp-sg13g2.sram-512x8"
+  ],
+  "reticleLimitMm2": 850,
+  "technology": {
+    "stdcell": {
+      "library": "sg13g2_stdcell",
+      "voltageV": 1.2,
+      "tracks": 9,
+      "corners": [
+        "typ_1p20V_25C",
+        "slow_1p08V_125C",
+        "fast_1p32V_m40C"
+      ],
+      "confidence": "datasheet"
+    },
+    "io": {
+      "library": "sg13g2_io",
+      "padUm": [
+        70,
+        70
+      ],
+      "cornerUm": 80,
+      "voltageV": 3.3,
+      "confidence": "empirical"
+    },
+    "metalLayers": 7,
+    "voltageDomains": [
+      "1.2 V core, 3.3 V IO"
+    ],
+    "parasitics": [
+      "min",
+      "nom",
+      "max"
+    ],
+    "signoff": {
+      "drc": [
+        "KLayout sg13g2.drc",
+        "Magic sg13g2"
+      ],
+      "lvs": [
+        "Netgen"
+      ],
+      "antenna": [
+        "KLayout"
+      ],
+      "density": [
+        "KLayout"
+      ],
+      "sta": [
+        "OpenSTA"
+      ],
+      "openTools": true
+    },
+    "source": "ihp-sg13g2 in the pinned iic-osic-tools image"
+  },
+  "calibration": "not run: the ROM and SRAM densities of library-130nm are empirical (FR-EST-13)"
+}

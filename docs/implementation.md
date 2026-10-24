@@ -159,7 +159,7 @@ plugins/                   extra plugin search path
 |---|---|---|---|---|
 | `flow-default` | data | flow pack: S0–S7, 20 checks, stage entry checks, hard-constraint slots, every stage's development pipeline and required tests; data `estimate-request-proxy`, `timing-exceptions-none` | all | via `tests/*-flow.spec.ts` |
 | `flow-six` | data | six-step flow pack (Qwen2.5-0.5B-Instruct, owner decision 2026-10-24): only the SPEC step so far, 21 checks | SPEC | via `tests/qwen-spec.spec.ts` |
-| `process-library` | data | profiles `gf180mcu`, `sephonchitech-180bcd`; `library-180nm`; `signoff-gf180mcu` | S0, S3, S6–S7 | via estimator and flow tests |
+| `process-library` | data | profiles `gf180mcu`, `sephonchitech-180bcd`, `sky130`, `ihp-sg13g2`; libraries `library-180nm`, `library-130nm`; `signoff-gf180mcu` | S0, S3, S6–S7 | via estimator and flow tests |
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
 | `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import` (optionally also as one model archive), `recover`, `run_graph`, `compare` | S0 (import), S1, SPEC | `test_model.py`, `test_graph.py` |
 | `numeric` | process (Python; `benchmark`, `l2_fast_check`, `calibrate_graph` and `diagnose` use the GPU) | `quantize`, `infer`, `evaluate`, `quantize_graph`, `calibrate_graph`, `calibration_data`, `evaluate_graph`, `benchmark_data`, `benchmark`, `benchmark_compare`, `diagnose`, `l2_fast_check` | S2, SPEC | `test_numeric.py`, `test_graph_l2.py`, `test_l2_torch.py`, `test_bench.py`, `test_benchcode.py`, `test_gptq.py`, `test_diagnose.py` |
@@ -590,11 +590,11 @@ Measured on the development machine (WSL2, Node 24.22, uv 0.13, Podman 3.4 with 
 |---|---|---|
 | `yarn check:workspace` | packages, references, `workspace:*` deps, vendor manifest and licenses | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` matches the schema | "up to date (2 files)" |
-| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 201 passed, 1 skipped, 7 min 33 s with the EDA image, the sandbox image and a GPU (2026-10-25, R2c); at R1, 165 passed, 1 skipped, 6 min 43 s; at R0, 164 passed, 1 skipped (R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
+| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 202 passed, 1 skipped, 7 min 33 s with the EDA image, the sandbox image and a GPU (2026-10-25, R2c); at R1, 165 passed, 1 skipped, 6 min 43 s; at R0, 164 passed, 1 skipped (R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
 | `yarn typecheck` | project references, then sources, tests, scripts and the Web UI | clean |
 | `yarn build` | `lib/` of every package, `apps/web/dist` | clean |
 | `yarn test` | all Vitest specs (below) | 33 files passed, 2 skipped (m4-flow, qwen-spec); 126 tests passed, 3 skipped (m4-flow, S0–S7 of `pipelines-flow` and qwen-spec, all opt-in; 2026-10-24, R2a) |
-| `yarn verify` | all of the above in order; required before every commit | exit 0 (2026-10-24); with the images present, Python checks 7 min 33 s, Vitest 805 s (R2c) |
+| `yarn verify` | all of the above in order; required before every commit | exit 0 (2026-10-24); with the images present, Python checks 7 min 33 s, Vitest 817 s (R2c) |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | full S0–S7 on the proxy, and the lineage from the GDS to the weights | see §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | hash chain, stored content against hashes | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | the test harness on a chip: generation over a prompt set, quality and speed, the chip's policy, a run directory | stories260K numeric (int8) chip against its reference, 20 prompts to the end of a 64-token context: next-token agreement 0.992, identical generations 0.65, perplexity 3.167 (reference 3.159), 11 s (2026-10-22). `vchip conform` passes on the reference and numeric chips of stories260K and on the reference chip of tiny Qwen3 |
@@ -708,7 +708,7 @@ GSM8K, IFEval and HumanEval+ are within about one point of the published numbers
 ### 7.2 Partial
 
 - **Estimator**: multi-chip is a chip count only (FR-EST-06). No sweep or Pareto (FR-EST-08). Calibration does not update the model automatically (FR-EST-10).
-- **Calibration** covers SRAM 512×8 only of the four configurations (FR-EST-13).
+- **Calibration** covers SRAM 512×8 only of the four configurations (FR-EST-13). The sky130 and IHP sg13g2 profiles are new (2026-10-25): their cell areas come from the PDKs' liberty files, but their ROM and SRAM densities in `library-130nm` are empirical, scaled from the GF180MCU calibrated value, and both profiles say `calibration: not run`. A slice of 57,344 weights estimates to 2.65–5.21 mm² (typ 3.79) on sky130 and 4.05–7.25 mm² (typ 5.66) on IHP at 128 MACs, against the 3.0 mm² placeholder prerun die: conditionally feasible on sky130, infeasible on IHP until the densities are calibrated.
 - **Verification**: only `rtl-functional-sim` is a declared, qualified capability. Gate-level simulation has no capability gate. SDF simulation runs, but `sdf.timing` cannot pass (§1.3, FR-VER-01/03, AC-12 positive case).
 - **Storage contents check** (FR-SGN-07): the mapping is reversible and round-trip checked at generation. No signoff check compares macro contents, because the design uses a standard-cell ROM.
 - **Physical**: the die is 1.2×2 mm, not 2 mm² (owner decision, requirements v0.6). The design subject is the untrained proxy. The spatial engine does not fit that die; it needs 5.0 × 3 mm by its measured cells (owner decision 2026-10-20: the die grows as needed; the requirements' §11.1 is updated once the size is confirmed by placement). It has not been implemented physically yet.

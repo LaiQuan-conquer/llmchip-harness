@@ -78,3 +78,40 @@ def test_onchip_kv_cache_uses_its_storage_entry():
     )
     kv = next(i for i in report["items"] if i["item"] == "KV cache (on chip)")
     assert kv["areaMm2"]["typ"] == pytest.approx(5 * 2 * 32 * 64 * 8 * 5 / 1e6)
+
+
+def test_the_130nm_profiles_estimate_a_slice():
+    """sky130 and IHP sg13g2: the profiles load and estimate a slice; their ROM densities are
+    empirical until calibrated (FR-EST-13), so the numbers are for relative comparison only."""
+    library = json.loads((DATA / "library-130nm.json").read_text())
+    for name in ("sky130", "ihp-sg13g2"):
+        profile = json.loads((DATA / f"{name}.json").read_text())
+        assert profile["calibration"].startswith("not run")
+        rom = next(entry for entry in library["entries"] if entry["id"] == f"{name}.stdcell-rom")
+        assert rom["densityUm2PerBit"]["confidence"] == "empirical"
+        request = {
+            "model": {
+                "params": 57_344,
+                "dim": 64,
+                "layers": 1,
+                "heads": 1,
+                "kvHeads": 1,
+                "vocab": 1024,
+                "hiddenDim": 256,
+                "title": "slice S-1",
+            },
+            "weightBits": 4,
+            "activationBits": 16,
+            "kvBits": 16,
+            "contextLength": 32,
+            "kvLocation": "onchip",
+            "kvStorage": f"{name}.sram-512x8",
+            "activationLocation": "onchip",
+            "weightStorage": f"{name}.stdcell-rom",
+            "parallelMacs": 128,
+            "clockMHz": 8,
+            "onchipBufferBits": 0,
+        }
+        result = estimate(request, profile, library)
+        assert result["conclusion"]["feasibility"] in ("feasible", "conditionally_feasible", "infeasible")
+        assert result["area"]["dieMm2"]["typ"] > 0

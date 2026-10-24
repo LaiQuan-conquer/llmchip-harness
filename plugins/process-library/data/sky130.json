@@ -1,0 +1,132 @@
+{
+  "id": "sky130",
+  "title": "SkyWater sky130A open PDK (prerun; ROM densities not calibrated)",
+  "nodeNm": 130,
+  "source": "sky130A in the pinned iic-osic-tools image; cell areas measured from its liberty files on 2026-10-25; every other value is empirical",
+  "foundry": null,
+  "prerunConstraint": {
+    "dieMm": {
+      "x": 1.5,
+      "y": 2
+    },
+    "areaMm2": 3.0,
+    "dieYOptionsMm": [
+      2,
+      3,
+      5
+    ],
+    "dieXMinMm": 1,
+    "note": "Placeholder prerun die for a slice; no owner decision has set it (the GF180MCU prerun die is 1.2 x 2 mm)."
+  },
+  "ring": {
+    "ioRingWidthMm": {
+      "low": 0.25,
+      "typ": 0.3,
+      "high": 0.35,
+      "confidence": "empirical",
+      "source": "sky130_fd_io pads with the standard edge spacing; to be measured on a real pad ring"
+    },
+    "sealRingWidthMm": {
+      "low": 0.01,
+      "typ": 0.02,
+      "high": 0.03,
+      "confidence": "empirical",
+      "source": "typical seal ring"
+    }
+  },
+  "logic": {
+    "macAreaUm2": {
+      "low": 2000,
+      "typ": 3500,
+      "high": 5500,
+      "confidence": "empirical",
+      "source": "8x4-bit MAC with a 20-bit accumulator, scaled from GF180MCU by the cell-area ratio (sky130 flip-flop 20.0 um2, GF180 63.7 um2)"
+    },
+    "flopBitAreaUm2": {
+      "low": 20.0192,
+      "typ": 26.0,
+      "high": 32.0,
+      "confidence": "datasheet",
+      "source": "sky130_fd_sc_hd__dfxtp_1 area 20.0192 um2 (Liberty ff_100C_1v65, measured 2026-10-25); typ/high add enable and read multiplexing"
+    },
+    "controlAreaMm2": {
+      "low": 0.02,
+      "typ": 0.04,
+      "high": 0.08,
+      "confidence": "empirical",
+      "source": "sequencer, interfaces, debug readback; scaled from GF180MCU"
+    },
+    "utilization": {
+      "low": 0.7,
+      "typ": 0.75,
+      "high": 0.85,
+      "confidence": "empirical",
+      "source": "typical standard-cell placement density; to be measured"
+    },
+    "powerOverhead": {
+      "low": 0.05,
+      "typ": 0.07,
+      "high": 0.1,
+      "confidence": "empirical",
+      "source": "power grid share of the core area, as in the GF180MCU profile"
+    }
+  },
+  "implementations": [
+    "sky130.stdcell-rom",
+    "sky130.sram-512x8"
+  ],
+  "reticleLimitMm2": 850,
+  "technology": {
+    "stdcell": {
+      "library": "sky130_fd_sc_hd",
+      "voltageV": 1.8,
+      "tracks": 9,
+      "corners": [
+        "tt_025C_1v80",
+        "ss_100C_1v60",
+        "ff_n40C_1v95"
+      ],
+      "confidence": "datasheet"
+    },
+    "io": {
+      "library": "sky130_fd_io",
+      "padUm": [
+        70,
+        70
+      ],
+      "cornerUm": 80,
+      "voltageV": 3.3,
+      "confidence": "empirical"
+    },
+    "metalLayers": 5,
+    "voltageDomains": [
+      "1.8 V core, 3.3 V IO"
+    ],
+    "parasitics": [
+      "min",
+      "nom",
+      "max"
+    ],
+    "signoff": {
+      "drc": [
+        "KLayout sky130.drc",
+        "Magic sky130A"
+      ],
+      "lvs": [
+        "Netgen"
+      ],
+      "antenna": [
+        "KLayout"
+      ],
+      "density": [
+        "KLayout"
+      ],
+      "sta": [
+        "OpenSTA"
+      ],
+      "openTools": true
+    },
+    "source": "sky130A in the pinned iic-osic-tools image"
+  },
+  "calibration": "not run: the ROM and SRAM densities of library-130nm are empirical (FR-EST-13)"
+}

@@ -21,9 +21,24 @@
       "path": "data/gf180mcu.json"
     },
     {
+      "id": "sky130",
+      "type": "process.profile",
+      "path": "data/sky130.json"
+    },
+    {
+      "id": "ihp-sg13g2",
+      "type": "process.profile",
+      "path": "data/ihp-sg13g2.json"
+    },
+    {
       "id": "library-180nm",
       "type": "implementation.library",
       "path": "data/library-180nm.json"
+    },
+    {
+      "id": "library-130nm",
+      "type": "implementation.library",
+      "path": "data/library-130nm.json"
     },
     {
       "id": "signoff-gf180mcu",
