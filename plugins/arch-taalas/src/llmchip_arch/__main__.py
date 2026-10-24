@@ -25,8 +25,12 @@ def handle_design(ctx: InvokeContext) -> Result:
             json.loads(Path(ctx.input("library").path).read_text()),
         )
         Path(ctx.out_dir, "chip-spec.json").write_text(json.dumps(chip, indent=2, ensure_ascii=False))
+        outputs = [Output("chip", "chip-spec.json", "chip.spec", "application/json")]
+        if chip.get("area"):
+            Path(ctx.out_dir, "ppa.json").write_text(json.dumps(chip["area"], indent=2, ensure_ascii=False))
+            outputs.append(Output("ppa", "ppa.json", "ppa.estimate", "application/json"))
         return Result(
-            outputs=[Output("chip", "chip-spec.json", "chip.spec", "application/json")],
+            outputs=outputs,
             metrics={
                 "architecture": chip["architecture"],
                 "engines": chip["dataflow"]["engines"],
@@ -86,7 +90,8 @@ def handle_verify(ctx: InvokeContext) -> Result:
         return Result(metrics=tile.verify(chip), parse={"status": "complete", "parser": "llmchip-arch/verify-tile"})
     spec_in = ctx.input("spec")
     spec = json.loads(Path(spec_in.path).read_text())
-    ppa = json.loads(Path(ctx.input("ppa").path).read_text())
+    ppa_input = next((i for i in ctx.inputs if i.name == "ppa"), None)
+    ppa = json.loads(Path(ppa_input.path).read_text()) if ppa_input else {}
     weights = next((i for i in ctx.inputs if i.name == "weights"), None)
     arrays = L2Model.load(spec_in.path, weights.path).a if weights else None
     return Result(

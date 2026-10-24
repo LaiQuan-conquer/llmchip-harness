@@ -36,7 +36,7 @@ describe('estimator (AC-M1-10)', () => {
     // A broken flow pack shows up neither in `plugins.list` (its problems are only logged) nor in
     // a check id alone: its checks and its SPEC pipeline plan prove that it loaded whole.
     expect(checks).toEqual(
-      expect.arrayContaining(['spec.l2.fast', 'spec.accuracy.quick.mmlu', 'spec.accuracy.mmlu', 'spec.slice', 'spec.diagnosis']),
+      expect.arrayContaining(['spec.l2.fast', 'spec.accuracy.quick.mmlu', 'spec.accuracy.mmlu', 'spec.slice', 'spec.diagnosis', 'spec.design', 'spec.tlm']),
     )
     await client.call('projects.create', { id: 'six', title: 'Six steps', flow: 'six' })
     const plan = await client.call('pipelines.plan', { project: 'six', stage: 'SPEC', kind: 'develop' })

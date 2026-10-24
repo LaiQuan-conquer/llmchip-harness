@@ -93,8 +93,8 @@ describe.skipIf(!ready)('Qwen2.5-0.5B-Instruct: the SPEC step', () => {
     // The required tests judge the development runs again (nothing reruns).
     const tests = await finished(client, (await client.call('pipelines.start', { project: 'qwen', stage: 'SPEC', kind: 'test' })).id, 600_000)
     for (const n of tests.nodes) expect(n.reused, n.id).toBeTruthy()
-    expect(tests.summary.nodes).toBe(11)
-    expect(tests.summary.pass + tests.summary.fail + tests.summary.indeterminate).toBe(11)
+    expect(tests.summary.nodes).toBe(13)
+    expect(tests.summary.pass + tests.summary.fail + tests.summary.indeterminate).toBe(13)
     const accuracy = tests.nodes.find((n) => n.id === 'SPEC/spec.accuracy.quick.mmlu')!
     const comparison = await client.call('runs.get', { run: accuracy.reused! })
     // The numbers, for the implementation guide (vitest does not show the console of a passing test).

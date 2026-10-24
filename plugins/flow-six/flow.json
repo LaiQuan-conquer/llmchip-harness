@@ -6,6 +6,10 @@
       "id": "SPEC",
       "title": "Specification: model, numeric spec and L2, benchmarks",
       "develop": {
+        "defaults": {
+          "process-profile": "data:gf180mcu",
+          "impl-library": "data:library-180nm"
+        },
         "nodes": [
           {
             "id": "import",
@@ -46,6 +50,39 @@
             "params": { "level": "S-1" },
             "inputs": { "graph": "node:recover.graph", "spec": "node:calibrate.spec" },
             "judge": ["spec.slice"]
+          },
+          {
+            "id": "design",
+            "plugin": "arch-taalas",
+            "handler": "design",
+            "params": {
+              "architecture": "taalas-tile/1",
+              "macsPerEngine": 128,
+              "engines": "per-layer",
+              "clockMHz": 8,
+              "weightStorage": "gf180mcu.stdcell-rom"
+            },
+            "inputs": {
+              "spec": "node:calibrate.spec",
+              "weights": "node:calibrate.weights",
+              "profile": "slot:process-profile",
+              "library": "slot:impl-library"
+            },
+            "bind": { "chip": "chip-spec", "ppa": "ppa-estimate" },
+            "judge": ["spec.design"]
+          },
+          {
+            "id": "tlm",
+            "plugin": "arch-taalas",
+            "handler": "tlm",
+            "params": { "tokens": [1, 2, 3, 4, 5, 6, 7, 8] },
+            "inputs": {
+              "chip": "node:design.chip",
+              "graph": "node:recover.graph",
+              "spec": "node:calibrate.spec",
+              "weights": "node:calibrate.weights"
+            },
+            "judge": ["spec.tlm"]
           },
           {
             "id": "l2-fast",
@@ -117,6 +154,8 @@
       "tests": [
         { "check": "model.upstream", "inputs": { "graph": "slot:model-graph", "census": "slot:model-census", "model": "slot:model" } },
         { "check": "spec.slice", "inputs": { "graph": "slot:model-graph", "spec": "slot:numeric-spec" } },
+        { "check": "spec.design", "inputs": { "chip": "slot:chip-spec", "ppa": "slot:ppa-estimate", "spec": "slot:numeric-spec", "weights": "slot:l2-weights" } },
+        { "check": "spec.tlm", "inputs": { "chip": "slot:chip-spec", "graph": "slot:model-graph", "spec": "slot:numeric-spec", "weights": "slot:l2-weights" } },
         {
           "check": "spec.l2.fast",
           "inputs": {
@@ -293,6 +332,34 @@
         { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
       ],
       "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.design",
+      "version": "1",
+      "title": "The taalas-tile/1 schedule is consistent: its phases give the chip's cycles per token",
+      "plugin": "arch-taalas",
+      "handler": "verify_spec",
+      "completeness": [
+        { "metric": "engines", "op": ">=", "value": 1 },
+        { "metric": "rom_word_bits", "op": ">", "value": 0 }
+      ],
+      "criteria": [
+        { "metric": "schedule_agrees", "op": "==", "value": true },
+        { "metric": "cycles_per_token", "op": ">", "value": 0 }
+      ]
+    },
+    {
+      "id": "spec.tlm",
+      "version": "1",
+      "title": "The transaction-level model equals L2: every phase's point, the same cycles, deterministic",
+      "plugin": "arch-taalas",
+      "handler": "tlm",
+      "completeness": [{ "metric": "points", "op": ">=", "value": 4 }],
+      "criteria": [
+        { "metric": "mismatches", "op": "==", "value": 0 },
+        { "metric": "cycles_agree", "op": "==", "value": 1 },
+        { "metric": "deterministic", "op": "==", "value": 1 }
+      ]
     },
     {
       "id": "spec.slice",

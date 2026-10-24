@@ -236,6 +236,7 @@ def design(
             "kvBits": 16,
             "contextLength": spec["context"]["maxTokens"],
             "kvLocation": "onchip",
+            "kvStorage": params.get("kvStorage", "gf180mcu.sram-512x8"),
             "activationLocation": "onchip",
             "weightStorage": params.get("weightStorage", "gf180mcu.stdcell-rom"),
             "parallelMacs": macs,

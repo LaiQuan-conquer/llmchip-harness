@@ -152,10 +152,26 @@
           "architecture": {
             "enum": [
               "taalas-hardwired/0.2",
-              "taalas-spatial/1"
+              "taalas-spatial/1",
+              "taalas-tile/1"
             ],
             "default": "taalas-hardwired/0.2",
-            "description": "Architecture template: the microcoded vector engine with an external memory, or the spatial engine (every matrix a circuit, KV cache on chip)."
+            "description": "Architecture template: the microcoded vector engine with an external memory, the spatial engine (every matrix a circuit, KV cache on chip), or the tile (ROM arrays, parallel MACs, a fixed schedule) for a recovered graph's numeric spec."
+          },
+          "macsPerEngine": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096,
+            "default": 128,
+            "description": "taalas-tile/1: multipliers per engine; must divide the hidden and intermediate sizes (128 for Qwen2.5-0.5B)."
+          },
+          "engines": {
+            "enum": [
+              "per-layer",
+              "one"
+            ],
+            "default": "per-layer",
+            "description": "taalas-tile/1: one engine per decoder layer (the full model, layers pipelined) or a single engine (a slice)."
           },
           "cyclesPerToken": {
             "type": "integer",
@@ -200,7 +216,7 @@
           "types": [
             "ppa.estimate"
           ],
-          "required": true
+          "required": false
         },
         {
           "name": "weights",
@@ -386,10 +402,26 @@
           "architecture": {
             "enum": [
               "taalas-hardwired/0.2",
-              "taalas-spatial/1"
+              "taalas-spatial/1",
+              "taalas-tile/1"
             ],
             "default": "taalas-hardwired/0.2",
-            "description": "Architecture template: the microcoded vector engine with an external memory, or the spatial engine (every matrix a circuit, KV cache on chip)."
+            "description": "Architecture template: the microcoded vector engine with an external memory, the spatial engine (every matrix a circuit, KV cache on chip), or the tile (ROM arrays, parallel MACs, a fixed schedule) for a recovered graph's numeric spec."
+          },
+          "macsPerEngine": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096,
+            "default": 128,
+            "description": "taalas-tile/1: multipliers per engine; must divide the hidden and intermediate sizes (128 for Qwen2.5-0.5B)."
+          },
+          "engines": {
+            "enum": [
+              "per-layer",
+              "one"
+            ],
+            "default": "per-layer",
+            "description": "taalas-tile/1: one engine per decoder layer (the full model, layers pipelined) or a single engine (a slice)."
           },
           "dividers": {
             "enum": [
