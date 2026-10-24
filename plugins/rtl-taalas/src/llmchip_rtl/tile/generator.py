@@ -125,6 +125,8 @@ def generate(
     if luts:
         first_lut = next(iter(luts))
         (out / "lut.hex").write_text((data / f"lut.{first_lut}.hex").read_text())
+        if "rsqrt" in luts:
+            (out / "rsqrt.hex").write_text((data / "lut.rsqrt.hex").read_text())
 
     # Tools that read the ROM module with its default parameter (Yosys does) take this copy;
     # simulators use each instance's INIT from the generated top.
@@ -132,6 +134,7 @@ def generate(
     (rtl / "tile_rom.v").write_text((_templates_dir() / "tile_rom.v").read_text())
     (rtl / "tile_mac.v").write_text((_templates_dir() / "tile_mac.v").read_text())
     (rtl / "tile_lut.v").write_text((_templates_dir() / "tile_lut.v").read_text())
+    (rtl / "tile_rmsnorm.v").write_text((_templates_dir() / "tile_rmsnorm.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     top = top.replace('parameter         INIT = "rom.hex"', f'parameter         INIT = "{banks[0]["hex"]}"')

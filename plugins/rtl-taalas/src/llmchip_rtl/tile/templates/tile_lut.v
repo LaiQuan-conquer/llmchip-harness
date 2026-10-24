@@ -14,17 +14,17 @@ module tile_lut #(
   output reg  [WIDTH-1:0] value
 );
 
-  reg [WIDTH-1:0] table [0:DEPTH-1];
+  reg [WIDTH-1:0] mem [0:DEPTH-1];
 
   initial begin
-    $readmemh(INIT, table);
+    $readmemh(INIT, mem);
   end
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       value <= {WIDTH{1'b0}};
     end else if (en) begin
-      value <= table[index];
+      value <= mem[index];
     end
   end
 
