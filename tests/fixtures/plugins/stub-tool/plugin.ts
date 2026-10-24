@@ -1,7 +1,7 @@
 // A stand-in for an EDA tool plus its report parser, with handlers that
 // misbehave on purpose to exercise the scheduler and the verdict engine.
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runPlugin } from '@llmchip/plugin-sdk'
@@ -50,6 +50,36 @@ runPlugin({
       }
       return { outputs: [], metrics: { slept: ms }, parse: null }
     },
+    // Counts steps, with a checkpoint after each; continues from `resume`. `crashAt` makes the
+    // first attempt (the one without `resume`) exit at that step, like a machine that died.
+    steps: async (ctx) => {
+      const { steps, stepMs, crashAt, badCheckpoint } = ctx.params as { steps: number; stepMs: number; crashAt?: number; badCheckpoint: boolean }
+      const resumedFrom = ctx.resume ? Number(readFileSync(ctx.resume.path, 'utf8')) : 0
+      for (let step = resumedFrom + 1; step <= steps; step++) {
+        if (ctx.signal.aborted) throw new Error('cancelled')
+        await sleep(stepMs)
+        writeFileSync(join(ctx.workDir, 'ckpt.tmp'), String(step))
+        renameSync(join(ctx.workDir, 'ckpt.tmp'), join(ctx.workDir, 'ckpt.txt'))
+        ctx.checkpoint(badCheckpoint ? '../../outside.txt' : 'ckpt.txt', 'steps')
+        if (crashAt === step && !ctx.resume) {
+          await sleep(200) // let the kernel store the checkpoint
+          process.exit(4)
+        }
+      }
+      writeFileSync(join(ctx.outDir, 'report.txt'), `steps ${steps}\nresumed from ${resumedFrom}\n`)
+      return { outputs: [{ name: 'report', path: 'report.txt', type: 'test.report' }], metrics: { steps, resumed_from: resumedFrom }, parse: { status: 'complete', parser: 'stub-steps/1' } }
+    },
+    // Hold resources for `ms`, and report the GPUs the run sees.
+    heavy: (ctx) => hold(ctx.params as { ms: number }),
+    gpu: (ctx) => hold(ctx.params as { ms: number }),
+    huge: (ctx) => hold(ctx.params as { ms: number }),
+    // Fails on a design that says "bad"; the fix is a new design.
+    flaky: (ctx) => {
+      const text = readFileSync(ctx.input('design').path, 'utf8')
+      if (text.includes('bad')) throw new Error('the design is bad')
+      writeFileSync(join(ctx.outDir, 'report.txt'), 'ok\n')
+      return { outputs: [{ name: 'report', path: 'report.txt', type: 'test.report' }], metrics: {}, parse: { status: 'complete', parser: 'stub-flaky/1' } }
+    },
     hang: () => new Promise(() => {}),
     crash: () => process.exit(3),
     fail: () => {
@@ -58,3 +88,8 @@ runPlugin({
     escape: () => ({ outputs: [{ name: 'x', path: '../../../escape.txt', type: 'test.report' }] }),
   },
 })
+
+async function hold({ ms }: { ms: number }) {
+  await sleep(ms)
+  return { outputs: [], metrics: { cuda_visible_devices: process.env.CUDA_VISIBLE_DEVICES ?? '(unset)' }, parse: { status: 'complete' as const, parser: 'stub-hold/1' } }
+}

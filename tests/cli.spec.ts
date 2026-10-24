@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { main } from '@llmchip/cli'
 import { sha256 } from '@llmchip/kernel'
-import { startKernel, tempDir } from './helpers.ts'
+import { FIXTURE_PLUGINS, startKernel, tempDir } from './helpers.ts'
 
 async function llmchip(home: string, args: string[], stdin?: string) {
   let out = ''
@@ -59,5 +59,31 @@ describe('llmchip CLI', () => {
     expect((await llmchip(home, ['projections', 'rebuild'])).out).toMatch(/^artifacts v1: \d+ events\n/m)
     expect((await llmchip(home, ['bogus'])).code).toBe(2)
     expect((await llmchip(home, ['artifact', 'stat', '0'.repeat(64)])).err).toMatch(/ARTIFACT_NOT_FOUND/)
+  })
+
+  it('plans, starts, shows and resumes stage pipelines', { timeout: 30_000 }, async () => {
+    const { home } = await startKernel(undefined, { config: { plugins: { searchPaths: [FIXTURE_PLUGINS] } } })
+    const dir = tempDir()
+    expect((await llmchip(home, ['project', 'create', 'chip', '--title', 'T', '--flow', 'test'])).code).toBe(0)
+    const plan = await llmchip(home, ['pipeline', 'plan', 'chip', 'A', '--kind', 'develop'])
+    expect(plan).toMatchObject({ code: 1, out: 'A: 5 nodes, not ready\n  A/drc needs slot:design\n  A/flaky needs slot:design\n' })
+    expect((await llmchip(home, ['pipeline', 'start', 'chip', 'A'])).code).toBe(2) // --kind is required
+    writeFileSync(join(dir, 'design.txt'), 'bad design')
+    const bad = (await llmchip(home, ['artifact', 'put', join(dir, 'design.txt'), '--type', 'test.design'])).out.trim()
+    await llmchip(home, ['project', 'bind', 'chip', 'design', bad])
+    const failed = await llmchip(home, ['pipeline', 'start', 'chip', 'A', '--kind', 'develop', '--wait'])
+    expect(failed.code).toBe(1)
+    expect(failed.out).toMatch(/develop A {2}failed {2}\(3\/5 done, 1 failed, 1 skipped\)/)
+    expect(failed.out).toMatch(/A\/drc +done +\S+ {2}stub\.drc: pass/)
+    expect(failed.out).toMatch(/A\/flaky +failed +\S+ {2}PIPELINE_RUN_FAILED/)
+    const id = failed.out.split(' ')[0]!
+    writeFileSync(join(dir, 'design.txt'), 'fixed design')
+    const fixed = (await llmchip(home, ['artifact', 'put', join(dir, 'design.txt'), '--type', 'test.design'])).out.trim()
+    await llmchip(home, ['project', 'bind', 'chip', 'design', fixed])
+    expect((await llmchip(home, ['pipeline', 'resume', id, '--wait'])).out).toMatch(/develop A {2}passed/)
+    expect((await llmchip(home, ['pipeline', 'list', '--project', 'chip'])).out).toMatch(new RegExp(`^${id} {2}chip {2}develop +A +passed\n$`))
+    const tests = await llmchip(home, ['pipeline', 'start', 'chip', 'A', '--kind', 'test', '--wait'])
+    expect(tests).toMatchObject({ code: 0 })
+    expect(tests.out).toMatch(/tests 2 pass, 0 fail, 0 indeterminate/)
   })
 })

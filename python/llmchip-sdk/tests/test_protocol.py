@@ -84,3 +84,45 @@ def test_handler_errors_and_protocol_mismatch(tmp_path):
     assert errors[1]["code"] == -32000
     assert errors[2]["message"] == "ValueError: bad input"
     assert errors[3]["code"] == -32601
+
+
+STEPS = """
+    from pathlib import Path
+
+    from llmchip_sdk import Result, run_plugin
+
+    def steps(ctx):
+        start = int(Path(ctx.resume.path).read_text()) if ctx.resume else 0
+        Path(ctx.work_dir, "ckpt.txt").write_text(str(start + 1))
+        ctx.checkpoint("ckpt.txt", "steps")
+        return Result(metrics={"resumed_from": start}, parse={"status": "complete", "parser": "steps/1"})
+
+    run_plugin("steps", "1.0.0", {"steps": steps})
+"""
+
+
+def test_checkpoint_notification_and_resume_input(tmp_path):
+    resume = tmp_path / "resume"
+    resume.write_text("3")
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "0.1.0", "kernelApiVersion": "0.3.0", "pluginDir": "."},
+    }
+    invoke = {
+        "run": "r2",
+        "handler": "steps",
+        "params": {},
+        "inputs": [
+            {"name": "resume", "hash": "0" * 64, "type": "run.checkpoint", "label": "public", "path": str(resume)}
+        ],
+        "outDir": str(tmp_path),
+        "workDir": str(tmp_path),
+    }
+    replies = run_plugin(STEPS, [init, {"jsonrpc": "2.0", "id": 2, "method": "invoke", "params": invoke}])
+    checkpoint = next(r for r in replies if r.get("method") == "checkpoint")
+    assert checkpoint["params"] == {"run": "r2", "name": "steps", "path": "ckpt.txt"}
+    assert (tmp_path / "ckpt.txt").read_text() == "4"
+    result = next(r for r in replies if r.get("id") == 2)
+    assert result["result"]["metrics"] == {"resumed_from": 3}

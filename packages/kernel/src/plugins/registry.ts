@@ -73,6 +73,15 @@ export class PluginRegistry {
     return { plugin, spec }
   }
 
+  /** The hash of the data file with this id, from the first plugin that has one. */
+  dataHash(id: string): string | undefined {
+    for (const plugin of this.plugins.values()) {
+      const data = plugin.data.get(id)
+      if (data) return data.hash
+    }
+    return undefined
+  }
+
   /** Imported data files of the given type, across plugins. */
   dataOfType(type: string): { plugin: string; id: string; hash: string }[] {
     const out: { plugin: string; id: string; hash: string }[] = []

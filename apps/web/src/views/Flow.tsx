@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { RunRecord, VerdictRecord } from '@llmchip/kernel-api'
+import type { PipelineRecord, RunRecord, VerdictRecord } from '@llmchip/kernel-api'
 import { useKernel, useQuery } from '../api.ts'
 import { useI18n, type Key } from '../i18n.ts'
 import type { Page, Selection } from '../App.tsx'
 import { ErrorLine, Section } from './common.tsx'
 import { CHECK_TITLES, RUN_TITLES, STEPS, type Format, type StepDef } from './flowSteps.ts'
+import { PipelineEntries, PipelinePanel, StagePipelineStatus } from './Pipelines.tsx'
 import { PROCESSES, projectIdFor, startFromWeights, type ProcessId, type StepState as RunStepState } from './modelPipeline.ts'
 import { S0Detail } from './steps/S0.tsx'
 import { S1Detail } from './steps/S1.tsx'
@@ -46,6 +47,10 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
   const { data: state, error } = useQuery((c) => (project ? c.call('projects.get', { project }) : Promise.resolve(undefined)), [project])
   const { data: runs } = useQuery((c) => (project ? c.call('runs.list', { project, limit: 1000 }) : Promise.resolve(undefined)), [project])
   const { data: verdicts } = useQuery((c) => c.call('verdicts.list', { limit: 1000 }), [])
+  const { data: pipelineList, error: pipelineError } = useQuery((c) => (project ? c.call('pipelines.list', { project, limit: 200 }) : Promise.resolve(undefined)), [project])
+  const pipelines = pipelineList?.pipelines ?? []
+  // What the readiness of the two entries depends on: bound slots, entered stages, pipelines.
+  const refreshKey = JSON.stringify([state?.slots, state?.stages, pipelines.map((p) => `${p.id}:${p.state}`)])
   const [open, setOpen] = useState<string | null>(null)
   const detail = selection.stage
 
@@ -119,6 +124,7 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
           <div style={{ width: `${(100 * done) / implemented.length}%` }} />
         </div>
         {proxy && <p className="flow-note">{t('flow.caveat.proxy')}</p>}
+        {project && <PipelineEntries project={project} stage="all" refreshKey={refreshKey} />}
         <div className="flow-path">
           {steps.map((s) => (
             <div className="flow-segment" key={s.def.stage}>
@@ -132,8 +138,14 @@ export function FlowView({ selection, select, onUp }: { selection: Selection; se
         </div>
       </Section>
 
+      {project && (
+        <Section title={t('pipe.title')}>
+          <PipelinePanel pipelines={pipelines} error={pipelineError} />
+        </Section>
+      )}
+
       {steps.map((s) => (
-        <StepCard key={s.def.stage} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => select({ stage: s.def.stage }) : undefined} />
+        <StepCard key={s.def.stage} project={project!} pipelines={pipelines} refreshKey={refreshKey} step={s} format={format} expanded={open === s.def.stage} onToggle={() => setOpen(open === s.def.stage ? null : s.def.stage)} proxy={proxy} select={select} onDetail={DETAILS[s.def.stage] ? () => select({ stage: s.def.stage }) : undefined} />
       ))}
     </>
   )
@@ -236,6 +248,9 @@ function StartFromWeights({ onStarted, open: initiallyOpen = false }: { onStarte
 }
 
 function StepCard({
+  project,
+  pipelines,
+  refreshKey,
   step,
   format,
   expanded,
@@ -244,6 +259,9 @@ function StepCard({
   select,
   onDetail,
 }: {
+  project: string
+  pipelines: PipelineRecord[]
+  refreshKey: string
   step: StepView
   format: Format
   expanded: boolean
@@ -282,6 +300,12 @@ function StepCard({
         </button>
       )}
       {proxy && (def.stage === 'S1' || def.stage === 'S2') && <p className="flow-note">{t('flow.caveat.proxy')}</p>}
+      {def.implemented && (
+        <>
+          <PipelineEntries project={project} stage={def.stage} refreshKey={refreshKey} />
+          <StagePipelineStatus pipelines={pipelines} stage={def.stage} />
+        </>
+      )}
 
       {def.implemented && (
         <>

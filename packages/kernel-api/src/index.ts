@@ -42,11 +42,16 @@ export interface KernelEventPayloads {
   'run.queued': T.RunQueuedPayload
   'run.started': T.RunStartedPayload
   'run.finished': T.RunFinishedPayload
+  'run.checkpointed': T.RunCheckpointedPayload
   'verdict.recorded': T.VerdictRecordedPayload
   'project.created': T.ProjectCreatedPayload
   'project.branched': T.ProjectBranchedPayload
   'project.slot_bound': T.SlotBoundPayload
   'stage.entered': T.StageEnteredPayload
+  'pipeline.started': T.PipelineStartedPayload
+  'pipeline.node': T.PipelineNodePayload
+  'pipeline.finished': T.PipelineFinishedPayload
+  'pipeline.resumed': T.PipelineResumedPayload
   // History only: approval gates and waivers were removed (owner decision 2026-10-24). These kinds
   // stay registered so that logs written before can be read and verified; nothing writes them.
   'approval.recorded': T.ApprovalRecordedPayload
@@ -83,11 +88,16 @@ export const KERNEL_EVENT_PAYLOAD_DEFS: { readonly [K in keyof KernelEventPayloa
   'run.queued': 'RunQueuedPayload',
   'run.started': 'RunStartedPayload',
   'run.finished': 'RunFinishedPayload',
+  'run.checkpointed': 'RunCheckpointedPayload',
   'verdict.recorded': 'VerdictRecordedPayload',
   'project.created': 'ProjectCreatedPayload',
   'project.branched': 'ProjectBranchedPayload',
   'project.slot_bound': 'SlotBoundPayload',
   'stage.entered': 'StageEnteredPayload',
+  'pipeline.started': 'PipelineStartedPayload',
+  'pipeline.node': 'PipelineNodePayload',
+  'pipeline.finished': 'PipelineFinishedPayload',
+  'pipeline.resumed': 'PipelineResumedPayload',
   'approval.recorded': 'ApprovalRecordedPayload',
   'approval.condition_closed': 'ConditionClosedPayload',
   'approval.invalidated': 'ApprovalInvalidatedPayload',
@@ -141,6 +151,12 @@ export interface KernelMethods {
   'projects.branch': { params: T.ProjectsBranchParams; result: T.OkResult }
   'stages.enter': { params: T.StagesEnterParams; result: T.OkResult }
   'migration.apply': { params: T.MigrationApplyParams; result: T.MigrationApplyResult }
+  'pipelines.plan': { params: T.PipelinesStartParams; result: T.PipelinePlan }
+  'pipelines.start': { params: T.PipelinesStartParams; result: T.PipelineRecord }
+  'pipelines.get': { params: T.PipelineRefParams; result: T.PipelineRecord }
+  'pipelines.list': { params: T.PipelinesListParams; result: T.PipelinesListResult }
+  'pipelines.cancel': { params: T.PipelineRefParams; result: T.PipelineRecord }
+  'pipelines.resume': { params: T.PipelineRefParams; result: T.PipelineRecord }
   'incidents.list': { params: T.IncidentsListParams; result: T.IncidentsListResult }
   'incidents.close': { params: T.IncidentsCloseParams; result: T.IncidentRecord }
   'declass.setRule': { params: T.DeclassRule; result: T.OkResult }
@@ -196,6 +212,12 @@ export const KERNEL_METHOD_DEFS: { readonly [M in KernelMethod]: { params: strin
   'projects.branch': { params: 'ProjectsBranchParams', result: 'OkResult' },
   'stages.enter': { params: 'StagesEnterParams', result: 'OkResult' },
   'migration.apply': { params: 'MigrationApplyParams', result: 'MigrationApplyResult' },
+  'pipelines.plan': { params: 'PipelinesStartParams', result: 'PipelinePlan' },
+  'pipelines.start': { params: 'PipelinesStartParams', result: 'PipelineRecord' },
+  'pipelines.get': { params: 'PipelineRefParams', result: 'PipelineRecord' },
+  'pipelines.list': { params: 'PipelinesListParams', result: 'PipelinesListResult' },
+  'pipelines.cancel': { params: 'PipelineRefParams', result: 'PipelineRecord' },
+  'pipelines.resume': { params: 'PipelineRefParams', result: 'PipelineRecord' },
   'incidents.list': { params: 'IncidentsListParams', result: 'IncidentsListResult' },
   'incidents.close': { params: 'IncidentsCloseParams', result: 'IncidentRecord' },
   'declass.setRule': { params: 'DeclassRule', result: 'OkResult' },

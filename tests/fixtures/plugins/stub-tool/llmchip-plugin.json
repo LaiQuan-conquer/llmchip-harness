@@ -108,6 +108,138 @@
     },
     {
       "name": "escape"
+    },
+    {
+      "name": "steps",
+      "inputs": [
+        {
+          "name": "design",
+          "types": [
+            "test.design"
+          ],
+          "required": false
+        },
+        {
+          "name": "resume",
+          "types": [
+            "run.checkpoint"
+          ],
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "test.report",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 5
+          },
+          "stepMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 100
+          },
+          "crashAt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "badCheckpoint": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "heavy",
+      "outputs": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 300
+          }
+        }
+      },
+      "resources": {
+        "cpu": 1,
+        "memGb": 3
+      }
+    },
+    {
+      "name": "gpu",
+      "outputs": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 300
+          }
+        }
+      },
+      "resources": {
+        "cpu": 1,
+        "memGb": 1,
+        "gpu": 1
+      }
+    },
+    {
+      "name": "huge",
+      "outputs": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 300
+          }
+        }
+      },
+      "resources": {
+        "cpu": 1,
+        "memGb": 1000
+      }
+    },
+    {
+      "name": "flaky",
+      "inputs": [
+        {
+          "name": "design",
+          "types": [
+            "test.design"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "test.report",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     }
   ]
 }

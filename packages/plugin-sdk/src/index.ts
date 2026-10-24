@@ -28,6 +28,17 @@ export interface InvokeContext {
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void
   /** The input with the given name; throws if it is missing. */
   input(name: string): ProtocolInput
+  /**
+   * The checkpoint to continue from, when the kernel restarts this work (input `resume`; passed
+   * only to handlers that declare an optional input `resume` of type `run.checkpoint`).
+   */
+  resume: ProtocolInput | undefined
+  /**
+   * Reports a checkpoint file, relative to `workDir`. The kernel stores it as an artifact at
+   * once, so that a retry or a pipeline restart gets it back as the input `resume`. Write the
+   * file completely before calling this.
+   */
+  checkpoint(path: string, name?: string): void
 }
 
 export type Handler = (ctx: InvokeContext) => ProtocolInvokeResult | Promise<ProtocolInvokeResult>
@@ -113,6 +124,8 @@ async function invoke(
         if (!input) throw new Error(`missing input ${name}`)
         return input
       },
+      resume: params.inputs.find((i) => i.name === 'resume'),
+      checkpoint: (path, name = 'checkpoint') => send({ jsonrpc: '2.0', method: 'checkpoint', params: { run: params.run, name, path } }),
     })
   } finally {
     cancels.delete(params.run)

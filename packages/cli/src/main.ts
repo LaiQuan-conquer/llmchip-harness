@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { KernelCallError, KernelClient } from '@llmchip/client'
-import type { Label, RunRecord } from '@llmchip/kernel-api'
+import type { Label, PipelineRecord, RunRecord } from '@llmchip/kernel-api'
 import { serveMcp } from './mcp.ts'
 
 export interface Io {
@@ -50,6 +50,10 @@ Commands:
   project branch ID NAME [--from B] [--at SEQ]
   stage enter ID STAGE [--branch B]
   verdict evaluate CHECK RUN [--project ID]
+  pipeline plan|start ID STAGE|all --kind develop|test [--branch B] [--wait]
+                                       A stage's development pipeline, or all its required tests
+  pipeline list [--project ID]
+  pipeline show|cancel|resume PIPELINE [--wait]
   task create --project P --goal ID --title T --provider ID [--role R] [--scope GLOB]...
   task run TASK [--steps N]
   task list
@@ -359,6 +363,40 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
         await client.call('stages.enter', { project: arg, stage: arg2, ...compact({ branch: values.branch }) })
         io.out(`entered stage ${arg2}\n`)
         return 0
+      case 'pipeline plan':
+      case 'pipeline start': {
+        if (!arg || !arg2) return usage(io, `pipeline ${action} needs ID and STAGE (or all)`)
+        if (values.kind !== 'develop' && values.kind !== 'test') return usage(io, '--kind must be develop or test')
+        const params = { project: arg, stage: arg2, kind: values.kind, ...compact({ branch: values.branch }) } as const
+        if (action === 'plan') {
+          const plan = await client.call('pipelines.plan', params)
+          print(plan, () => `${plan.stages.join(', ') || '(no stage declares it)'}: ${plan.nodes} nodes, ${plan.ready ? 'ready' : 'not ready'}\n${plan.missing.map((m) => `  ${m.node} needs ${m.ref}\n`).join('')}`)
+          return plan.ready ? 0 : 1
+        }
+        let pipeline = await client.call('pipelines.start', params)
+        if (values.wait) pipeline = await waitPipeline(client, pipeline.id)
+        print(pipeline, () => pipelineLines(pipeline))
+        return pipeline.state === 'failed' || pipeline.state === 'cancelled' ? 1 : 0
+      }
+      case 'pipeline list': {
+        const { pipelines } = await client.call('pipelines.list', compact({ project: values.project }))
+        print(pipelines, () => pipelines.map((p) => `${p.id}  ${p.project}  ${p.kind.padEnd(7)}  ${p.stages.join(',').padEnd(12)}  ${p.state}\n`).join(''))
+        return 0
+      }
+      case 'pipeline show':
+      case 'pipeline cancel':
+      case 'pipeline resume': {
+        if (!arg) return usage(io, `pipeline ${action} needs PIPELINE`)
+        let pipeline =
+          action === 'show'
+            ? await client.call('pipelines.get', { pipeline: arg })
+            : action === 'cancel'
+              ? await client.call('pipelines.cancel', { pipeline: arg })
+              : await client.call('pipelines.resume', { pipeline: arg })
+        if (values.wait && action !== 'cancel') pipeline = await waitPipeline(client, pipeline.id)
+        print(pipeline, () => pipelineLines(pipeline))
+        return pipeline.state === 'failed' || pipeline.state === 'cancelled' ? 1 : 0
+      }
       case 'verdict evaluate': {
         if (!arg || !arg2) return usage(io, 'verdict evaluate needs CHECK and RUN')
         const verdict = await client.call('verdicts.evaluate', { check: arg, run: arg2, project: values.project ?? '' })
@@ -446,6 +484,29 @@ async function waitRun(client: KernelClient, run: string): Promise<RunRecord> {
     const record = await client.call('runs.wait', { run, timeoutMs: 600_000 })
     if (record.state === 'finished') return record
   }
+}
+
+async function waitPipeline(client: KernelClient, id: string): Promise<PipelineRecord> {
+  for (;;) {
+    const pipeline = await client.call('pipelines.get', { pipeline: id })
+    if (pipeline.state !== 'running') return pipeline
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+}
+
+function pipelineLines(p: PipelineRecord): string {
+  const s = p.summary
+  const head = `${p.id}  ${p.kind} ${p.stages.join(', ')}  ${p.state}  (${s.done}/${s.nodes} done, ${s.failed} failed, ${s.skipped} skipped${p.kind === 'test' ? `; tests ${s.pass} pass, ${s.fail} fail, ${s.indeterminate} indeterminate` : ''})\n`
+  return (
+    head +
+    p.nodes
+      .map((n) => {
+        const verdicts = n.verdicts.map((v) => `${v.check}: ${v.verdict}`).join(', ')
+        const run = n.reused ? `reused ${n.reused}` : (n.runs.at(-1) ?? '')
+        return `  ${n.id.padEnd(28)} ${n.state.padEnd(9)} ${run}${verdicts ? `  ${verdicts}` : ''}${n.reason ? `  ${n.reason.code}` : ''}\n`
+      })
+      .join('')
+  )
 }
 
 function runLine(run: RunRecord): string {

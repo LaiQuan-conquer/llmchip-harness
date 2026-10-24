@@ -1,0 +1,19 @@
+{
+  "model": {
+    "params": 5248,
+    "dim": 16,
+    "layers": 2,
+    "heads": 2,
+    "kvHeads": 1,
+    "vocab": 35,
+    "hiddenDim": 32,
+    "title": "proxy"
+  },
+  "weightBits": 2,
+  "activationLocation": "offchip",
+  "contextLength": 64,
+  "weightStorage": "gf180mcu.stdcell-rom",
+  "parallelMacs": 2,
+  "clockMHz": 8,
+  "targetAreaMm2": 2.4
+}

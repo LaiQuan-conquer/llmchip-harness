@@ -193,6 +193,7 @@ The full recipe, with a worked example and the tests to copy, is in implementati
 4. Test the plugin directly (pytest or Vitest) and end to end through the kernel (`tests/`).
 5. Inputs reach a handler as files without a suffix (`in/<n>-<name>`): recognize formats by content, not by file name, and give the direct tests suffixless inputs too.
 6. A `process` plugin that starts processes in sessions of their own or containers must end them on SIGTERM, within the cancel grace period (`scheduler.cancelGraceMs`, 2 s by default); the kernel kills only the plugin's process group. Prove it with a cancellation test, as `tests/vchip.spec.ts` does.
+7. Declare `resources` for a handler that needs more than one core and 1 GiB, or a GPU, so the scheduler does not overload the machine. A handler that runs for long reports checkpoints (`ctx.checkpoint`) and declares the optional input `resume`, so that an interrupted run continues instead of starting over (implementation guide §5.2b).
 
 ### Generated hardware
 

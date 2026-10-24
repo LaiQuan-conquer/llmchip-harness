@@ -1,5 +1,6 @@
-import { constants, copyFileSync, chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync, statSync } from 'node:fs'
+import { constants, copyFileSync, chmodSync, createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, appendFileSync, rmSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { availableParallelism, totalmem } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js'
@@ -13,6 +14,7 @@ import {
   type ProtocolInitializeResult,
   type ProtocolInvokeParams,
   type ProtocolInvokeResult,
+  type ResourceRequest,
   type RunRecord,
   type RunRef,
   type RunsStartParams,
@@ -39,7 +41,7 @@ const RETRYABLE: ReadonlySet<ExecutionStatus> = new Set(['interrupted', 'crashed
 /** Projection of `run.*` events: the run table, which doubles as the persistent queue. */
 export const runsProjection: Projection = {
   name: 'runs',
-  version: 1,
+  version: 2,
   setup(db) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
@@ -68,12 +70,15 @@ export const runsProjection: Projection = {
       )
       return
     }
-    if (event.kind !== 'run.started' && event.kind !== 'run.finished') return
+    if (event.kind !== 'run.started' && event.kind !== 'run.finished' && event.kind !== 'run.checkpointed') return
     const payload = event.payload as Record<string, any>
     const row = db.prepare('SELECT record FROM runs WHERE id = ?').get(payload.run) as { record: string } | undefined
     if (!row) return
     const run = JSON.parse(row.record) as RunRecord
-    if (event.kind === 'run.started') {
+    if (event.kind === 'run.checkpointed') {
+      run.checkpoint = payload.artifact
+      db.prepare('UPDATE runs SET record = ? WHERE id = ?').run(JSON.stringify(run), run.id)
+    } else if (event.kind === 'run.started') {
       Object.assign(run, { state: 'running', execution: 'running', startedAt: event.ts })
       db.prepare('UPDATE runs SET state = ?, pid = ?, record = ? WHERE id = ?').run('running', payload.pid, JSON.stringify(run), run.id)
     } else {
@@ -84,8 +89,15 @@ export const runsProjection: Projection = {
   },
 }
 
+/** Resources counted against the host's capacity. */
+type Resources = Required<ResourceRequest>
+
 interface Active {
   run: RunRecord
+  /** What the run holds of the capacity while it is active. */
+  resources: Resources
+  /** Checkpoints are stored one after the other, so the last one reported is the latest; the run finishes only after they are. */
+  checkpoints: Promise<void>
   process?: PluginProcess
   /** Why the kernel is stopping the run, if it is. */
   abort?: ExecutionStatus
@@ -97,7 +109,14 @@ interface Active {
  * queue is the `runs` projection, so it survives restarts. Each run gets a
  * fresh workspace (`in/` read-only copies of the inputs, `out/`, `work/`), its
  * own process group, a timeout and cancellation. Outputs are registered as
- * artifacts only after the run succeeded (atomic run commit, §4.3).
+ * artifacts only after the run succeeded (atomic run commit, §4.3); checkpoints
+ * a run reports are stored at once, so that a retry can resume from them.
+ *
+ * Runs start in queue order while they fit the host's capacity (CPU cores,
+ * memory, GPUs; requirements NFR-15): the first queued run that does not fit
+ * waits, and the runs behind it wait too, so none is starved. A run that needs
+ * more than the whole capacity starts only when nothing else runs. Only one run
+ * uses the GPUs at a time (NFR-15), and only that run sees them.
  */
 export class Scheduler {
   private readonly events: EventStore
@@ -112,6 +131,8 @@ export class Scheduler {
   private readonly paramValidators = new Map<string, ValidateFunction>()
   private readonly ajv = new Ajv2020({ strict: false, allErrors: true, useDefaults: true })
   private stopped = false
+  /** The host's capacity, from the configuration or detected. */
+  readonly capacity: Resources
 
   constructor(options: {
     events: EventStore
@@ -130,6 +151,12 @@ export class Scheduler {
     this.logger = options.logger
     this.redact = options.redact
     this.events.registerProjection(runsProjection)
+    const configured = this.config.scheduler.resources ?? {}
+    this.capacity = {
+      cpu: configured.cpu ?? availableParallelism(),
+      memGb: configured.memGb ?? Math.floor(totalmem() / 2 ** 30),
+      gpu: configured.gpu ?? detectGpus(),
+    }
   }
 
   get paused(): boolean {
@@ -156,19 +183,26 @@ export class Scheduler {
     mkdirSync(this.layout.runs, { recursive: true })
   }
 
-  start(params: RunsStartParams, actor: Actor, retryOf?: RunRecord): RunRecord {
-    const { plugin, spec } = this.registry.handler(params.plugin, params.handler)
-    if (plugin.manifest.runtime === 'data') throw new KernelError('PLUGIN_NOT_EXECUTABLE', `plugin ${plugin.manifest.id} has no code`)
-    const runParams = structuredClone(params.params ?? {})
+  /** A handler's params with the defaults of its JSON Schema filled in; throws if they are invalid. */
+  params(pluginId: string, handler: string, params: Record<string, unknown> = {}): Record<string, unknown> {
+    const { plugin, spec } = this.registry.handler(pluginId, handler)
+    const runParams = structuredClone(params)
     if (spec.params) {
       const key = `${plugin.manifest.id}/${plugin.manifest.version}/${spec.name}`
       let validate = this.paramValidators.get(key)
       if (!validate) this.paramValidators.set(key, (validate = this.ajv.compile(spec.params)))
       if (!validate(runParams)) {
         const errors = (validate.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message}`)
-        throw new KernelError('RUN_PARAMS_INVALID', `invalid params for ${params.plugin}/${params.handler}: ${errors.join('; ')}`, { errors })
+        throw new KernelError('RUN_PARAMS_INVALID', `invalid params for ${pluginId}/${handler}: ${errors.join('; ')}`, { errors })
       }
     }
+    return runParams
+  }
+
+  start(params: RunsStartParams, actor: Actor, retryOf?: RunRecord): RunRecord {
+    const { plugin, spec } = this.registry.handler(params.plugin, params.handler)
+    if (plugin.manifest.runtime === 'data') throw new KernelError('PLUGIN_NOT_EXECUTABLE', `plugin ${plugin.manifest.id} has no code`)
+    const runParams = this.params(params.plugin, params.handler, params.params ?? {})
     const inputs = params.inputs ?? []
     const labels: Label[] = []
     for (const input of inputs) {
@@ -205,6 +239,7 @@ export class Scheduler {
       parse: null,
       error: null,
       log: null,
+      checkpoint: null,
       label: maxLabel(labels),
       attempt: retryOf ? retryOf.attempt + 1 : 1,
       maxAttempts: params.maxAttempts ?? retryOf?.maxAttempts ?? 1,
@@ -277,6 +312,50 @@ export class Scheduler {
     return this.get(id)
   }
 
+  /**
+   * Starts a run again with the same handler, params and inputs, and with its latest
+   * checkpoint as the input `resume` when the handler declares one (a pipeline restarting
+   * an interrupted node, or a retry).
+   */
+  restart(run: RunRecord, actor: Actor): RunRecord {
+    const { plugin, handler, params, timeoutMs } = run
+    return this.start({ plugin, handler, params, inputs: this.resumeInputs(run), timeoutMs, ...(run.project ? { project: run.project } : {}) }, actor, run)
+  }
+
+  /** The run's inputs, with `resume` set to its latest checkpoint if the handler takes one. */
+  private resumeInputs(run: RunRecord): RunRef[] {
+    const spec = this.registry.get(run.plugin)?.manifest.handlers?.find((h) => h.name === run.handler)
+    const takesResume = spec?.inputs?.some((i) => i.name === 'resume') ?? false
+    if (!takesResume || !run.checkpoint) return run.inputs
+    return [...run.inputs.filter((i) => i.name !== 'resume'), { name: 'resume', hash: run.checkpoint }]
+  }
+
+  /** What a run of the handler needs (requirements NFR-15). */
+  private request(run: RunRecord): Resources {
+    const plugin = this.registry.get(run.plugin)
+    const declared = plugin?.manifest.handlers?.find((h) => h.name === run.handler)?.resources ?? {}
+    const container = plugin?.manifest.runtime === 'container'
+    const { containerCpus, containerMemory } = this.config.scheduler
+    return {
+      cpu: declared.cpu ?? (container ? containerCpus : 1),
+      memGb: declared.memGb ?? (container ? gibibytes(containerMemory) : 1),
+      gpu: declared.gpu ?? 0,
+    }
+  }
+
+  /** Whether a run needing `need` fits next to the active runs. */
+  private fits(need: Resources): boolean {
+    if (this.active.size === 0) return true // a run larger than the whole capacity runs alone
+    let { cpu, memGb } = this.capacity
+    for (const { resources } of this.active.values()) {
+      // One run uses the GPUs at a time (requirements NFR-15).
+      if (need.gpu > 0 && resources.gpu > 0) return false
+      cpu -= resources.cpu
+      memGb -= resources.memGb
+    }
+    return need.cpu <= cpu && need.memGb <= memGb && need.gpu <= this.capacity.gpu
+  }
+
   /** Emergency stop (FR-AGT-23): no new run is started until `resume`. Running runs continue. */
   setPaused(paused: boolean, reason: string, actor: Actor): boolean {
     if (this.paused !== paused) this.events.append({ kind: 'kernel.paused', payload: { paused, reason }, actor })
@@ -294,18 +373,18 @@ export class Scheduler {
     while (this.active.size > 0) await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
-  /** Starts queued runs while capacity allows. */
+  /** Starts queued runs, in order, while they fit (`maxParallel` and the host's capacity). */
   pump(): void {
     if (this.stopped || this.paused) return
-    const capacity = this.config.scheduler.maxParallel - this.active.size
-    if (capacity <= 0) return
-    const queued = this.events.db
-      .prepare("SELECT record FROM runs WHERE state = 'queued' ORDER BY seq LIMIT ?")
-      .all(capacity + this.active.size) as { record: string }[]
+    if (this.active.size >= this.config.scheduler.maxParallel) return
+    const queued = this.events.db.prepare("SELECT record FROM runs WHERE state = 'queued' ORDER BY seq").all() as { record: string }[]
     for (const { record } of queued) {
       const run = JSON.parse(record) as RunRecord
-      if (this.active.has(run.id) || this.active.size >= this.config.scheduler.maxParallel) continue
-      const active: Active = { run }
+      if (this.active.has(run.id)) continue
+      if (this.active.size >= this.config.scheduler.maxParallel) break
+      const resources = this.request(run)
+      if (!this.fits(resources)) break // strict queue order: the runs behind it wait too
+      const active: Active = { run, resources, checkpoints: Promise.resolve() }
       this.active.set(run.id, active)
       void this.execute(active)
         .catch((error) => this.logger.error('run execution failed', { run: run.id, error: String(error) }))
@@ -361,18 +440,30 @@ export class Scheduler {
     let command = (plugin.manifest.entry?.command ?? []).map((part) =>
       part.replaceAll('${python}', at.python).replaceAll('${node}', at.node).replaceAll('${pluginDir}', at.plugin),
     )
-    if (container) command = this.containerCommand(run, plugin, paths, command)
+    if (container) command = this.containerCommand(run, plugin, paths, command, active.resources)
     const invokeInputs = inputs.map((input) => ({ ...input, path: input.path.replace(paths.in, at.in) }))
 
     const process_ = PluginProcess.spawn({
       command,
       cwd: paths.work,
-      env: { ...childEnv(), LLMCHIP_RUN: run.id, LLMCHIP_RUN_DIR: dir },
+      env: {
+        ...childEnv(),
+        LLMCHIP_RUN: run.id,
+        LLMCHIP_RUN_DIR: dir,
+        // Only a run that asked for GPUs sees them.
+        CUDA_VISIBLE_DEVICES: Array.from({ length: active.resources.gpu }, (_, i) => String(i)).join(','),
+      },
       onLog: (level, message) => log(level, message),
       onNotification: (method, params) => {
-        const p = params as { run?: string; fraction?: number; message?: string; level?: string }
+        const p = params as { run?: string; fraction?: number; message?: string; level?: string; name?: string; path?: string }
         if (method === 'progress' && p.run === run.id) active.progress = { ...(p.fraction === undefined ? {} : { fraction: p.fraction }), ...(p.message ? { message: p.message } : {}) }
         else if (method === 'log') log(p.level ?? 'info', p.message ?? '')
+        else if (method === 'checkpoint' && p.run === run.id) {
+          const [name, path] = [p.name ?? 'checkpoint', p.path ?? '']
+          active.checkpoints = active.checkpoints.then(() =>
+            this.storeCheckpoint(run, name, path, paths.work).catch((error) => log('error', `checkpoint not stored: ${(error as Error).message}`)),
+          )
+        }
       },
     })
     active.process = process_
@@ -418,6 +509,8 @@ export class Scheduler {
     else if (pluginError) execution = 'exited_nonzero'
     else execution = 'crashed'
 
+    // Checkpoints reported before the end are stored whatever the outcome.
+    await active.checkpoints
     let outputs: RunRef[] = []
     let finalError = active.abort ? `${active.abort} by the kernel` : error
     if (execution === 'exited_zero' && result) {
@@ -456,8 +549,8 @@ export class Scheduler {
    * network, CPU and memory limits, inputs and the plugin read-only, only the
    * run workspace writable. The Python SDK is mounted for Python plugins.
    */
-  private containerCommand(run: RunRecord, plugin: RegisteredPlugin, paths: { in: string; out: string; work: string }, command: string[]): string[] {
-    const { containerRuntime, containerCpus, containerMemory } = this.config.scheduler
+  private containerCommand(run: RunRecord, plugin: RegisteredPlugin, paths: { in: string; out: string; work: string }, command: string[], resources: Resources): string[] {
+    const { containerRuntime } = this.config.scheduler
     const uid = process.getuid?.() ?? 0
     const gid = process.getgid?.() ?? 0
     const [entrypoint, ...args] = command
@@ -469,8 +562,8 @@ export class Scheduler {
       `--name=llmchip-run-${run.id.toLowerCase()}`,
       `--label=llmchip.run=${run.id}`,
       '--network=none',
-      `--cpus=${containerCpus}`,
-      `--memory=${containerMemory}`,
+      `--cpus=${resources.cpu}`,
+      `--memory=${Math.round(resources.memGb * 1024)}m`,
       `--user=${uid}:${gid}`,
       ...(uid === 0 ? [] : ['--userns=keep-id']),
       '--security-opt=label=disable',
@@ -497,12 +590,32 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Stores a checkpoint file of a running run as a `run.checkpoint` artifact at once
+   * (IF-2 `checkpoint`), so that a retry or a pipeline restart can resume from it even if
+   * the run itself does not finish.
+   */
+  private async storeCheckpoint(run: RunRecord, name: string, path: string, workDir: string): Promise<void> {
+    if (!insideFile(workDir, path)) throw new KernelError('RUN_CHECKPOINT_INVALID', `checkpoint ${name} (${path}) is not a file in the run's work directory`)
+    const file = resolve(workDir, path)
+    const meta = await this.artifacts.put(createReadStream(file), {
+      type: 'run.checkpoint',
+      mediaType: 'application/octet-stream',
+      label: run.label,
+      inputs: [...new Set(run.inputs.map((i) => i.hash))],
+      run: run.id,
+      creator: { kind: 'plugin', id: run.plugin },
+      project: run.project,
+    })
+    this.events.append({ kind: 'run.checkpointed', payload: { run: run.id, name, artifact: meta.hash }, actor: KERNEL_ACTOR, project: run.project, label: run.label })
+  }
+
   private async registerOutputs(run: RunRecord, plugin: RegisteredPlugin, result: ProtocolInvokeResult, outDir: string): Promise<RunRef[]> {
     const spec = plugin.manifest.handlers?.find((h) => h.name === run.handler)
     const refs: RunRef[] = []
     for (const output of result.outputs) {
       const path = resolve(outDir, output.path)
-      if (relative(outDir, path).startsWith('..') || !existsSync(path) || !statSync(path).isFile()) {
+      if (!insideFile(outDir, output.path)) {
         throw new KernelError('RUN_OUTPUT_INVALID', `output ${output.name} (${output.path}) is not a file in the run's out directory`)
       }
       const declared = spec?.outputs?.find((o) => o.name === output.name)
@@ -548,9 +661,9 @@ export class Scheduler {
         label: run.label,
       })
       if (RETRYABLE.has(result.execution) && run.attempt < run.maxAttempts) {
-        const { plugin, handler, params, inputs, timeoutMs } = run
         try {
-          this.start({ plugin, handler, params, inputs, timeoutMs, ...(run.project ? { project: run.project } : {}) }, KERNEL_ACTOR, run)
+          // The retry resumes from the run's latest checkpoint when the handler takes one.
+          this.restart(this.get(run.id), KERNEL_ACTOR)
         } catch (error) {
           this.logger.error('cannot retry run', { run: run.id, error: String(error) })
         }
@@ -560,6 +673,37 @@ export class Scheduler {
     for (const waiter of this.waiters.get(run.id) ?? []) waiter(finished)
     this.waiters.delete(run.id)
   }
+}
+
+/** GPUs reported by `nvidia-smi -L`; 0 without the tool or a GPU. */
+function detectGpus(): number {
+  try {
+    return execFileSync('nvidia-smi', ['-L'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n')
+      .filter((line) => line.startsWith('GPU ')).length
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Whether `path` names a regular file inside `dir`: not outside it, and not through a symbolic
+ * link (a plugin, possibly in a container, must not make the kernel read a host file).
+ */
+function insideFile(dir: string, path: string): boolean {
+  const file = resolve(dir, path)
+  if (relative(dir, file).startsWith('..') || !existsSync(file)) return false
+  if (lstatSync(file).isSymbolicLink() || !statSync(file).isFile()) return false
+  const real = realpathSync(file)
+  return !relative(realpathSync(dir), real).startsWith('..')
+}
+
+/** A container engine memory size (`8g`, `512m`, `1024k`, bytes) in GiB. */
+function gibibytes(size: string): number {
+  const match = /^(\d+(?:\.\d+)?)([kmgt]?)b?$/i.exec(size.trim())
+  if (!match) return 1
+  const unit = { '': 1 / 2 ** 30, k: 1 / 2 ** 20, m: 1 / 2 ** 10, g: 1, t: 2 ** 10 }[match[2]!.toLowerCase() as '' | 'k' | 'm' | 'g' | 't']
+  return Number(match[1]) * unit
 }
 
 /** Environment passed to plugin processes: no secrets, only what a process needs to run. */

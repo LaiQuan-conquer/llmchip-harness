@@ -449,6 +449,17 @@ export const kernelSchema = {
         "maxAttempts": {
           "type": "integer",
           "minimum": 1
+        },
+        "checkpoint": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Latest checkpoint the run reported (IF-2 `checkpoint`), stored as an artifact at once; a retry or a pipeline restart passes it as the input `resume` when the handler declares one."
         }
       },
       "required": [
@@ -672,6 +683,11 @@ export const kernelSchema = {
               "type": "string",
               "default": "8g",
               "description": "Memory limit passed to the container engine."
+            },
+            "resources": {
+              "$ref": "#/$defs/ResourceRequest",
+              "default": {},
+              "description": "Capacity runs are scheduled against. Missing values are detected: CPU cores, total memory, GPUs reported by `nvidia-smi -L`."
             }
           }
         },
@@ -1403,6 +1419,10 @@ export const kernelSchema = {
         "timeoutMs": {
           "type": "integer",
           "minimum": 1
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequest",
+          "description": "What one run of this handler needs. Defaults: 1 CPU and 1 GiB for process plugins, the scheduler's container limits for container plugins, no GPU."
         }
       },
       "required": [
@@ -2024,6 +2044,34 @@ export const kernelSchema = {
               "description": "Checks that must pass on the artifact bound to a slot before the stage can be entered (e.g. integration views, FR-PHY-08)."
             }
           }
+        },
+        "develop": {
+          "title": "StageDevelop",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaults": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PipelineInputRef"
+              },
+              "description": "Slot -> artifact, bound at the start of the stage when the slot is empty."
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PipelineNodeSpec"
+              }
+            }
+          },
+          "description": "The stage's development pipeline (requirements FR-PRJ-07)."
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineTestSpec"
+          },
+          "description": "Every test the stage requires (requirements FR-PRJ-07)."
         }
       },
       "required": [
@@ -4348,6 +4396,599 @@ export const kernelSchema = {
         "archive"
       ],
       "description": "History only (owner decision 2026-10-24 removed approval gates, waivers and export): kept so that event logs written before can still be read and verified; the kernel never writes this kind any more."
+    },
+    "ResourceRequest": {
+      "title": "ResourceRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "CPU cores."
+        },
+        "memGb": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Memory in GiB."
+        },
+        "gpu": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "GPUs; a run with 0 sees none (CUDA_VISIBLE_DEVICES is empty)."
+        }
+      },
+      "description": "Resources a handler needs per run, or the capacity of the host (requirements NFR-15)."
+    },
+    "ProtocolCheckpointParams": {
+      "title": "ProtocolCheckpointParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "File relative to the run's work directory."
+        }
+      },
+      "required": [
+        "run",
+        "name",
+        "path"
+      ],
+      "description": "IF-2 `checkpoint` notification: the kernel stores the file as a `run.checkpoint` artifact before the run ends."
+    },
+    "RunCheckpointedPayload": {
+      "title": "RunCheckpointedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "artifact": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "run",
+        "name",
+        "artifact"
+      ]
+    },
+    "PipelineInputRef": {
+      "type": "string",
+      "pattern": "^(slot:[^\\s]+|data:[^\\s]+|node:[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$",
+      "description": "`slot:<slot>` (bound artifact), `data:<id>` (plugin data file), or `node:<node>.<output>` (output of an earlier node of the same stage).",
+      "title": "PipelineInputRef"
+    },
+    "PipelineNodeSpec": {
+      "title": "PipelineNodeSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PipelineInputRef"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/PipelineInputRef"
+                },
+                "minItems": 1
+              }
+            ]
+          }
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "beforeEntry": {
+          "type": "boolean",
+          "description": "Runs before the stage is entered (its admission checks judge it)."
+        },
+        "bind": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Output name -> project slot, bound when the run succeeds."
+        },
+        "judge": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Checks evaluated on the run; the node fails unless every verdict passes."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "handler"
+      ]
+    },
+    "PipelineTestSpec": {
+      "title": "PipelineTestSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PipelineInputRef"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/PipelineInputRef"
+                },
+                "minItems": 1
+              }
+            ]
+          }
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "check"
+      ],
+      "description": "A required test of a stage: the check, and the inputs of the run it judges (a finished run of the same handler with the same inputs and params is reused)."
+    },
+    "PipelineKind": {
+      "title": "PipelineKind",
+      "type": "string",
+      "enum": [
+        "develop",
+        "test"
+      ]
+    },
+    "PipelineState": {
+      "title": "PipelineState",
+      "type": "string",
+      "enum": [
+        "running",
+        "passed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "PipelineNode": {
+      "title": "PipelineNode",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`<stage>/<node>`, `<stage>/defaults`, `<stage>/enter` or `<stage>/<check>`."
+        },
+        "stage": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "defaults",
+            "enter",
+            "run",
+            "test"
+          ]
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "done",
+            "failed",
+            "skipped",
+            "cancelled"
+          ]
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Runs started for the node, oldest first (a restart after an interruption adds one)."
+        },
+        "reused": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A finished run a test node judged instead of starting one."
+        },
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "title": "PipelineVerdict",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "verdict": {
+                "$ref": "#/$defs/CheckVerdict"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "check",
+              "verdict",
+              "id"
+            ]
+          }
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "stage",
+        "kind",
+        "after",
+        "state",
+        "runs",
+        "reused",
+        "verdicts",
+        "reason"
+      ]
+    },
+    "PipelineSummary": {
+      "title": "PipelineSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cancelled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "indeterminate": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "nodes",
+        "done",
+        "failed",
+        "skipped",
+        "cancelled",
+        "pass",
+        "fail",
+        "indeterminate"
+      ]
+    },
+    "PipelineRecord": {
+      "title": "PipelineRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PipelineKind"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "state": {
+          "$ref": "#/$defs/PipelineState"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineNode"
+          }
+        },
+        "by": {
+          "$ref": "#/$defs/Actor"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/PipelineSummary"
+        }
+      },
+      "required": [
+        "id",
+        "project",
+        "branch",
+        "kind",
+        "stages",
+        "state",
+        "nodes",
+        "by",
+        "startedAt",
+        "endedAt",
+        "summary"
+      ],
+      "description": "A run of a stage's development pipeline or of its required tests (K3, requirements FR-PRJ-07/08)."
+    },
+    "PipelineStartedPayload": {
+      "title": "PipelineStartedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineRecord"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "PipelineNodePayload": {
+      "title": "PipelineNodePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/$defs/PipelineNode"
+        }
+      },
+      "required": [
+        "pipeline",
+        "node"
+      ]
+    },
+    "PipelineFinishedPayload": {
+      "title": "PipelineFinishedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/PipelineState"
+        }
+      },
+      "required": [
+        "pipeline",
+        "state"
+      ]
+    },
+    "PipelineResumedPayload": {
+      "title": "PipelineResumedPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "PipelinesStartParams": {
+      "title": "PipelinesStartParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "default": "main"
+        },
+        "stage": {
+          "type": "string",
+          "description": "A stage id, or `all` for every stage in order."
+        },
+        "kind": {
+          "$ref": "#/$defs/PipelineKind"
+        }
+      },
+      "required": [
+        "project",
+        "stage",
+        "kind"
+      ]
+    },
+    "PipelinePlan": {
+      "title": "PipelinePlan",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "title": "PipelineMissing",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node",
+              "ref"
+            ]
+          },
+          "description": "Inputs that no stage of this run provides and that are not available now (unbound slots, unknown data)."
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stages",
+        "nodes",
+        "missing",
+        "ready"
+      ]
+    },
+    "PipelineRefParams": {
+      "title": "PipelineRefParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "PipelinesListParams": {
+      "title": "PipelinesListParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50
+        }
+      }
+    },
+    "PipelinesListResult": {
+      "title": "PipelinesListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pipelines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineRecord"
+          }
+        }
+      },
+      "required": [
+        "pipelines"
+      ]
     }
   }
 } as const

@@ -328,7 +328,7 @@ export class Workflow {
         project: projectId,
         refs: { artifacts: [hash] },
       })
-      throw new KernelError('HARD_CONSTRAINT_REQUIRES_HUMAN', `slot ${slot} holds a hard constraint; only a human may bind it`, { slot })
+      throw new KernelError('HARD_CONSTRAINT_REQUIRES_HUMAN', `slot ${slot} holds a hard constraint; only a human may bind it`, { slot, by: actor.id })
     }
     if (previous === hash) return
     this.events.append({ kind: 'project.slot_bound', payload: { project: projectId, branch, slot, hash, previous }, actor, project: projectId, label: meta.label })
@@ -412,6 +412,16 @@ export class Workflow {
     const pack = JSON.parse(readFileSync(this.artifacts.objectPath(hash), 'utf8'))
     assertValid<FlowPack>('FlowPack', history ? withoutHistory(pack) : pack, 'FLOW_INVALID')
     return pack
+  }
+
+  /** Whether a slot of the project holds a hard constraint (only a human binds it). */
+  hardConstraintSlot(projectId: string, slot: string): boolean {
+    return (this.flow(projectId).hardConstraintSlots ?? []).includes(slot)
+  }
+
+  /** The flow pack a project was created with (its history-only fields dropped). */
+  flow(projectId: string): FlowPack {
+    return this.projectFlow(this.requireProject(projectId))
   }
 
   /** The flow pack a project was created with. */

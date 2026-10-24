@@ -4,15 +4,120 @@
   "stages": [
     {
       "id": "A",
-      "title": "Design"
+      "title": "Design",
+      "develop": {
+        "nodes": [
+          {
+            "id": "drc",
+            "plugin": "stub-tool",
+            "handler": "report",
+            "inputs": {
+              "design": "slot:design"
+            },
+            "bind": {
+              "report": "drc-report"
+            },
+            "judge": [
+              "stub.drc"
+            ]
+          },
+          {
+            "id": "flaky",
+            "plugin": "stub-tool",
+            "handler": "flaky",
+            "inputs": {
+              "design": "slot:design"
+            },
+            "after": [
+              "drc"
+            ],
+            "bind": {
+              "report": "flaky-report"
+            }
+          },
+          {
+            "id": "wrapup",
+            "plugin": "stub-tool",
+            "handler": "sleep",
+            "params": {
+              "ms": 10
+            },
+            "after": [
+              "flaky"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "stub.drc",
+          "inputs": {
+            "design": "slot:design"
+          }
+        },
+        {
+          "check": "stub.limit",
+          "inputs": {
+            "design": "slot:design"
+          },
+          "params": {
+            "limit": 5
+          }
+        }
+      ]
     },
     {
       "id": "B",
-      "title": "Signoff"
+      "title": "Signoff",
+      "develop": {
+        "defaults": {
+          "spec": "data:test-spec"
+        },
+        "nodes": [
+          {
+            "id": "steps",
+            "plugin": "stub-tool",
+            "handler": "steps",
+            "params": {
+              "steps": 6,
+              "stepMs": 400
+            },
+            "inputs": {
+              "design": "slot:design"
+            },
+            "bind": {
+              "report": "steps-report"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "C",
-      "title": "Package"
+      "title": "Package",
+      "tests": [
+        {
+          "check": "stub.drc",
+          "inputs": {
+            "design": "slot:package"
+          }
+        }
+      ],
+      "develop": {
+        "nodes": [
+          {
+            "id": "registry",
+            "plugin": "stub-tool",
+            "handler": "report",
+            "inputs": {
+              "design": "slot:design"
+            },
+            "bind": {
+              "report": "registry"
+            }
+          }
+        ]
+      }
     }
   ],
   "checks": [

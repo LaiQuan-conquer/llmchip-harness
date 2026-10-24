@@ -16,6 +16,7 @@ import { Incidents } from './security/incidents.ts'
 import { Policy } from './security/policy.ts'
 import { Scheduler } from './runs/scheduler.ts'
 import { Workflow } from './workflow/engine.ts'
+import { Pipelines } from './workflow/pipelines.ts'
 import { KernelServer, type MethodHandlers } from './server.ts'
 import { KernelError } from './util/errors.ts'
 import { createLogger, type Logger } from './util/logger.ts'
@@ -79,6 +80,7 @@ export class Kernel {
   readonly registry: PluginRegistry
   readonly scheduler: Scheduler
   readonly workflow: Workflow
+  readonly pipelines: Pipelines
   readonly incidents: Incidents
   readonly gateway: EgressGateway
   readonly policy: Policy
@@ -142,6 +144,13 @@ export class Kernel {
         scheduler: this.scheduler,
         incidents: this.incidents,
       })
+      this.pipelines = new Pipelines({
+        events: this.events,
+        registry: this.registry,
+        scheduler: this.scheduler,
+        workflow: this.workflow,
+        logger: this.logger,
+      })
       this.agents = new AgentRuntime({
         events: this.events,
         artifacts: this.artifacts,
@@ -175,6 +184,7 @@ export class Kernel {
         kernel.logger.warn('plugin problem', { problem })
       }
       kernel.scheduler.recover()
+      kernel.pipelines.recover()
       for (const plugin of options.plugins ?? []) await kernel.plugins.load(plugin)
       const token = randomBytes(32).toString('base64url')
       const externalToken = randomBytes(32).toString('base64url')
@@ -222,6 +232,7 @@ export class Kernel {
     try {
       rmSync(join(this.layout.run, 'harnessd.json'), { force: true })
       await this.server?.close()
+      this.pipelines.stop()
       await this.scheduler.stop()
       await this.plugins.dispose()
       this.events.append({ kind: 'kernel.stopped', payload: { reason }, actor: KERNEL_ACTOR })
@@ -289,6 +300,12 @@ export class Kernel {
       },
       'migration.apply': ({ project, branch, report, comment }, session) =>
         this.workflow.applyMigration(project, branch ?? 'main', report, comment ?? '', session.actor),
+      'pipelines.plan': (params) => this.pipelines.plan(params),
+      'pipelines.start': (params, session) => this.pipelines.start(params, session.actor),
+      'pipelines.get': ({ pipeline }) => this.pipelines.get(pipeline),
+      'pipelines.list': (params) => ({ pipelines: this.pipelines.list(params) }),
+      'pipelines.cancel': ({ pipeline }, session) => this.pipelines.cancel(pipeline, session.actor),
+      'pipelines.resume': ({ pipeline }, session) => this.pipelines.resume(pipeline, session.actor),
       'incidents.list': (params) => ({ incidents: this.incidents.list(params) }),
       'incidents.close': ({ incident, cause, action }, session) => this.incidents.close(incident, cause, action, session.actor),
       'declass.setRule': (rule, session) => {

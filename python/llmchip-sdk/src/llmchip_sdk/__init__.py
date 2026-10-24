@@ -82,6 +82,26 @@ class InvokeContext:
                 return item
         raise KeyError(f"missing input {name}")
 
+    @property
+    def resume(self) -> Input | None:
+        """The checkpoint to continue from, when the kernel restarts this work (input ``resume``).
+
+        The kernel passes it only to handlers that declare an optional input ``resume`` of type
+        ``run.checkpoint``.
+        """
+        return next((item for item in self.inputs if item.name == "resume"), None)
+
+    def checkpoint(self, path: str, name: str = "checkpoint") -> None:
+        """Reports a checkpoint file, relative to ``work_dir``.
+
+        The kernel stores it as an artifact at once, so that a retry, or a pipeline restarting
+        this work after an interruption, gets it back as the input ``resume``. Write the file
+        completely (for example to a temporary name, then rename) before calling this.
+        """
+        self._plugin._send(
+            {"jsonrpc": "2.0", "method": "checkpoint", "params": {"run": self.run, "name": name, "path": path}}
+        )
+
     def progress(self, fraction: float | None = None, message: str | None = None) -> None:
         params: dict[str, Any] = {"run": self.run}
         if fraction is not None:

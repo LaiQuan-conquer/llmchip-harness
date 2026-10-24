@@ -51,6 +51,12 @@ export type PluginKind =
   | 'llm-provider'
   | 'ui-panel'
   | 'test'
+/**
+ * `slot:<slot>` (bound artifact), `data:<id>` (plugin data file), or `node:<node>.<output>` (output of an earlier node of the same stage).
+ */
+export type PipelineInputRef = string
+export type PipelineKind = 'develop' | 'test'
+export type PipelineState = 'running' | 'passed' | 'failed' | 'cancelled'
 
 /**
  * Who performed an action. `external` is a client connected through MCP or the API that the workbench does not control (requirements §6.1).
@@ -164,6 +170,10 @@ export interface RunRecord {
   startedAt: string | null
   endedAt: string | null
   maxAttempts: number
+  /**
+   * Latest checkpoint the run reported (IF-2 `checkpoint`), stored as an artifact at once; a retry or a pipeline restart passes it as the input `resume` when the handler declares one.
+   */
+  checkpoint?: Hash | null
 }
 /**
  * A named artifact consumed or produced by a run.
@@ -271,10 +281,28 @@ export interface WorkspaceConfig {
      * Memory limit passed to the container engine.
      */
     containerMemory?: string
+    resources?: ResourceRequest
   }
   llm?: {
     providers?: LlmProviderConfig[]
   }
+}
+/**
+ * Capacity runs are scheduled against. Missing values are detected: CPU cores, total memory, GPUs reported by `nvidia-smi -L`.
+ */
+export interface ResourceRequest {
+  /**
+   * CPU cores.
+   */
+  cpu?: number
+  /**
+   * Memory in GiB.
+   */
+  memGb?: number
+  /**
+   * GPUs; a run with 0 sees none (CUDA_VISIBLE_DEVICES is empty).
+   */
+  gpu?: number
 }
 export interface LlmProviderConfig {
   id: string
@@ -459,6 +487,7 @@ export interface HandlerSpec {
     [k: string]: unknown | undefined
   }
   timeoutMs?: number
+  resources?: ResourceRequest1
 }
 export interface HandlerInputSpec {
   name: string
@@ -470,6 +499,23 @@ export interface HandlerOutputSpec {
   name: string
   type: string
   mediaType?: string
+}
+/**
+ * What one run of this handler needs. Defaults: 1 CPU and 1 GiB for process plugins, the scheduler's container limits for container plugins, no GPU.
+ */
+export interface ResourceRequest1 {
+  /**
+   * CPU cores.
+   */
+  cpu?: number
+  /**
+   * Memory in GiB.
+   */
+  memGb?: number
+  /**
+   * GPUs; a run with 0 sees none (CUDA_VISIBLE_DEVICES is empty).
+   */
+  gpu?: number
 }
 /**
  * Contents of `llmchip-plugin.json` (architecture §4.9).
@@ -665,6 +711,11 @@ export interface FlowStage {
   id: string
   title: string
   entry?: StageEntry
+  develop?: StageDevelop
+  /**
+   * Every test the stage requires (requirements FR-PRJ-07).
+   */
+  tests?: PipelineTestSpec[]
 }
 export interface StageEntry {
   /**
@@ -674,6 +725,58 @@ export interface StageEntry {
     check: string
     slot: string
   }[]
+}
+/**
+ * The stage's development pipeline (requirements FR-PRJ-07).
+ */
+export interface StageDevelop {
+  /**
+   * Slot -> artifact, bound at the start of the stage when the slot is empty.
+   */
+  defaults?: {
+    [k: string]: PipelineInputRef | undefined
+  }
+  nodes?: PipelineNodeSpec[]
+}
+export interface PipelineNodeSpec {
+  id: string
+  plugin: string
+  handler: string
+  params?: {
+    [k: string]: unknown | undefined
+  }
+  inputs?: {
+    [k: string]: PipelineInputRef | [PipelineInputRef, ...PipelineInputRef[]] | undefined
+  }
+  after?: string[]
+  /**
+   * Runs before the stage is entered (its admission checks judge it).
+   */
+  beforeEntry?: boolean
+  /**
+   * Output name -> project slot, bound when the run succeeds.
+   */
+  bind?: {
+    [k: string]: string | undefined
+  }
+  /**
+   * Checks evaluated on the run; the node fails unless every verdict passes.
+   */
+  judge?: string[]
+  timeoutMs?: number
+}
+/**
+ * A required test of a stage: the check, and the inputs of the run it judges (a finished run of the same handler with the same inputs and params is reused).
+ */
+export interface PipelineTestSpec {
+  check: string
+  inputs?: {
+    [k: string]: PipelineInputRef | [PipelineInputRef, ...PipelineInputRef[]] | undefined
+  }
+  params?: {
+    [k: string]: unknown | undefined
+  }
+  timeoutMs?: number
 }
 /**
  * Stages and check definitions of a workflow (architecture §4.3). There are no approval gates (owner decision 2026-10-24).
@@ -1245,4 +1348,134 @@ export interface PackageExportedPayload {
   approval: string
   package: Hash
   archive: Hash
+}
+/**
+ * Resources a handler needs per run, or the capacity of the host (requirements NFR-15).
+ */
+export interface ResourceRequest2 {
+  /**
+   * CPU cores.
+   */
+  cpu?: number
+  /**
+   * Memory in GiB.
+   */
+  memGb?: number
+  /**
+   * GPUs; a run with 0 sees none (CUDA_VISIBLE_DEVICES is empty).
+   */
+  gpu?: number
+}
+/**
+ * IF-2 `checkpoint` notification: the kernel stores the file as a `run.checkpoint` artifact before the run ends.
+ */
+export interface ProtocolCheckpointParams {
+  run: string
+  name: string
+  /**
+   * File relative to the run's work directory.
+   */
+  path: string
+}
+export interface RunCheckpointedPayload {
+  run: string
+  name: string
+  artifact: Hash
+}
+export interface PipelineNode {
+  /**
+   * `<stage>/<node>`, `<stage>/defaults`, `<stage>/enter` or `<stage>/<check>`.
+   */
+  id: string
+  stage: string
+  kind: 'defaults' | 'enter' | 'run' | 'test'
+  after: string[]
+  state: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled'
+  /**
+   * Runs started for the node, oldest first (a restart after an interruption adds one).
+   */
+  runs: string[]
+  /**
+   * A finished run a test node judged instead of starting one.
+   */
+  reused: string | null
+  verdicts: PipelineVerdict[]
+  reason: Message | null
+}
+export interface PipelineVerdict {
+  check: string
+  verdict: CheckVerdict
+  id: string
+}
+export interface PipelineSummary {
+  nodes: number
+  done: number
+  failed: number
+  skipped: number
+  cancelled: number
+  pass: number
+  fail: number
+  indeterminate: number
+}
+/**
+ * A run of a stage's development pipeline or of its required tests (K3, requirements FR-PRJ-07/08).
+ */
+export interface PipelineRecord {
+  id: string
+  project: string
+  branch: string
+  kind: PipelineKind
+  stages: string[]
+  state: PipelineState
+  nodes: PipelineNode[]
+  by: Actor
+  startedAt: string
+  endedAt: string | null
+  summary: PipelineSummary
+}
+export interface PipelineStartedPayload {
+  pipeline: PipelineRecord
+}
+export interface PipelineNodePayload {
+  pipeline: string
+  node: PipelineNode
+}
+export interface PipelineFinishedPayload {
+  pipeline: string
+  state: PipelineState
+}
+export interface PipelineResumedPayload {
+  pipeline: string
+}
+export interface PipelinesStartParams {
+  project: string
+  branch?: string
+  /**
+   * A stage id, or `all` for every stage in order.
+   */
+  stage: string
+  kind: PipelineKind
+}
+export interface PipelinePlan {
+  stages: string[]
+  nodes: number
+  /**
+   * Inputs that no stage of this run provides and that are not available now (unbound slots, unknown data).
+   */
+  missing: PipelineMissing[]
+  ready: boolean
+}
+export interface PipelineMissing {
+  node: string
+  ref: string
+}
+export interface PipelineRefParams {
+  pipeline: string
+}
+export interface PipelinesListParams {
+  project?: string
+  limit?: number
+}
+export interface PipelinesListResult {
+  pipelines: PipelineRecord[]
 }

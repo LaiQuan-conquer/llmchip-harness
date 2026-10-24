@@ -1,22 +1,223 @@
 {
   "id": "default",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "stages": [
     {
       "id": "S0",
-      "title": "Feasibility and cost estimate"
+      "title": "Feasibility and cost estimate",
+      "develop": {
+        "defaults": {
+          "estimate-request": "data:estimate-request-proxy",
+          "process-profile": "data:gf180mcu",
+          "impl-library": "data:library-180nm"
+        },
+        "nodes": [
+          {
+            "id": "estimate",
+            "plugin": "estimator",
+            "handler": "estimate",
+            "inputs": {
+              "request": "slot:estimate-request",
+              "profile": "slot:process-profile",
+              "library": "slot:impl-library"
+            },
+            "judge": [
+              "estimate.feasibility"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "estimate.feasibility",
+          "inputs": {
+            "request": "slot:estimate-request",
+            "profile": "slot:process-profile",
+            "library": "slot:impl-library"
+          }
+        }
+      ]
     },
     {
       "id": "S1",
-      "title": "Model intake"
+      "title": "Model intake",
+      "develop": {
+        "defaults": {
+          "eval-set": "data:evalset-proxy"
+        },
+        "nodes": [
+          {
+            "id": "synthesize",
+            "plugin": "model-llama",
+            "handler": "synthesize",
+            "params": {
+              "dim": 16,
+              "hiddenDim": 32,
+              "layers": 2,
+              "heads": 2,
+              "kvHeads": 1,
+              "seqLen": 64,
+              "seed": 1
+            },
+            "bind": {
+              "tokenizer": "tokenizer"
+            }
+          },
+          {
+            "id": "intake",
+            "plugin": "model-llama",
+            "handler": "intake",
+            "params": {
+              "license": "proxy (untrained)"
+            },
+            "inputs": {
+              "weights": "node:synthesize.weights",
+              "tokenizer": "node:synthesize.tokenizer"
+            },
+            "bind": {
+              "ir": "model-ir"
+            }
+          },
+          {
+            "id": "reference",
+            "plugin": "model-llama",
+            "handler": "reference",
+            "inputs": {
+              "ir": "node:intake.ir",
+              "tokenizer": "node:synthesize.tokenizer",
+              "evalset": "slot:eval-set"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "S2",
-      "title": "Numeric co-design"
+      "title": "Numeric co-design",
+      "develop": {
+        "nodes": [
+          {
+            "id": "quantize",
+            "plugin": "numeric",
+            "handler": "quantize",
+            "params": {
+              "weightFormat": "ternary",
+              "groupSize": 16,
+              "contextLength": 64
+            },
+            "inputs": {
+              "ir": "slot:model-ir",
+              "tokenizer": "slot:tokenizer",
+              "evalset": "slot:eval-set"
+            },
+            "bind": {
+              "spec": "numeric-spec",
+              "weights": "l2-weights"
+            }
+          },
+          {
+            "id": "evaluate",
+            "plugin": "numeric",
+            "handler": "evaluate",
+            "inputs": {
+              "ir": "slot:model-ir",
+              "tokenizer": "slot:tokenizer",
+              "evalset": "slot:eval-set",
+              "spec": "node:quantize.spec",
+              "weights": "node:quantize.weights"
+            },
+            "judge": [
+              "accuracy.budget"
+            ]
+          },
+          {
+            "id": "infer",
+            "plugin": "numeric",
+            "handler": "infer",
+            "inputs": {
+              "spec": "node:quantize.spec",
+              "weights": "node:quantize.weights",
+              "tokenizer": "slot:tokenizer",
+              "evalset": "slot:eval-set"
+            },
+            "bind": {
+              "trace": "l2-trace"
+            }
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "accuracy.budget",
+          "inputs": {
+            "ir": "slot:model-ir",
+            "tokenizer": "slot:tokenizer",
+            "evalset": "slot:eval-set",
+            "spec": "slot:numeric-spec",
+            "weights": "slot:l2-weights"
+          }
+        }
+      ]
     },
     {
       "id": "S3",
-      "title": "Architecture design and exploration"
+      "title": "Architecture design and exploration",
+      "develop": {
+        "nodes": [
+          {
+            "id": "design",
+            "plugin": "arch-taalas",
+            "handler": "design",
+            "params": {
+              "weightStorage": "gf180mcu.stdcell-rom",
+              "parallelMacs": 2,
+              "clockMHz": 8,
+              "die": {
+                "xMm": 1.2,
+                "yMm": 2
+              },
+              "memoryInterface": "sqi",
+              "operandBuffers": "none",
+              "targetAreaMm2": 2.4
+            },
+            "inputs": {
+              "spec": "slot:numeric-spec",
+              "weights": "slot:l2-weights",
+              "profile": "slot:process-profile",
+              "library": "slot:impl-library"
+            },
+            "bind": {
+              "chip": "chip-spec",
+              "ppa": "ppa-estimate"
+            }
+          },
+          {
+            "id": "verify_spec",
+            "plugin": "arch-taalas",
+            "handler": "verify_spec",
+            "inputs": {
+              "chip": "node:design.chip",
+              "spec": "slot:numeric-spec",
+              "ppa": "node:design.ppa",
+              "weights": "slot:l2-weights"
+            },
+            "judge": [
+              "arch.spec"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "arch.spec",
+          "inputs": {
+            "chip": "slot:chip-spec",
+            "spec": "slot:numeric-spec",
+            "ppa": "slot:ppa-estimate",
+            "weights": "slot:l2-weights"
+          }
+        }
+      ]
     },
     {
       "id": "S4",
@@ -28,11 +229,141 @@
             "slot": "storage-impl"
           }
         ]
-      }
+      },
+      "develop": {
+        "nodes": [
+          {
+            "id": "calibrate",
+            "plugin": "eda-gf180",
+            "handler": "calibrate",
+            "params": {
+              "implementation": "gf180mcu.stdcell-rom",
+              "sizes": [
+                [
+                  256,
+                  16
+                ]
+              ]
+            },
+            "beforeEntry": true,
+            "bind": {
+              "report": "storage-impl"
+            }
+          },
+          {
+            "id": "views",
+            "plugin": "estimator",
+            "handler": "check_views",
+            "inputs": {
+              "calibration": "node:calibrate.report"
+            },
+            "beforeEntry": true,
+            "judge": [
+              "impl.views.S4"
+            ]
+          },
+          {
+            "id": "generate",
+            "plugin": "rtl-taalas",
+            "handler": "generate",
+            "inputs": {
+              "spec": "slot:numeric-spec",
+              "weights": "slot:l2-weights",
+              "chip": "slot:chip-spec"
+            },
+            "bind": {
+              "rtl": "rtl"
+            }
+          },
+          {
+            "id": "check_isa",
+            "plugin": "rtl-taalas",
+            "handler": "check_isa",
+            "inputs": {
+              "rtl": "node:generate.rtl",
+              "spec": "slot:numeric-spec",
+              "weights": "slot:l2-weights",
+              "tokenizer": "slot:tokenizer",
+              "evalset": "slot:eval-set"
+            }
+          },
+          {
+            "id": "lint",
+            "plugin": "sim-verilator",
+            "handler": "lint",
+            "inputs": {
+              "rtl": "node:generate.rtl"
+            },
+            "judge": [
+              "rtl.lint"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "impl.views.S4",
+          "inputs": {
+            "calibration": "slot:storage-impl"
+          }
+        },
+        {
+          "check": "rtl.lint",
+          "inputs": {
+            "rtl": "slot:rtl"
+          }
+        }
+      ]
     },
     {
       "id": "S5",
-      "title": "Functional verification"
+      "title": "Functional verification",
+      "develop": {
+        "defaults": {
+          "verification-plan": "data:verification-plan-default"
+        },
+        "nodes": [
+          {
+            "id": "qualify",
+            "plugin": "sim-verilator",
+            "handler": "qualify",
+            "judge": [
+              "sim-verilator.qualify.rtl-functional-sim"
+            ]
+          },
+          {
+            "id": "verify",
+            "plugin": "sim-verilator",
+            "handler": "verify",
+            "after": [
+              "qualify"
+            ],
+            "inputs": {
+              "rtl": "slot:rtl",
+              "spec": "slot:numeric-spec",
+              "trace": "slot:l2-trace",
+              "plan": "slot:verification-plan"
+            },
+            "judge": [
+              "rtl.equivalence"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "sim-verilator.qualify.rtl-functional-sim"
+        },
+        {
+          "check": "rtl.equivalence",
+          "inputs": {
+            "rtl": "slot:rtl",
+            "spec": "slot:numeric-spec",
+            "trace": "slot:l2-trace",
+            "plan": "slot:verification-plan"
+          }
+        }
+      ]
     },
     {
       "id": "S6",
@@ -44,7 +375,62 @@
             "slot": "storage-impl"
           }
         ]
-      }
+      },
+      "develop": {
+        "defaults": {
+          "timing-exceptions": "data:timing-exceptions-none"
+        },
+        "nodes": [
+          {
+            "id": "views",
+            "plugin": "estimator",
+            "handler": "check_views",
+            "inputs": {
+              "calibration": "slot:storage-impl"
+            },
+            "beforeEntry": true,
+            "judge": [
+              "impl.views.S6"
+            ]
+          },
+          {
+            "id": "constraints",
+            "plugin": "eda-gf180",
+            "handler": "constraints",
+            "inputs": {
+              "chip": "slot:chip-spec"
+            },
+            "bind": {
+              "constraints": "constraints"
+            }
+          },
+          {
+            "id": "implement",
+            "plugin": "eda-gf180",
+            "handler": "implement",
+            "params": {
+              "placementDensityPct": 70
+            },
+            "inputs": {
+              "rtl": "slot:rtl",
+              "chip": "slot:chip-spec",
+              "constraints": "node:constraints.constraints"
+            },
+            "bind": {
+              "layout": "layout",
+              "gds": "gds"
+            }
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "impl.views.S6",
+          "inputs": {
+            "calibration": "slot:storage-impl"
+          }
+        }
+      ]
     },
     {
       "id": "S7",
@@ -56,7 +442,128 @@
             "slot": "storage-impl"
           }
         ]
-      }
+      },
+      "develop": {
+        "defaults": {
+          "signoff-rules": "data:signoff-gf180mcu"
+        },
+        "nodes": [
+          {
+            "id": "views",
+            "plugin": "estimator",
+            "handler": "check_views",
+            "inputs": {
+              "calibration": "slot:storage-impl"
+            },
+            "beforeEntry": true,
+            "judge": [
+              "impl.views.S7"
+            ]
+          },
+          {
+            "id": "drc",
+            "plugin": "eda-gf180",
+            "handler": "drc",
+            "inputs": {
+              "gds": "slot:gds",
+              "layout": "slot:layout",
+              "rules": "slot:signoff-rules"
+            },
+            "judge": [
+              "phy.drc"
+            ]
+          },
+          {
+            "id": "lvs",
+            "plugin": "eda-gf180",
+            "handler": "lvs",
+            "inputs": {
+              "gds": "slot:gds",
+              "layout": "slot:layout"
+            },
+            "judge": [
+              "phy.lvs"
+            ]
+          },
+          {
+            "id": "sta",
+            "plugin": "eda-gf180",
+            "handler": "sta",
+            "inputs": {
+              "layout": "slot:layout",
+              "constraints": "slot:constraints",
+              "exceptions": "slot:timing-exceptions",
+              "chip": "slot:chip-spec"
+            },
+            "judge": [
+              "phy.sta"
+            ]
+          },
+          {
+            "id": "gatesim",
+            "plugin": "sim-verilator",
+            "handler": "gatesim",
+            "params": {
+              "prompts": 2,
+              "steps": 8
+            },
+            "inputs": {
+              "layout": "slot:layout",
+              "rtl": "slot:rtl",
+              "spec": "slot:numeric-spec",
+              "trace": "slot:l2-trace"
+            },
+            "judge": [
+              "phy.gatesim"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "check": "impl.views.S7",
+          "inputs": {
+            "calibration": "slot:storage-impl"
+          }
+        },
+        {
+          "check": "phy.drc",
+          "inputs": {
+            "gds": "slot:gds",
+            "layout": "slot:layout",
+            "rules": "slot:signoff-rules"
+          }
+        },
+        {
+          "check": "phy.lvs",
+          "inputs": {
+            "gds": "slot:gds",
+            "layout": "slot:layout"
+          }
+        },
+        {
+          "check": "phy.sta",
+          "inputs": {
+            "layout": "slot:layout",
+            "constraints": "slot:constraints",
+            "exceptions": "slot:timing-exceptions",
+            "chip": "slot:chip-spec"
+          }
+        },
+        {
+          "check": "phy.gatesim",
+          "inputs": {
+            "layout": "slot:layout",
+            "rtl": "slot:rtl",
+            "spec": "slot:numeric-spec",
+            "trace": "slot:l2-trace"
+          },
+          "params": {
+            "prompts": 2,
+            "steps": 8
+          }
+        }
+      ]
     }
   ],
   "checks": [

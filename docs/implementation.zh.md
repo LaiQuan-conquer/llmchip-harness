@@ -4,10 +4,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v0.2 |
+| 文档版本 | v0.3 |
 | 日期 | 2026-10-24 |
-| 对应代码 | R0（负责人决定，2026-10-24）：取消审批门、豁免、导出与 `packager`，流程为 S0–S7；在此之前的提交 `9434f86`：M4 的 `9cc76a0`，以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
-| 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.7、[微内核架构](<../Microkernel Architecture.zh.md>) v0.11 |
+| 对应代码 | R1：阶段流水线（每一步的“运行研发流程”与“运行全部测试”）、按 CPU/内存/GPU 调度、运行检查点与续跑；R0（提交 `d771bb9`，负责人决定，2026-10-24）：取消审批门、豁免、导出与 `packager`，流程为 S0–S7；在此之前的提交 `9434f86`：M4 的 `9cc76a0`，以及演示流程页面、`yarn demo`、模型导入与图还原、S2 的数值方案、S3 的精确速度与微架构选项，到 S5 为止的空间引擎 `taalas-spatial/1`，以及虚拟芯片测试环境 `llmchip-vchip`：独立运行，也作为内核插件 `vchip` 并有 Web UI 页面（设计中的 L4） |
+| 上游文档 | [需求分析](<../Coding Harness MVP Requirement Analysis.zh.md>) v0.7、[微内核架构](<../Microkernel Architecture.zh.md>) v0.12 |
 
 本文说明**代码现在实际做了什么、怎样扩展**。它是描述性文档，不具权威性：产品必须做什么由需求文档规定，系统应如何组织由架构文档规定。
 
@@ -34,7 +34,8 @@
 | M3 RTL 与验证（S4–S5） | `3842361` | 在占位模型上完成 | `tests/m3-flow.spec.ts`（需 EDA 镜像） |
 | M4 物理实现与签核（S6–S7） | `9cc76a0` | 在占位模型上完成，芯片 1.2×2 mm；当时的 S8 流片包已随 R0 删除 | `tests/m4-flow.spec.ts`（须显式开启，实测 39 分钟） |
 | M5 迁移到流片工艺、M6 回片测试 | — | 已删除（负责人决定，2026-10-24：不流片）。迁移影响评估（FR-MIG）仍可用 | `tests/m4-kernel.spec.ts`、`plugins/estimator/tests/test_migration.py` |
-| R0 取消审批门与豁免 | 本提交 | 完成：没有审批门、快照、审批、放行、豁免与导出；删除 `packager`；需求 v0.7、架构 v0.11 | `tests/workflow.spec.ts`、`tests/m4-kernel.spec.ts`、各流程测试 |
+| R0 取消审批门与豁免 | `d771bb9` | 完成：没有审批门、快照、审批、放行、豁免与导出；删除 `packager`；需求 v0.7、架构 v0.11 | `tests/workflow.spec.ts`、`tests/m4-kernel.spec.ts`、各流程测试 |
+| R1 流水线与资源 | 本提交 | 完成：阶段流水线（`pipelines.*`、CLI `pipeline`、演示流程页的两个入口与流水线面板），`flow-default` 为 S0–S7 声明研发流水线与必需测试；按 CPU、内存、GPU 调度；运行检查点与续跑（IF-2 `checkpoint`、输入 `resume`）；架构 v0.12 | `tests/pipelines.spec.ts`、`tests/pipelines-flow.spec.ts`、`tests/resources.spec.ts`、`tests/checkpoint.spec.ts` |
 
 因此 M1 整体**未**通过验收：缺少 AC-M1-01（安装器）和桌面外壳，见 §7。
 
@@ -46,17 +47,18 @@
 | K1 事件库 | 追加式 SQLite 日志、哈希链、投影、重放 | [events/store.ts](../packages/kernel/src/events/store.ts) |
 | K2 产物库 | 内容寻址、只读对象、血缘、标签传播 | [artifacts/store.ts](../packages/kernel/src/artifacts/store.ts) |
 | K3/K6 工作流 | 项目、槽位、分支、阶段（只有准入检查）、判定、迁移记录 | [workflow/engine.ts](../packages/kernel/src/workflow/engine.ts) |
-| K4 调度器 | 持久队列、进程与容器执行、超时、取消、重试、暂停 | [runs/scheduler.ts](../packages/kernel/src/runs/scheduler.ts) |
+| K3 流水线 | 每一步的研发流水线与必需测试：依赖、失败与跳过、复用、取消、改正后继续、内核重启后继续 | [workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts) |
+| K4 调度器 | 持久队列、按 CPU/内存/GPU 调度、进程与容器执行、超时、取消、重试（从检查点续跑）、暂停、运行检查点 | [runs/scheduler.ts](../packages/kernel/src/runs/scheduler.ts) |
 | K5 API 策略 | 区分所有者令牌与外部令牌；方法白名单 | [security/policy.ts](../packages/kernel/src/security/policy.ts) |
 | K8 出口网关 | 标签、目的地上限、NDA 指纹、去密规则、审计 | [security/egress.ts](../packages/kernel/src/security/egress.ts) |
 | K9 插件注册表 | 清单扫描、校验、数据导入 | [plugins/registry.ts](../packages/kernel/src/plugins/registry.ts) |
 | K10 配置与密钥 | 分层配置、AES-256-GCM 密钥文件、脱敏 | [config/](../packages/kernel/src/config/) |
 | 智能体运行时 | 托管智能体：工具检查、变更集、接手包、死循环与预算停止 | [agents/runtime.ts](../packages/kernel/src/agents/runtime.ts)、[agents/providers.ts](../packages/kernel/src/agents/providers.ts) |
 | IF-1 内核 API | WebSocket `/v1/rpc` 上的 JSON-RPC 2.0，以及 HTTP `/v1/artifacts` | [server.ts](../packages/kernel/src/server.ts)、[client](../packages/client/src/index.ts) |
-| IF-2 插件协议 | stdio 上的 JSON-RPC 2.0，每行一条消息 | [plugins/process.ts](../packages/kernel/src/plugins/process.ts)、两个 SDK |
+| IF-2 插件协议 | stdio 上的 JSON-RPC 2.0，每行一条消息；通知 `progress`、`log`、`checkpoint` | [plugins/process.ts](../packages/kernel/src/plugins/process.ts)、两个 SDK |
 | IF-3 工具容器 | Podman，无网络，输入与插件目录只读 | `Scheduler.containerCommand` |
-| CLI 与 MCP | `llmchip` 命令、通用 `call`、stdio 上的 MCP | [cli/src/main.ts](../packages/cli/src/main.ts)、[cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
-| Web UI | 九个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S7 路径、结果和检查 | [apps/web/src](../apps/web/src) |
+| CLI 与 MCP | `llmchip` 命令（含 `pipeline plan/start/list/show/cancel/resume`）、通用 `call`、stdio 上的 MCP | [cli/src/main.ts](../packages/cli/src/main.ts)、[cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
+| Web UI | 九个页面，中英文。默认页面“演示流程”用通俗语言展示项目的 S0–S7 路径、结果和检查；全部阶段与每个阶段各有“运行研发流程”和“运行全部测试”两个入口，流水线面板列出每次运行的节点、运行、判定与原因 | [apps/web/src](../apps/web/src) |
 | 领域流程 | 内置插件跑通 S0–S7，每个阶段由其检查判定（见 §2.4 的表） | [plugins/](../plugins) |
 | 真实模型导入与图还原 | 按本机路径导入已下载的模型目录（safetensors + config.json + tokenizer.json，或 llama2.c），从文件头做张量普查并估算，还原计算图（Llama 家族：Llama、Mistral、SmolLM、Qwen2、Qwen3、llama2.c），执行为 L0，并与 transformers / run.c 移植逐项测试：权重逐位、结构参数、参数总量、每层中间结果、每个提示的 logits、top-1 与贪心生成、单 token 与长序列边界用例。项目自带的 llama2.c 权重（如占位模型）直接从产物导入。S1 页面可选择任一已导入模型或新路径，填写自定义提示，并展示每个测试项 | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
@@ -129,6 +131,7 @@ Tauri 桌面外壳、安装器、专用 WSL 发行版、首次启动引导、自
 | 10 | K8 网关 | `EgressGateway` | 指纹与去密规则投影 | 事件、产物、事故 |
 | 11 | K5 策略 | `Policy` | 外部方法白名单 | 事故、网关 |
 | 12 | K3/K6 | `Workflow` | 流程包、检查定义、`workflow` 投影 | 事件、产物、注册表、调度器、事故 |
+| 12a | K3 流水线 | `Pipelines`（[workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts)） | `pipelines` 投影、正在等待的运行 | 事件、注册表、调度器、工作流、日志 |
 | 13 | 智能体运行时 | `AgentRuntime` | `agents` 投影、活动会话 | 事件、产物、调度器、工作流、网关、事故、日志、密钥（不经过 API 策略） |
 | 14 | K9 内核内宿主 | `PluginHost` | Cordis 根上下文 | 事件、产物、日志 |
 | 15 | IF-1 服务，在 `Kernel.start` 中创建 | `KernelServer`（[server.ts](../packages/kernel/src/server.ts)） | 连接；`run/harnessd.json` 由 `Kernel.start` 写入 | 策略、处理函数、事件（订阅）、产物（HTTP） |
@@ -156,7 +159,7 @@ plugins/                   额外的插件搜索路径
 
 | 插件 | 运行方式 | 处理器 | 用于 | 单元测试 |
 |---|---|---|---|---|
-| `flow-default` | data | 流程包：S0–S7、20 项检查、阶段准入检查、硬约束槽位 | 全部 | 经由 `tests/*-flow.spec.ts` |
+| `flow-default` | data | 流程包：S0–S7、20 项检查、阶段准入检查、硬约束槽位、每个阶段的研发流水线与必需测试；数据 `estimate-request-proxy`、`timing-exceptions-none` | 全部 | 经由 `tests/*-flow.spec.ts` |
 | `process-library` | data | 工艺档案 `gf180mcu`、`sephonchitech-180bcd`；`library-180nm`；`signoff-gf180mcu` | S0、S3、S6–S7 | 经由估算器与流程测试 |
 | `estimator` | process（Python） | `estimate`、`check_views`、`migrate` | S0、S4/S6/S7 阶段准入、FR-MIG | `test_estimate.py`、`test_migration.py` |
 | `model-llama` | process（Python） | `synthesize`、`intake`、`reference`、`import`、`recover`、`run_graph`、`compare` | S0（导入）、S1 | `test_model.py`、`test_graph.py` |
@@ -177,7 +180,7 @@ plugins/                   额外的插件搜索路径
 
 - **estimator**：可行性、面积、成本与性能估算（FR-EST），给出下限/典型/上限值、每项的来源与置信度，以及缺失的参数。`check_views` 按阶段报告已标定存储实现具备哪些集成视图。`migrate` 依据设计对工艺能力的依赖评估迁移影响（FR-MIG）。
 - **process-library**：工艺档案（含迁移所需的工艺数据）、实现库与 GF180 签核规则。每个数值都记录来源与置信度，经验值在标定前始终是经验值。
-- **flow-default**：阶段 S0–S7 及其检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。没有审批门（负责人决定，2026-10-24）。
+- **flow-default**（流程版本 0.12.0）：阶段 S0–S7 及其检查，阶段准入检查，以及硬约束槽位 `constraints`、`timing-exceptions`、`signoff-rules`。没有审批门（负责人决定，2026-10-24）。每个阶段声明研发流水线 `develop` 与必需测试 `tests`，驱动 5K 占位模型走与 `yarn demo` 相同的正向路径：参数固定在流程包中（占位模型结构、三值数值方案、1.2×2 mm 晶粒上的向量引擎）；默认产物（占位模型的估算请求 `estimate-request-proxy`、空的时序例外登记表 `timing-exceptions-none`、工艺档案、评估集、验证计划、签核规则）只在槽位为空时绑定。S1 没有必需测试（占位模型的导入没有检查）。
 - **model-llama**：
   - 模型导入与图还原（见下文）。
   - 把 llama2.c 检查点与分词器导入为 S2–S7 使用的 llama2.c 模型 IR。
@@ -235,7 +238,7 @@ yarn llmchip events list                     # 记录了什么
 2. 事件 1 为 `kernel.started`。
 3. `PluginRegistry.scan` 依次搜索 `plugins/`（`plugins.bundled` 为真时搜索内置插件）、`<home>/plugins`、`plugins.searchPaths`。配置分层只做浅合并，所以 `--plugins` 会替换 `config.json` 中的 `searchPaths`。它按 `PluginManifest` 和 `kernelApi` 范围校验每个 `llmchip-plugin.json`，并把每个 `data` 文件导入为产物：事件 2–10 都是 `artifact.created`，执行者都是 `plugin:*`。有问题的插件被拒绝并记录，但不中断启动。
 4. `Workflow.loadFlows` 读取每个 `flow.pack` 产物，汇总检查定义。对同一检查 id 有冲突定义的流程包，以及不符合 schema 的流程包（例如仍声明审批门），都会被拒绝，记为 `FLOW_INVALID` 问题并写入内核日志。项目创建时所用的流程包按原样保存在产物库中：读取 R0 之前的项目时，其中只属于历史的字段（`gates`、阶段入口的 `gates`、检查的 `waiver`）被忽略。
-5. `Scheduler.recover` 把仍记为 `running` 的运行结束为 `interrupted`。它杀掉该运行遗留的进程组（仅当 `/proc/<pid>/environ` 含 `LLMCHIP_RUN=<id>` 时）及其容器，还有剩余次数时就重试，然后清空 `runs/`。接着加载 `KernelOptions.plugins` 中的内核内插件（只有测试会传入）。
+5. `Scheduler.recover` 把仍记为 `running` 的运行结束为 `interrupted`。它杀掉该运行遗留的进程组（仅当 `/proc/<pid>/environ` 含 `LLMCHIP_RUN=<id>` 时）及其容器，还有剩余次数时就重试（处理器声明了 `resume` 时从最近的检查点续跑），然后清空 `runs/`。随后 `Pipelines.recover` 让仍在运行的流水线继续：运行被中断的节点重新运行（同样从检查点续跑），期间已结束的运行记入节点。接着加载 `KernelOptions.plugins` 中的内核内插件（只有测试会传入）。
 6. `KernelServer.listen` 监听 `127.0.0.1:<随机端口>`，然后写入 `run/harnessd.json`，内含 URL 与两个新令牌。最后调用 `Scheduler.pump`。
 
 **命令**（[cli/src/main.ts](../packages/cli/src/main.ts) 中的 `case 'estimate'`）：
@@ -322,6 +325,31 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 
 `tests/flow-helpers.ts` 的 `throughS3` 和 `throughS5Proxy` 用真实插件把同一路径走到 S3 和 S5。`tests/m4-flow.spec.ts` 再继续到 S7，并从 GDS 追溯到模型权重。
 
+
+### 3.3 路径 C：一个阶段的两个入口（流水线）
+
+每一步的“运行研发流程”和“运行全部测试”都是流水线（需求 FR-PRJ-07/08）。以下命令于 2026-10-24 在全新主目录上用内置插件实际执行过：
+
+```sh
+yarn llmchip project create demo --title demo
+yarn llmchip pipeline plan demo S2 --kind develop      # S2: 5 nodes, not ready；逐项列出缺少的槽位（S2/quantize needs slot:model-ir ...），退出码 1
+yarn llmchip pipeline plan demo all --kind develop     # S0, S1, S2, S3, S4, S5, S6, S7: 40 nodes, ready
+yarn llmchip pipeline start demo S0 --kind develop --wait   # develop S0  passed  (3/3 done)；S0/estimate 判定 estimate.feasibility: pass
+yarn llmchip pipeline start demo S1 --kind develop --wait   # develop S1  passed  (5/5 done)
+yarn llmchip pipeline start demo S0 --kind test --wait      # test S0  passed；S0/estimate.feasibility 复用了研发流程的运行
+yarn llmchip pipeline list --project demo
+```
+
+[workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts) 内部发生了什么：
+
+- **`Pipelines.plan`** 由项目创建时的流程包展开节点（`build`）：研发流水线的每一步依次是 `<阶段>/defaults`、`beforeEntry` 节点、`<阶段>/enter`、其余节点，`all` 依次串起所有声明了研发流水线的阶段（后一步的 `defaults` 依赖前一步的全部节点）；必需测试每项一个节点，互不依赖。输入引用有三种：`slot:<槽位>`、`data:<数据 id>`、`node:<节点>.<输出>`。现在没有绑定、也不会由本次流水线前面的节点绑定的槽位，以及不存在的数据，列为缺少。
+- **`Pipelines.start`** 在缺少输入时以 `PIPELINE_INPUTS_MISSING` 拒绝，什么都不声明时以 `PIPELINE_EMPTY` 拒绝，同一项目分支上已有流水线在其中某个阶段运行时以 `PIPELINE_RUNNING` 拒绝；否则追加 `pipeline.started`（含全部节点），然后 `advance`。
+- **`advance`** 反复执行：依赖全部完成的等待节点开始执行；有依赖失败、跳过或取消的节点记为 `skipped`（`PIPELINE_DEPENDENCY_FAILED`）；没有等待和运行中的节点时追加 `pipeline.finished`（全部完成为 `passed`，否则 `failed`）。
+- 节点的执行：`defaults` 把空槽位绑定到默认产物；`enter` 调用 `Workflow.enterStage`（准入检查判定）；`run` 以启动者的身份启动运行，`test` 先找同一处理器、同样参数（含默认值）和输入的成功运行，找到就复用（`reused`），否则启动一个。运行结束后（`Scheduler.wait`），`run` 节点把输出绑定到槽位并判定所列检查，`test` 节点判定它的检查；任何判定不是 `pass`、运行没有成功结束、或绑定被拒绝，节点为 `failed` 并带原因。硬约束槽位只在为空时由流水线绑定；已有人绑定的产物不被替换（`PIPELINE_HARD_CONSTRAINT_BOUND`），新的须由人手动绑定。只有节点当前的运行（或它复用的运行）能结束节点：取消后立即继续时，被取消的旧运行不影响新的一次。每次状态变化都是一条 `pipeline.node` 事件。
+- **`Pipelines.cancel`** 把未结束的节点记为 `cancelled` 并取消它们的运行；**`Pipelines.resume`**（失败或取消的流水线）追加 `pipeline.resumed`，把失败、跳过、取消的节点放回等待，已完成的节点保留。重新运行同样输入的节点时，若上一次运行留有检查点且处理器声明了 `resume`，就从检查点续跑。
+
+`tests/pipelines.spec.ts` 用 `test-flow` 证明这些语义（含杀掉内核后从中断的节点续跑）；`tests/pipelines-flow.spec.ts` 用内置插件在全新项目上跑 S0–S3 的研发与测试，在 `LLMCHIP_FULL_FLOW=1` 时用 `all` 跑完 S0–S7。
+
 ---
 
 ## 4. 数据与资源归属
@@ -335,6 +363,8 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 | 产物内容与目录 | `ArtifactStore.put`（`artifact.created`） | 调度器（复制）、HTTP 下载、智能体（`read_artifact`） | 不可变；`markDeleted` 只做标记，内容保留（尚无清除或 GC） |
 | 插件数据文件对应的产物 | `PluginRegistry.register`，每次扫描时 | 流程、CLI `estimate`、测试 | 按哈希幂等；标签默认 `public` |
 | 运行输出 | `Scheduler.registerOutputs` | 任何客户端 | 仅在 `exited_zero` 之后；标签 ≥ 运行标签 |
+| 运行检查点（`run.checkpoint`） | `Scheduler.storeCheckpoint`，在 IF-2 `checkpoint` 通知到达时 | 重试与流水线续跑（输入 `resume`）、任何客户端 | 运行进行中立即入库，按报告顺序逐个入库，运行失败也保留；路径必须是运行 `work/` 中的普通文件（不是符号链接）；运行在全部检查点入库后才结束 |
+| 流水线 | `Pipelines`（`pipeline.*` 事件） | API、UI、CLI | 都是事件；重启后由 `Pipelines.recover` 继续 |
 | 运行日志（`run.log`） | `Scheduler.execute` | 任何客户端 | 每次运行都保存，与执行状态无关 |
 | 上传（`PUT /v1/artifacts`） | `KernelServer`，仅限所有者令牌 | — | 外部令牌被拒绝并记事故 |
 | 运行工作区 `runs/<id>/` | `Scheduler.execute` 创建并删除 | 插件（`in/` 只读） | 每次运行后删除；启动时清空整个 `runs/` |
@@ -350,7 +380,8 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 按写入者划分的事件种类：
 
 - Kernel：`kernel.started/stopped`、`projection.rebuilt`
-- Scheduler：`kernel.paused`、`run.*`
+- Scheduler：`kernel.paused`、`run.*`（含 `run.checkpointed`）
+- Pipelines：`pipeline.started`、`pipeline.node`、`pipeline.resumed`、`pipeline.finished`
 - ArtifactStore：`artifact.*`
 - SecretStore：`secret.changed`
 - PluginHost：`plugin.*`
@@ -368,7 +399,7 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 - **内核停止**（`Kernel.shutdown`）按固定顺序执行：
   1. 删除运行时文件；
   2. 关闭服务；
-  3. 停止调度器（把所有运行中止为 `interrupted`，并等待各自记录结果）；
+  3. 停止流水线的推进（`Pipelines.stop`：此时被中断的运行不判为失败，由下次启动的 `Pipelines.recover` 重新运行），再停止调度器（把所有运行中止为 `interrupted`，并等待各自记录结果）；
   4. 按加载的逆序、带超时地卸载内核内插件；
   5. 追加 `kernel.stopped`；
   6. 关闭数据库并释放锁。
@@ -428,6 +459,25 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
    - [tests/calibration.spec.ts](../tests/calibration.spec.ts) 覆盖按视图的阶段准入（需 EDA 镜像）。
 
 新的流程包是带 `flow.pack` 数据文件的 `data` 插件，参见 [test-flow](../tests/fixtures/plugins/test-flow)。项目用 `projects.create {flow}` 选择流程包。
+
+### 5.2a 阶段的研发流水线与必需测试
+
+示例：[flow-default/flow.json](../plugins/flow-default/flow.json) 的阶段 S2：`develop` 中 `quantize` 把 `spec`、`weights` 绑定到 `numeric-spec`、`l2-weights`，`evaluate` 用 `node:quantize.spec` 等输入并判定 `accuracy.budget`，`infer` 把 `trace` 绑定到 `l2-trace`；`tests` 对绑定的槽位判定 `accuracy.budget`。最小示例是 [test-flow](../tests/fixtures/plugins/test-flow/flow.json) 的阶段 A 与 B。
+
+1. 在阶段中写 `develop`：`defaults`（槽位 → `data:` 或 `slot:` 引用，只在槽位为空时绑定）与 `nodes`。每个节点有 `id`、`plugin`、`handler`、可选的 `params`、`inputs`（输入名 → 引用或引用数组）、`after`、`bind`（输出名 → 槽位）、`judge`（检查 id）、`beforeEntry`（在进入阶段之前运行，供准入检查判定）和 `timeoutMs`。
+2. 在阶段中写 `tests`：每项是 `check` 与其运行的 `inputs`、`params`。处理器取自检查定义；已有同样参数与输入的成功运行时复用它，所以研发流水线之后运行测试不会重复计算。
+3. 引用只能指向本步骤前面的节点（`node:`）、槽位（`slot:`）或插件数据（`data:`）；跨步骤的数据经槽位传递。引用了未声明节点的流程包在展开时以 `PIPELINE_INVALID` 失败。
+4. 参数改变了检查所判定的标准时，按 §5.2 修改检查的 `version`；流水线本身没有版本。
+5. 测试：照 [tests/pipelines.spec.ts](../tests/pipelines.spec.ts)（语义）与 [tests/pipelines-flow.spec.ts](../tests/pipelines-flow.spec.ts)（真实插件，在全新项目上每一步都要 `ready`、通过，且测试复用研发运行）。
+
+### 5.2b 处理器的资源需求与检查点
+
+示例：[stub-tool](../tests/fixtures/plugins/stub-tool/llmchip-plugin.json) 的 `heavy`（`resources: {memGb: 3}`）、`gpu`（`gpu: 1`）与 `steps`（检查点与续跑，[plugin.ts](../tests/fixtures/plugins/stub-tool/plugin.ts)）。
+
+1. 资源：在处理器清单中写 `resources: {cpu, memGb, gpu}`。不写时，进程插件按 1 核、1 GiB，容器插件按调度器的 `containerCpus`/`containerMemory`，都没有 GPU。容器运行的 `--cpus`、`--memory` 取这个需求。同一时刻只有一个运行使用 GPU（需求 NFR-15），只有它看得到 GPU（`CUDA_VISIBLE_DEVICES`）；容器插件不分配 GPU。主机容量取配置 `scheduler.resources`，未写的项自动探测（CPU 核数、内存总量、`nvidia-smi -L`）。
+2. 检查点：处理器把检查点完整写入工作目录（先写临时文件再改名），再调用 `ctx.checkpoint(path, name)`（Python）或 `ctx.checkpoint(path, name)`（TypeScript），`path` 相对于 `work/`。
+3. 续跑：在清单中声明可选输入 `resume`（类型 `run.checkpoint`），并在处理器开头读 `ctx.resume`。重试（`maxAttempts` > 1）、流水线在内核重启后重新运行被中断的节点、以及 `pipelines.resume` 重新运行同样输入的节点时，内核传入最近的检查点。
+4. 测试：照 [tests/resources.spec.ts](../tests/resources.spec.ts) 与 [tests/checkpoint.spec.ts](../tests/checkpoint.spec.ts)；Python SDK 的通知格式由 `python/llmchip-sdk/tests/test_protocol.py` 覆盖。
 
 ### 5.3 工艺、实现库或模板数据
 
@@ -571,11 +621,11 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 164 passed、1 skipped，有 EDA 镜像时 6 分 42 秒（2026-10-24，R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 165 passed、1 skipped，有 EDA 镜像时 6 分 43 秒（2026-10-24，R1）；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
-| `yarn test` | 全部 Vitest 用例（见下表） | 29 个文件通过、1 个跳过（m4-flow）；103 个测试通过、1 个跳过（2026-10-24） |
-| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 6 分 42 秒、Vitest 732 秒 |
+| `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、1 个跳过（m4-flow）；125 个测试通过、2 个跳过（m4-flow 与 `pipelines-flow` 的 S0–S7，都须显式开启；2026-10-24） |
+| `yarn verify` | 依次执行以上全部；每次提交前必须通过 | 退出码 0（2026-10-24）；镜像齐全时，Python 检查 6 分 43 秒、Vitest 740 秒 |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | 占位模型上完整的 S0–S7，以及从 GDS 到权重的血缘 | 见 §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | 哈希链；已存储内容与哈希一致 | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | 用测试环境测一颗芯片：在提示词集上生成，质量与速度，按芯片策略判定，写出运行目录 | stories260K 的数值（int8）芯片对照其参考芯片，20 个提示词生成到 64 token 上下文结束：下一 token 一致率 0.992，生成完全相同 0.65，困惑度 3.167（参考 3.159），11 秒（2026-10-22）。`vchip conform` 在 stories260K 的参考与数值芯片、tiny Qwen3 的参考芯片上均通过 |
@@ -597,6 +647,10 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 | `packages/kernel/tests/main.spec.ts`、`tests/cli.spec.ts` | `harnessd` 与 `llmchip` 命令行 | FR-INT-07 | 总是 |
 | `tests/kernel-api.spec.ts` | 令牌、参数校验、上传、无缝订阅、日志中无密钥、每个主目录只有一个内核 | IF-1 | 总是 |
 | `tests/runs.spec.ts` | 入队检查、崩溃、无效输出、超时、取消、暂停、遗留进程清理与重试 | K4、AC-M1-04 | 总是 |
+| `tests/resources.spec.ts` | 按容量调度：放不下的运行按队列顺序等待（后面的也等）、小运行并行、GPU 一次只给一个运行（有两块 GPU 时也是）且其他运行看不到它、超过全部容量的运行单独运行 | NFR-15 | 总是 |
+| `tests/checkpoint.spec.ts` | 检查点在运行中立即作为运行的产物入库；崩溃的运行留下检查点，重试以 `resume` 输入续跑；工作目录之外的检查点被拒绝 | FR-TRC-10、IF-2 | 总是 |
+| `tests/pipelines.spec.ts` | 计划与缺少输入、`all` 中前面节点绑定的槽位、研发流水线（进入阶段、运行、绑定、判定）、测试复用研发运行、失败保持失败且依赖被跳过、改正后继续、取消、取消后立即继续；同一阶段只能有一条运行中的流水线；硬约束槽位不被流水线覆盖；依赖成环的流程包被拒绝；内核正常停止或被杀掉后流水线继续，被中断的节点从检查点续跑 | FR-PRJ-07/08、FR-TRC-10、AC-15 | 总是 |
+| `tests/pipelines-flow.spec.ts` | 内置插件：全新项目上 S0–S3 每一步的研发与测试都通过，测试复用研发运行；`all` 跑完 S0–S7 的研发与全部测试 | FR-PRJ-07/08 | S0–S3 总是运行（需要 `.venv`）；S0–S7 须同时满足 `LLMCHIP_FULL_FLOW=1` 和 EDA 镜像；1 passed，1967 秒（2026-10-24） |
 | `tests/recovery.spec.ts` | 已确认的写入在反复 SIGKILL 后仍然存在 | NFR-04 | 总是 |
 | `tests/workflow.spec.ts` | 解析不完整、崩溃或能力未认证时判 indeterminate；没有豁免：失败保持失败并打开事故，改正后的新设计才通过，历史保留；没有审批门时进入阶段、旧方法不存在；R0 之前写下的主目录（旧流程包上的项目、审批/豁免/导出事件、`waived` 判定、带 `gates` 的迁移事件）仍能打开、重放并通过哈希链校验；新注册的流程包若仍声明审批门则被拒绝；分支 | AC-M1-03、架构 ADR-011 | 总是 |
 | `tests/agents.spec.ts` | 变更集上的迭代循环、权限、死循环与预算停止、假 PDK 出口拦截、接手、降低标准 | AC-M1-02/07/08/09/13 | 总是 |
@@ -655,7 +709,8 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 - **空间引擎**（2026-10-21 实测，占位模型，8 MHz）：每个 token 1,327 周期（6,029 tok/s）；加上主机的 START 与 STATUS 帧为 2,059 周期（约 3,900 tok/s）。综合后单元面积 5.96 mm²：KV 环形缓存 2.09，矩阵电路 1.94（串行加法器 0.80、行输出 0.75、延迟线 0.39），核心逻辑 0.97 及其 16 个 softmax 除法器 0.05，核心寄存器 0.42，注意力乘法器 0.41，查找表 0.07，主机接口 0.02。其他形状的核心逻辑（按维度）和查找表面积是外推值。KV 寄存器的复位值来自复位后的清零过程（AGENTS.md，负责人决定，2026-10-21），门级仿真的证明随物理实现一起完成。生成器实现维度为 2 的幂（头大小至少 4）、2 个头、1 个 KV 头、上下文 64、任意层数、隐藏维度不超过 255 的模型；其他形状会被拒绝并给出原因。不给 `die`（或 `targetAreaMm2`）时，面积上限是工艺档案的 prerun 面积（2.4 mm²），空间引擎放不下；PPA 会给出建议的晶粒（`suggestedDie`），在 prerun 约束更新之前（P4），设计使用这个晶粒。
 - **迁移**：评估可用，确认后记录重新开始的阶段。下游产物与判定不会被标记为失效（FR-MIG-03、FR-TRC-05）。从 S3 或更早重新开始须由人类确认（FR-MIG-04），这一点没有测试：唯一不是人类的调用方是外部令牌，而 `migration.apply` 不在外部方法白名单中。没有能自动打标签的 NDA PDK 导入通道（FR-INT-04、FR-SEC-01）。
 - **智能体**：变更集没有大小阈值（FR-AGT-06）。没有软约束流程（FR-AGT-09）。没有按角色区分的工具集或 LLM（FR-AGT-14/19）。去密接手包只作为建议给出，不会实际生成（FR-AGT-13a）。
-- **UI**：没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-10/11/13、FR-AGT-25/26）。每一步的“运行研发流程”和“运行全部测试”两个入口尚未实现（R1）。演示流程页的“完成”是近似：阶段内每项已判定检查的最新判定都通过、每个处理器的最新运行都成功，并且已进入下一阶段（最后一个阶段除外）；各步骤必需的测试清单要到 R1 才在流程包中定义。
+- **调度与流水线**（R1）：内置插件还没有声明 `resources`，所以都按默认需求调度（进程插件 1 核、1 GiB；容器插件 4 核、8 GiB）；真实需求在各插件实测后补上。因此在 15 GB 内存的开发机上，两个按默认上限（8 GiB）的容器运行不再并行，而是先后运行（此前会超额使用内存）；`tests/ui-latency.spec.ts` 为了制造负载，把容量声明为 32 GiB。队列严格按顺序：放不下的运行会挡住后面的运行，利用率因此偏低，但不会有运行被饿死。容器插件不分配 GPU。测试复用以前的运行时只比较处理器、参数和输入，不比较插件版本（运行记录不保存插件版本）。没有测试“运行全部测试”在内核被杀掉后的续跑（研发流水线的续跑有测试，两者走同一条路径）。流水线是否可以写入硬约束槽位（目前：只在为空时写入）待负责人决定。`flow-default` 的流水线参数固定在流程包里，只驱动 5K 占位模型；Qwen 的流水线随 R2 起的六步流程包提供。
+- **UI**：没有事故筛选与跳转链接。除 PNG 外，没有 RTL、波形或版图查看器。设置页缺少 LLM、配额与出口配置（FR-UI-10/11/13、FR-AGT-25/26）。流水线面板列出节点的状态、运行、判定与原因，但没有每个节点的用时、资源和实时日志（FR-UI-14 的节点图只部分实现）。演示流程页的“完成”仍是近似：阶段内每项已判定检查的最新判定都通过、每个处理器的最新运行都成功，并且已进入下一阶段（最后一个阶段除外）；它还没有改为按流程包的必需测试判断。
 - **工具版本的追溯**：运行记录只保存插件和处理器，不保存当次运行使用的容器镜像；镜像只能从插件清单中查到（摘要固定），清单改变后无法从运行本身得知旧镜像（FR-TRC-02、AC-08）。
 - **R0 之前的判定**：在旧主目录中，`accuracy.budget` 或 `phy.drc` 的版本 1 判定若为 `waived`，之后版本 2 的通过会打开 `standard_lowered` 事故，尽管标准实际上变严了（取消了豁免）。关闭事故时说明即可。
 - **CLI**：去密、迁移没有专用命令，需要用 `llmchip call`（FR-INT-07）。
@@ -675,7 +730,7 @@ yarn llmchip call gates.release '{"project":"chip","gate":"G0"}'  # unknown meth
 | C3 | 架构 §14 的目录布局（`agent-runtime/`、`llm-providers/`、`mcp-server/`、`plugin-sdk-ts/` 包） | 智能体运行时与提供方在 `packages/kernel/src/agents/`，MCP 在 `packages/cli/src/mcp.ts`，SDK 为 `packages/plugin-sdk` | 布局（“建议”） |
 | C4 | 架构 §6.2：变更集写入项目 git 工作目录“随 M2 的生成器到来” | M2–M4 都没有实现 | §6 |
 | C5 | 架构 §3、§6.1：智能体运行时与 LLM 提供方是内核内系统插件 | `AgentRuntime` 是 `Kernel` 构造函数直接创建的普通类；提供方是内核代码；都不经过 `PluginHost` | §6、ADR-001 |
-| C6 | 架构 §4.3：运行成功结束后，才把它的输出一次性登记为产物 | 输出逐个入库；后面的输出无效时，前面的输出留在库中，运行记录却不列出它们 | K3/K4 |
+| C6 | 架构 §4.3：运行成功结束后，才把它的输出一次性登记为产物（检查点除外，R1） | 输出逐个入库；后面的输出无效时，前面的输出留在库中，运行记录却不列出它们 | K3/K4 |
 | C7 | 架构 §5 第 5 条：关闭时先停止智能体运行时，再刷写事件库 | `Kernel.shutdown` 从不停止 `AgentRuntime`，也不先结束正在运行的 `tasks.run` 循环。它能否在数据库关闭后追加事件，尚未核实 | K1、§6 |
 
 负责人决定之前，保持代码现状，不要基于这些条目的任何一方继续开发。

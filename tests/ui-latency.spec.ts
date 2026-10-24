@@ -25,7 +25,12 @@ describe.skipIf(!available(IMAGE))('UI responsiveness under load', () => {
     const listing = { toolCalls: [{ name: 'list_artifacts' }] }
     const { kernel } = await startKernel(undefined, {
       bundled: true,
-      config: { llm: { providers: [{ id: 'busy', kind: 'scripted', location: 'local', script: Array.from({ length: 400 }, () => listing) }] } },
+      // Two container runs at the default 8 GiB each are the load; declare room for both, since
+      // the scheduler would otherwise run them one after the other on a smaller machine (NFR-15).
+      config: {
+        llm: { providers: [{ id: 'busy', kind: 'scripted', location: 'local', script: Array.from({ length: 400 }, () => listing) }] },
+        scheduler: { resources: { memGb: 32 } },
+      },
     })
     const client = await connect(kernel)
     await client.call('projects.create', { id: 'load', title: 'Load' })

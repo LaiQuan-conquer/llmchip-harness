@@ -31,6 +31,9 @@ const EXTERNAL_METHODS: ReadonlySet<KernelMethod> = new Set<KernelMethod>([
   'tasks.list',
   'changesets.list',
   'constraints.list',
+  'pipelines.plan',
+  'pipelines.get',
+  'pipelines.list',
 ])
 
 /** The external client as an egress destination: it may receive at most `internal` data. */

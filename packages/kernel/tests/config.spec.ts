@@ -11,7 +11,7 @@ describe('loadConfig', () => {
       server: { host: '127.0.0.1', port: 0 },
       events: { verifyTailOnStart: 1000 },
       plugins: { searchPaths: [], bundled: true },
-      scheduler: { maxParallel: 2, defaultTimeoutMs: 3_600_000, cancelGraceMs: 2000, containerRuntime: 'podman', containerCpus: 4, containerMemory: '8g' },
+      scheduler: { maxParallel: 2, defaultTimeoutMs: 3_600_000, cancelGraceMs: 2000, containerRuntime: 'podman', containerCpus: 4, containerMemory: '8g', resources: {} },
       llm: { providers: [] },
     })
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ server: { port: 8080 } }))

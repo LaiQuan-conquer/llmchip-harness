@@ -1,8 +1,21 @@
 {
   "id": "test-flow",
   "version": "1.0.0",
-  "kinds": ["flow-pack"],
+  "kinds": [
+    "flow-pack"
+  ],
   "runtime": "data",
   "kernelApi": "^0.3",
-  "data": [{ "id": "flow", "type": "flow.pack", "path": "flow.json" }]
+  "data": [
+    {
+      "id": "flow",
+      "type": "flow.pack",
+      "path": "flow.json"
+    },
+    {
+      "id": "test-spec",
+      "type": "test.spec",
+      "path": "spec.json"
+    }
+  ]
 }

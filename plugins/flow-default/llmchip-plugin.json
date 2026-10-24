@@ -2,8 +2,26 @@
   "id": "flow-default",
   "version": "0.1.0",
   "title": "Default flow: stages S0-S7 and their checks (requirements §4)",
-  "kinds": ["flow-pack"],
+  "kinds": [
+    "flow-pack"
+  ],
   "runtime": "data",
   "kernelApi": "^0.3",
-  "data": [{ "id": "flow", "type": "flow.pack", "path": "flow.json" }]
+  "data": [
+    {
+      "id": "flow",
+      "type": "flow.pack",
+      "path": "flow.json"
+    },
+    {
+      "id": "estimate-request-proxy",
+      "type": "estimate.request",
+      "path": "estimate-request-proxy.json"
+    },
+    {
+      "id": "timing-exceptions-none",
+      "type": "timing.exceptions",
+      "path": "timing-exceptions-none.json"
+    }
+  ]
 }

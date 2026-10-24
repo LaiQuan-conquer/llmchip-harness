@@ -104,6 +104,9 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
     const point = { architecture: 'taalas-spatial/1' as const, dividers: 16, clockMHz: 8, die: { xMm: 5, yMm: 3 } }
     await pipeline.designArch(client, 'sp', point, false, () => {})
     await pipeline.exploreArch(client, 'sp', point, () => {})
+    // A development pipeline of S0 in the project, for the pipeline panel.
+    const develop = await client.call('pipelines.start', { project: 'ui', stage: 'S0', kind: 'develop' })
+    for (let i = 0; i < 600 && (await client.call('pipelines.get', { pipeline: develop.id })).state === 'running'; i++) await new Promise((r) => setTimeout(r, 100))
     const runtime = readRuntimeInfo(kernel.layout.root)!
     try {
       const page = await chromium.newPage()
@@ -130,8 +133,20 @@ describe.skipIf(!existsSync(DIST))('Web UI in a browser', () => {
           expect(CATALOG_KEYS.filter((key) => text.includes(key)), `${lang}/${name}`).toEqual([])
           expect(text, `${lang}/${name}`).not.toMatch(/\b(nav|common|overview|agents|trajectory|estimator|incidents|artifacts|settings|status|feasibility|playground)\.[a-z]\w*/)
         }
-        // The S0 detail view, opened from its card on the flow page.
+        // The two entries: run all tests of S0 from its card; the pipeline appears in the panel.
         await page.click('button[data-page=flow]')
+        await page.waitForSelector('button[data-pipeline="all:develop"]')
+        const before = (await client.call('pipelines.list', { project: 'ui' })).pipelines.length
+        await page.click('#flow-S0 button[data-pipeline="S0:test"]:not([disabled])')
+        await page.waitForFunction(`document.querySelectorAll('.pipeline-panel [data-pipeline-id]').length > ${before}`)
+        const tests = (await client.call('pipelines.list', { project: 'ui' })).pipelines[0]!
+        expect(tests).toMatchObject({ kind: 'test', stages: ['S0'] })
+        await page.waitForSelector('.pipeline-nodes')
+        const panel = await page.innerText('.app')
+        expect(CATALOG_KEYS.filter((key) => panel.includes(key)), `${lang}/pipelines`).toEqual([])
+        expect(panel).not.toMatch(/\bpipe\.[a-z]/)
+        expect(panel).toContain(lang === 'zh' ? '运行全部测试' : 'Run all tests')
+        // The S0 detail view, opened from its card on the flow page.
         await page.click('#flow-S0 .flow-detail')
         await page.waitForSelector('.s0-answer')
         const detail = await page.innerText('.app')

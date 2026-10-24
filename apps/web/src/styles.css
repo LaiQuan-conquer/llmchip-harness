@@ -127,13 +127,13 @@ pre.content { max-height: 60vh; }
 .flow-path { display: flex; flex-wrap: wrap; align-items: center; row-gap: 14px; }
 .flow-segment { display: flex; align-items: center; }
 .flow-segment:not(:last-child)::after { content: ''; width: 18px; height: 2px; background: #c7ccd6; margin: 0 2px; }
-.flow-node { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 128px; min-height: 76px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; text-align: left; }
+.flow-node { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 128px; min-height: 76px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: inherit; text-align: left; }
 .flow-node .flow-id { font-weight: 700; font-size: 12px; color: var(--muted); }
 .flow-node .flow-name { font-size: 13px; line-height: 1.25; }
 .flow-node .flow-state { font-size: 11px; color: var(--muted); margin-top: auto; }
 .flow-node.done { border-color: var(--ok); background: #f1faf4; }
 .flow-node.done .flow-state, .flow-node.done .flow-id { color: var(--ok); }
-.flow-node.active, .flow-node.running { border-color: var(--warn); background: #fffaf0; }
+.flow-node.active, .flow-node.running { border-color: var(--warn); background: #fffaf0; color: inherit; }
 .flow-node.active .flow-state, .flow-node.running .flow-state { color: var(--warn); }
 .flow-node.running .flow-state::before { content: '● '; animation: flow-blink 1s infinite; }
 .flow-node.attention { border-color: var(--bad); background: #fff5f5; }
@@ -261,3 +261,9 @@ pre.content { max-height: 60vh; }
 .vchip-sample p { margin: 0 0 2px; }
 .vchip-continuation { color: #1f4fb8; margin-left: 2px; }
 .nowrap { white-space: nowrap; }
+.pipeline-entries { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.pipeline-status { margin: 4px 0 8px; }
+.pipeline { border-top: 1px solid #e3e6eb; padding: 8px 0; }
+.pipeline-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pipeline-nodes { width: 100%; margin-top: 6px; font-size: 13px; }
+.pipeline-nodes td { vertical-align: top; padding: 2px 8px 2px 0; }

@@ -4,10 +4,10 @@ English | [中文](implementation.zh.md)
 
 | Item | Content |
 |---|---|
-| Document version | v0.2 |
+| Document version | v0.3 |
 | Date | 2026-10-24 |
-| Describes | R0 (owner decision 2026-10-24): approval gates, waivers, export and `packager` removed, the flow is S0–S7; before it, commit `9434f86`: M4's `9cc76a0`, plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, the exact speed and microarchitecture options of S3, the spatial engine `taalas-spatial/1` through S5, and the virtual-chip test harness `llmchip-vchip`, standalone and as the kernel plugin `vchip` with its Web UI page (design L4) |
-| Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.7, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.11 |
+| Describes | R1: stage pipelines (every step's "run development" and "run all tests"), CPU/memory/GPU scheduling, run checkpoints and resumption; R0 (commit `d771bb9`, owner decision 2026-10-24): approval gates, waivers, export and `packager` removed, the flow is S0–S7; before it, commit `9434f86`: M4's `9cc76a0`, plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, the exact speed and microarchitecture options of S3, the spatial engine `taalas-spatial/1` through S5, and the virtual-chip test harness `llmchip-vchip`, standalone and as the kernel plugin `vchip` with its Web UI page (design L4) |
+| Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.7, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.12 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
 
@@ -30,7 +30,8 @@ Source references name a file and a symbol (`Scheduler.execute` in [runs/schedul
 | M3 RTL and verification (S4–S5) | `3842361` | Done on the proxy model | `tests/m3-flow.spec.ts` (needs the EDA image) |
 | M4 physical and signoff (S6–S7) | `9cc76a0` | Done on the proxy model, 1.2×2 mm die; its S8 tapeout package was removed with R0 | `tests/m4-flow.spec.ts` (opt-in, 39 min measured) |
 | M5 migration to the tapeout process, M6 post-silicon | — | Deleted (owner decision 2026-10-24: no tapeout). The migration impact assessment (FR-MIG) still works | `tests/m4-kernel.spec.ts`, `plugins/estimator/tests/test_migration.py` |
-| R0 approval gates and waivers removed | this commit | Done: no gates, snapshots, approvals, release, waivers or export; `packager` deleted; requirements v0.7, architecture v0.11 | `tests/workflow.spec.ts`, `tests/m4-kernel.spec.ts`, the flow tests |
+| R0 approval gates and waivers removed | `d771bb9` | Done: no gates, snapshots, approvals, release, waivers or export; `packager` deleted; requirements v0.7, architecture v0.11 | `tests/workflow.spec.ts`, `tests/m4-kernel.spec.ts`, the flow tests |
+| R1 pipelines and resources | this commit | Done: stage pipelines (`pipelines.*`, CLI `pipeline`, the two entries and the pipeline panel of the Flow page), `flow-default` declares the development pipeline and the required tests of S0–S7; CPU, memory and GPU scheduling; run checkpoints and resumption (IF-2 `checkpoint`, input `resume`); architecture v0.12 | `tests/pipelines.spec.ts`, `tests/pipelines-flow.spec.ts`, `tests/resources.spec.ts`, `tests/checkpoint.spec.ts` |
 
 So M1 as a whole is **not** accepted: AC-M1-01 (installer) and the desktop shell are missing. See §7.
 
@@ -42,17 +43,18 @@ So M1 as a whole is **not** accepted: AC-M1-01 (installer) and the desktop shell
 | K1 event store | Append-only SQLite log with a hash chain, projections, replay | [events/store.ts](../packages/kernel/src/events/store.ts) |
 | K2 artifact store | Content-addressed, read-only objects, lineage, label propagation | [artifacts/store.ts](../packages/kernel/src/artifacts/store.ts) |
 | K3/K6 workflow | Projects, slots, branches, stages (admission checks only), verdicts, migration records | [workflow/engine.ts](../packages/kernel/src/workflow/engine.ts) |
-| K4 scheduler | Persistent queue, process and container execution, timeouts, cancellation, retries, pause | [runs/scheduler.ts](../packages/kernel/src/runs/scheduler.ts) |
+| K3 pipelines | Every step's development pipeline and required tests: dependencies, failures and skips, reuse, cancel, resume after the fix, continuing after a kernel restart | [workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts) |
+| K4 scheduler | Persistent queue, CPU/memory/GPU scheduling, process and container execution, timeouts, cancellation, retries (resuming from checkpoints), pause, run checkpoints | [runs/scheduler.ts](../packages/kernel/src/runs/scheduler.ts) |
 | K5 API policy | Owner token vs external token; method allow-list | [security/policy.ts](../packages/kernel/src/security/policy.ts) |
 | K8 egress | Labels, destination limits, NDA fingerprints, declassification, audit | [security/egress.ts](../packages/kernel/src/security/egress.ts) |
 | K9 plugin registry | Manifest scan, validation, data import | [plugins/registry.ts](../packages/kernel/src/plugins/registry.ts) |
 | K10 config and secrets | Layered config, AES-256-GCM secret file, redaction | [config/](../packages/kernel/src/config/) |
 | Agent runtime | Managed agents with tool checks, change sets, handoff, loop and budget stops | [agents/runtime.ts](../packages/kernel/src/agents/runtime.ts), [agents/providers.ts](../packages/kernel/src/agents/providers.ts) |
 | IF-1 kernel API | JSON-RPC 2.0 over WebSocket `/v1/rpc`, HTTP `/v1/artifacts` | [server.ts](../packages/kernel/src/server.ts), [client](../packages/client/src/index.ts) |
-| IF-2 plugin protocol | JSON-RPC 2.0, one message per line, over stdio | [plugins/process.ts](../packages/kernel/src/plugins/process.ts), SDKs |
+| IF-2 plugin protocol | JSON-RPC 2.0, one message per line, over stdio; notifications `progress`, `log`, `checkpoint` | [plugins/process.ts](../packages/kernel/src/plugins/process.ts), SDKs |
 | IF-3 tool containers | Podman, no network, read-only inputs and plugin directory | `Scheduler.containerCommand` |
-| CLI and MCP | `llmchip` commands, generic `call`, MCP on stdio | [cli/src/main.ts](../packages/cli/src/main.ts), [cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
-| Web UI | Nine pages, Chinese and English. The default page, Flow, shows a project's S0–S7 path with results and checks in plain language | [apps/web/src](../apps/web/src) |
+| CLI and MCP | `llmchip` commands (including `pipeline plan/start/list/show/cancel/resume`), generic `call`, MCP on stdio | [cli/src/main.ts](../packages/cli/src/main.ts), [cli/src/mcp.ts](../packages/cli/src/mcp.ts) |
+| Web UI | Nine pages, Chinese and English. The default page, Flow, shows a project's S0–S7 path with results and checks in plain language; all stages and every stage have two entries, "run development" and "run all tests", and the pipeline panel lists each pipeline's nodes, runs, verdicts and reasons | [apps/web/src](../apps/web/src) |
 | Domain flow | S0–S7 with bundled plugins, each stage judged by its checks (table in §2.4) | [plugins/](../plugins) |
 | Real model import and graph recovery | A downloaded model directory (safetensors + config.json + tokenizer.json, or llama2.c) is imported by local path, censused from its headers, estimated, recovered into a computation graph (Llama family: Llama, Mistral, SmolLM, Qwen2, Qwen3, llama2.c), executed as L0 and tested item by item against transformers / the run.c port: weights bit for bit, configuration, parameter count, every layer's hidden state, logits, top-1 and greedy generation per prompt, single-token and long-sequence boundary cases. A project's own llama2.c weights (e.g. the proxy) are imported from its artifacts. The S1 page picks any imported model or a new path, takes custom prompts, and shows every test item | [model-llama/src/llmchip_model/pipeline.py](../plugins/model-llama/src/llmchip_model/pipeline.py) |
 
@@ -125,6 +127,7 @@ No tool checks the following rules, so keeping them is up to you:
 | 10 | K8 gateway | `EgressGateway` | fingerprint and declassification projections | events, artifacts, incidents |
 | 11 | K5 policy | `Policy` | the external allow-list | incidents, gateway |
 | 12 | K3/K6 | `Workflow` | flow packs, check definitions, `workflow` projection | events, artifacts, registry, scheduler, incidents |
+| 12a | K3 pipelines | `Pipelines` ([workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts)) | `pipelines` projection, the runs it waits for | events, registry, scheduler, workflow, logger |
 | 13 | Agent runtime | `AgentRuntime` | `agents` projection, live sessions | events, artifacts, scheduler, workflow, gateway, incidents, logger, secrets (not the API policy) |
 | 14 | K9 in-kernel host | `PluginHost` | Cordis root context | events, artifacts, logger |
 | 15 | IF-1 server, built in `Kernel.start` | `KernelServer` ([server.ts](../packages/kernel/src/server.ts)) | sockets; `Kernel.start` writes `run/harnessd.json` | policy, handlers, events (subscriptions), artifacts (HTTP) |
@@ -152,7 +155,7 @@ plugins/                   extra plugin search path
 
 | Plugin | Runtime | Handlers | Used in | Unit tests |
 |---|---|---|---|---|
-| `flow-default` | data | flow pack: S0–S7, 20 checks, stage entry checks, hard-constraint slots | all | via `tests/*-flow.spec.ts` |
+| `flow-default` | data | flow pack: S0–S7, 20 checks, stage entry checks, hard-constraint slots, every stage's development pipeline and required tests; data `estimate-request-proxy`, `timing-exceptions-none` | all | via `tests/*-flow.spec.ts` |
 | `process-library` | data | profiles `gf180mcu`, `sephonchitech-180bcd`; `library-180nm`; `signoff-gf180mcu` | S0, S3, S6–S7 | via estimator and flow tests |
 | `estimator` | process (Python) | `estimate`, `check_views`, `migrate` | S0, stage entry S4/S6/S7, FR-MIG | `test_estimate.py`, `test_migration.py` |
 | `model-llama` | process (Python) | `synthesize`, `intake`, `reference`, `import`, `recover`, `run_graph`, `compare` | S0 (import), S1 | `test_model.py`, `test_graph.py` |
@@ -173,7 +176,7 @@ What each domain plugin produces:
 
 - **estimator**: feasibility, area, cost and performance estimates (FR-EST), with low/typical/high values, a source and confidence per item, and the missing parameters. `check_views` reports the integration views a calibrated storage implementation has, per stage. `migrate` assesses migration impact against the design's process-capability dependencies (FR-MIG).
 - **process-library**: process profiles (with technology data for migration), the implementation library and the GF180 signoff rules. Every value records its source and confidence. Empirical values stay empirical until calibrated.
-- **flow-default**: stages S0–S7 with their checks, stage entry checks, and the hard-constraint slots `constraints`, `timing-exceptions` and `signoff-rules`. There are no approval gates (owner decision 2026-10-24).
+- **flow-default** (flow version 0.12.0): stages S0–S7 with their checks, stage entry checks, and the hard-constraint slots `constraints`, `timing-exceptions` and `signoff-rules`. There are no approval gates (owner decision 2026-10-24). Every stage declares a development pipeline `develop` and required tests `tests`, which drive the 5K proxy along the same positive path as `yarn demo`: the params are fixed in the flow pack (the proxy's structure, the ternary numeric scheme, the vector engine on the 1.2×2 mm die); default artifacts (the proxy's estimate request `estimate-request-proxy`, the empty timing exception registry `timing-exceptions-none`, the process profile, the evaluation set, the verification plan, the signoff rules) are bound only when the slot is empty. S1 has no required test (the proxy's intake has no check).
 - **model-llama**: model import and graph recovery (below), plus llama2.c checkpoint and tokenizer intake into the llama2.c Model IR used by S2–S7. Proxy models (a planned model's structure, fixed seed, untrained, with the bundled `evalset-proxy`). The L0 FP32 reference, a NumPy port of `run.c`, checked against the vendored, compiled `run.c` in `plugins/model-llama/upstream/`.
 - **numeric**: quantization (int8/int4/int3/ternary, group scales), the numeric spec (requirements §3.4.2), and the L2 bit-exact integer model with observation-point traces. Also the L2-vs-L0 accuracy evaluation (S2 evidence), with bundled evaluation sets. The rounding (`half-up`, `half-even`, `truncate`), the overflow handling (`saturate`, `wrap`) and the accumulator width (the proven no-overflow width, or a narrower one) are structured fields of the spec, defined once in [arith.py](../plugins/numeric/src/llmchip_numeric/arith.py); the defaults give the L2 of before they existed, bit for bit. `quantize_graph` / `evaluate_graph` do the same for any recovered graph ([graph_l2.py](../plugins/numeric/src/llmchip_numeric/graph_l2.py), spec format `llmchip-numeric-graph-spec/1`): an analysis of models the vector engine cannot implement, with fraction bits per layer and a 24-bit residual stream by default, judged by `numeric.accuracy`. On a llama2.c graph it equals the chip L2 bit for bit.
 - **arch-taalas**: the Taalas-style hardwired template. It derives the chip spec and PPA from a frozen numeric spec, and checks their consistency (the S3 check `arch.spec`). Its speed is not a formula: it compiles the engine's microcode (`Compiled`) and counts its cycles with [perf.py](../plugins/rtl-taalas/src/llmchip_rtl/perf.py), a state-by-state model of the core and the memory port whose busy cycles equal the RTL simulation's, step by step ([performance.py](../plugins/arch-taalas/src/llmchip_arch/performance.py); `verify_spec` recomputes them, so a chip spec cannot claim another speed). The microarchitecture options of the chip spec are the lanes, `memoryInterface` (`spi`, or `sqi`: quad SPI on four bidirectional lines) and `operandBuffers` (`none`; `attention`: the head's q and the output accumulators as rotating registers; `all`: also a vector buffer for MATVEC and RMS). `explore` evaluates every combination (exact cycles, estimated area, fit, Pareto front), also for a graph numeric spec of an imported model (analysis, from its shape).
@@ -227,7 +230,7 @@ yarn llmchip events list                     # what was recorded
 2. Event 1 is `kernel.started`.
 3. `PluginRegistry.scan` searches `plugins/` (when `plugins.bundled`), then `<home>/plugins`, then `plugins.searchPaths`. `--plugins` replaces the `searchPaths` of `config.json`, because the config layers merge shallowly. It validates each `llmchip-plugin.json` against `PluginManifest` and the `kernelApi` range, and imports every `data` file as an artifact (events 2–10 are `artifact.created`, all `plugin:*`). It rejects a bad plugin, records the problem, and does not abort the start.
 4. `Workflow.loadFlows` reads every `flow.pack` artifact and collects check definitions. A pack with conflicting definitions of one check id, or one that does not match the schema (for example one that still declares gates), is rejected as a `FLOW_INVALID` problem written to the kernel log. The pack a project was created with stays stored as it was: when a project from before R0 is read, its history-only fields (`gates`, the stages' entry `gates`, the checks' `waiver`) are ignored.
-5. `Scheduler.recover` finishes any run still recorded as `running` as `interrupted`. It kills the run's orphaned process group (only if `/proc/<pid>/environ` carries `LLMCHIP_RUN=<id>`) and its container. It retries the run if attempts remain, and wipes `runs/`. In-kernel plugins passed in `KernelOptions.plugins` are loaded next (tests only).
+5. `Scheduler.recover` finishes any run still recorded as `running` as `interrupted`. It kills the run's orphaned process group (only if `/proc/<pid>/environ` carries `LLMCHIP_RUN=<id>`) and its container. It retries the run if attempts remain (from its latest checkpoint when the handler declares `resume`), and wipes `runs/`. Then `Pipelines.recover` continues the pipelines still running: a node whose run was interrupted runs again (from the checkpoint, likewise), and runs that ended meanwhile are recorded on their nodes. In-kernel plugins passed in `KernelOptions.plugins` are loaded next (tests only).
 6. `KernelServer.listen` binds to `127.0.0.1:<random port>`. `run/harnessd.json` is written with the URL and two fresh tokens. Then `Scheduler.pump` runs.
 
 **The command** (`case 'estimate'` in [cli/src/main.ts](../packages/cli/src/main.ts)):
@@ -301,6 +304,31 @@ Older event logs with `approval.*`, `waiver.recorded` and `package.exported` eve
 
 `tests/flow-helpers.ts` `throughS3` and `throughS5Proxy` drive the same path through S3 and S5 with the real plugins. `tests/m4-flow.spec.ts` continues it to S7 and traces the GDS back to the model weights.
 
+
+### 3.3 Path C: the two entries of a stage (pipelines)
+
+Every step's "run development" and "run all tests" are pipelines (requirements FR-PRJ-07/08). These commands were run in sequence on a fresh home with the bundled plugins on 2026-10-24:
+
+```sh
+yarn llmchip project create demo --title demo
+yarn llmchip pipeline plan demo S2 --kind develop      # S2: 5 nodes, not ready; lists each missing slot (S2/quantize needs slot:model-ir ...), exit code 1
+yarn llmchip pipeline plan demo all --kind develop     # S0, S1, S2, S3, S4, S5, S6, S7: 40 nodes, ready
+yarn llmchip pipeline start demo S0 --kind develop --wait   # develop S0  passed  (3/3 done); S0/estimate judged estimate.feasibility: pass
+yarn llmchip pipeline start demo S1 --kind develop --wait   # develop S1  passed  (5/5 done)
+yarn llmchip pipeline start demo S0 --kind test --wait      # test S0  passed; S0/estimate.feasibility reused the development run
+yarn llmchip pipeline list --project demo
+```
+
+What happens inside [workflow/pipelines.ts](../packages/kernel/src/workflow/pipelines.ts):
+
+- **`Pipelines.plan`** expands the nodes from the flow pack the project was created with (`build`): per step of a development pipeline `<stage>/defaults`, the `beforeEntry` nodes, `<stage>/enter`, then the other nodes; `all` chains every stage that declares a development pipeline (a step's `defaults` depends on all nodes of the previous one). Each required test is one node, independent of the others. Inputs refer to `slot:<slot>`, `data:<data id>` or `node:<node>.<output>`. A slot that is unbound now and that no earlier node of this pipeline binds, or data that does not exist, is listed as missing.
+- **`Pipelines.start`** refuses with `PIPELINE_INPUTS_MISSING` when inputs are missing, with `PIPELINE_EMPTY` when nothing is declared, and with `PIPELINE_RUNNING` when a pipeline is running on one of the stages on the same project branch; otherwise it appends `pipeline.started` (with all nodes) and calls `advance`.
+- **`advance`** repeats: a pending node whose dependencies are all done is executed; a node with a failed, skipped or cancelled dependency is `skipped` (`PIPELINE_DEPENDENCY_FAILED`); when no node is pending or running it appends `pipeline.finished` (`passed` if all are done, else `failed`).
+- Executing a node: `defaults` binds the empty slots to the default artifacts; `enter` calls `Workflow.enterStage` (the admission checks judge); `run` starts a run as the person who started the pipeline; `test` first looks for a successful run of the same handler with the same params (defaults filled in) and inputs and reuses it (`reused`), else starts one. When the run ends (`Scheduler.wait`), a `run` node binds its outputs to slots and judges its listed checks, a `test` node judges its check; any verdict other than `pass`, a run that did not end successfully, or a refused binding makes the node `failed`, with the reason. A pipeline binds a hard-constraint slot only while it is empty; an artifact a person bound is not replaced (`PIPELINE_HARD_CONSTRAINT_BOUND`), and a person binds the new one by hand. Only a node's current run (or the run it reused) finishes the node: when a pipeline is resumed right after a cancel, the cancelled run does not decide the new attempt. Every state change is a `pipeline.node` event.
+- **`Pipelines.cancel`** marks unfinished nodes `cancelled` and cancels their runs; **`Pipelines.resume`** (a failed or cancelled pipeline) appends `pipeline.resumed` and puts the failed, skipped and cancelled nodes back to pending; done nodes stay. When a node with the same inputs runs again and its last run left a checkpoint, and the handler declares `resume`, it continues from the checkpoint.
+
+`tests/pipelines.spec.ts` proves these semantics with `test-flow` (including continuing after the kernel is killed, from the checkpoint of the interrupted node); `tests/pipelines-flow.spec.ts` runs the development and the tests of S0–S3 on a fresh project with the bundled plugins, and S0–S7 through `all` with `LLMCHIP_FULL_FLOW=1`.
+
 ---
 
 ## 4. Data and resource ownership
@@ -314,6 +342,8 @@ Older event logs with `approval.*`, `waiver.recorded` and `package.exported` eve
 | Artifact content and catalog | `ArtifactStore.put` (`artifact.created`) | scheduler (copies), HTTP download, agents (`read_artifact`) | immutable; `markDeleted` only marks it, and content is kept (no purge or GC yet) |
 | Artifacts from plugin data files | `PluginRegistry.register`, at each scan | flows, CLI `estimate`, tests | idempotent by hash; label default `public` |
 | Run outputs | `Scheduler.registerOutputs` | any client | only after `exited_zero`; label ≥ run label |
+| Run checkpoints (`run.checkpoint`) | `Scheduler.storeCheckpoint`, when an IF-2 `checkpoint` notification arrives | retries and pipeline resumption (input `resume`), any client | stored while the run is going, one after the other in the order reported, kept if the run fails; the path must be a regular file in the run's `work/` (not a symbolic link); a run ends only after all its checkpoints are stored |
+| Pipelines | `Pipelines` (`pipeline.*` events) | API, UI, CLI | events only; continued by `Pipelines.recover` after a restart |
 | Run logs (`run.log`) | `Scheduler.execute` | any client | stored for every run, whatever its execution status |
 | Uploads (`PUT /v1/artifacts`) | `KernelServer` for the owner token only | — | external tokens are refused with an incident |
 | Run workspace `runs/<id>/` | `Scheduler.execute` creates and removes it | the plugin (in/ read-only) | removed after every run; all of `runs/` is wiped at start |
@@ -326,7 +356,7 @@ Older event logs with `approval.*`, `waiver.recorded` and `package.exported` eve
 | Secrets | `SecretStore.set` / `remove` (`secret.changed` carries names only) | providers via `secret(name)` | values never in events or logs (`Redactor`) |
 | `run/harnessd.json`, lock | `Kernel.start` / `shutdown` | CLI, MCP bridge, tests | deleted at shutdown; a stale lock from a dead pid is taken over |
 
-Event kinds by writer: `kernel.started/stopped`, `projection.rebuilt` (Kernel); `kernel.paused`, `run.*` (Scheduler); `artifact.*` (ArtifactStore); `secret.changed` (SecretStore); `plugin.*` (PluginHost); `verdict.*`, `project.*`, `stage.*`, `constraint.*`, `migration.*` (Workflow; `approval.*`, `waiver.recorded` and `package.exported` are history only, with no writer); `incident.*` (Incidents); `egress.*`, `declass.*` (EgressGateway); `task.*`, `agent.step`, `changeset.*` (AgentRuntime). Every payload is validated against its schema definition (`KERNEL_EVENT_PAYLOAD_DEFS`) before it is hashed. Unknown kinds are refused.
+Event kinds by writer: `kernel.started/stopped`, `projection.rebuilt` (Kernel); `kernel.paused`, `run.*` including `run.checkpointed` (Scheduler); `pipeline.started`, `pipeline.node`, `pipeline.resumed`, `pipeline.finished` (Pipelines); `artifact.*` (ArtifactStore); `secret.changed` (SecretStore); `plugin.*` (PluginHost); `verdict.*`, `project.*`, `stage.*`, `constraint.*`, `migration.*` (Workflow; `approval.*`, `waiver.recorded` and `package.exported` are history only, with no writer); `incident.*` (Incidents); `egress.*`, `declass.*` (EgressGateway); `task.*`, `agent.step`, `changeset.*` (AgentRuntime). Every payload is validated against its schema definition (`KERNEL_EVENT_PAYLOAD_DEFS`) before it is hashed. Unknown kinds are refused.
 
 ### 4.2 Cancellation and shutdown
 
@@ -335,7 +365,7 @@ Event kinds by writer: `kernel.started/stopped`, `projection.rebuilt` (Kernel); 
 - **Kernel stop** (`Kernel.shutdown`) runs in a fixed order:
   1. delete the runtime file;
   2. close the server;
-  3. stop the scheduler (abort every run as `interrupted` and wait for each to record its result);
+  3. stop advancing pipelines (`Pipelines.stop`: runs interrupted now do not fail their nodes; the next `Pipelines.recover` runs them again), then stop the scheduler (abort every run as `interrupted` and wait for each to record its result);
   4. dispose in-kernel plugins in reverse load order, with timeouts;
   5. append `kernel.stopped`;
   6. close the database and release the lock.
@@ -391,6 +421,25 @@ Example: the stage entry check `impl.views.S4`. It is defined in [flow-default/f
    - Stage entry on views is covered in [tests/calibration.spec.ts](../tests/calibration.spec.ts) (EDA image).
 
 A new flow pack is a `data` plugin with a `flow.pack` data file ([test-flow](../tests/fixtures/plugins/test-flow)). Projects choose one with `projects.create {flow}`.
+
+### 5.2a A stage's development pipeline and required tests
+
+Example: stage S2 of [flow-default/flow.json](../plugins/flow-default/flow.json): in `develop`, `quantize` binds `spec` and `weights` to `numeric-spec` and `l2-weights`, `evaluate` takes inputs such as `node:quantize.spec` and judges `accuracy.budget`, `infer` binds `trace` to `l2-trace`; `tests` judges `accuracy.budget` on the bound slots. The smallest example is stages A and B of [test-flow](../tests/fixtures/plugins/test-flow/flow.json).
+
+1. Write `develop` in the stage: `defaults` (slot → `data:` or `slot:` reference, bound only when the slot is empty) and `nodes`. Each node has an `id`, `plugin`, `handler`, and optional `params`, `inputs` (input name → reference or array of references), `after`, `bind` (output name → slot), `judge` (check ids), `beforeEntry` (runs before the stage is entered, for its admission checks to judge) and `timeoutMs`.
+2. Write `tests` in the stage: each is a `check` with the `inputs` and `params` of its run. The handler comes from the check definition; a successful run with the same params and inputs is reused, so tests after the development pipeline do not compute again.
+3. References point only to earlier nodes of the step (`node:`), to slots (`slot:`) or to plugin data (`data:`); data crosses steps through slots. A flow pack referring to an undeclared node fails with `PIPELINE_INVALID` when it is expanded.
+4. When params change what a check judges, change the check's `version` as in §5.2; pipelines themselves have no version.
+5. Test as [tests/pipelines.spec.ts](../tests/pipelines.spec.ts) (semantics) and [tests/pipelines-flow.spec.ts](../tests/pipelines-flow.spec.ts) (real plugins: on a fresh project every step must be `ready` and pass, and the tests must reuse the development runs) do.
+
+### 5.2b A handler's resources and checkpoints
+
+Example: `heavy` (`resources: {memGb: 3}`), `gpu` (`gpu: 1`) and `steps` (checkpoints and resumption, [plugin.ts](../tests/fixtures/plugins/stub-tool/plugin.ts)) of [stub-tool](../tests/fixtures/plugins/stub-tool/llmchip-plugin.json).
+
+1. Resources: write `resources: {cpu, memGb, gpu}` in the handler's manifest. Without it, process plugins count as 1 core and 1 GiB, container plugins as the scheduler's `containerCpus`/`containerMemory`, neither with a GPU. A container run's `--cpus` and `--memory` are this request. Only one run uses GPUs at a time (requirements NFR-15), and only it sees them (`CUDA_VISIBLE_DEVICES`); container plugins are not given GPUs. The host's capacity is the configuration `scheduler.resources`; items not written are detected (CPU cores, total memory, `nvidia-smi -L`).
+2. Checkpoints: the handler writes the checkpoint completely in its work directory (to a temporary name, then renames it), then calls `ctx.checkpoint(path, name)` (Python and TypeScript), with `path` relative to `work/`.
+3. Resumption: declare the optional input `resume` (type `run.checkpoint`) in the manifest and read `ctx.resume` at the start of the handler. On a retry (`maxAttempts` > 1), when a pipeline reruns a node interrupted by a kernel restart, and when `pipelines.resume` reruns a node with the same inputs, the kernel passes the latest checkpoint.
+4. Test as [tests/resources.spec.ts](../tests/resources.spec.ts) and [tests/checkpoint.spec.ts](../tests/checkpoint.spec.ts) do; the Python SDK's notification is covered by `python/llmchip-sdk/tests/test_protocol.py`.
 
 ### 5.3 Process, library or template data
 
@@ -524,11 +573,11 @@ Measured on the development machine (WSL2, Node 24.22, uv 0.13, Podman 3.4 with 
 |---|---|---|
 | `yarn check:workspace` | packages, references, `workspace:*` deps, vendor manifest and licenses | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` matches the schema | "up to date (2 files)" |
-| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 164 passed, 1 skipped, 6 min 42 s with the EDA image (2026-10-24; R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
+| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 165 passed, 1 skipped, 6 min 43 s with the EDA image (2026-10-24, R1); at R0, 164 passed, 1 skipped (R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
 | `yarn typecheck` | project references, then sources, tests, scripts and the Web UI | clean |
 | `yarn build` | `lib/` of every package, `apps/web/dist` | clean |
-| `yarn test` | all Vitest specs (below) | 29 files passed, 1 skipped (m4-flow); 103 tests passed, 1 skipped (2026-10-24) |
-| `yarn verify` | all of the above in order; required before every commit | exit 0 (2026-10-24); with the images present, Python checks 6 min 42 s, Vitest 732 s |
+| `yarn test` | all Vitest specs (below) | 33 files passed, 1 skipped (m4-flow); 125 tests passed, 2 skipped (m4-flow and S0–S7 of `pipelines-flow`, both opt-in; 2026-10-24) |
+| `yarn verify` | all of the above in order; required before every commit | exit 0 (2026-10-24); with the images present, Python checks 6 min 43 s, Vitest 740 s |
 | `LLMCHIP_FULL_FLOW=1 yarn test tests/m4-flow.spec.ts` | full S0–S7 on the proxy, and the lineage from the GDS to the weights | see §6.3 |
 | `yarn llmchip events verify` / `artifact verify` | hash chain, stored content against hashes | `ok: N … checked` |
 | `yarn vchip bench CHIP [--reference R] [--golden G]` | the test harness on a chip: generation over a prompt set, quality and speed, the chip's policy, a run directory | stories260K numeric (int8) chip against its reference, 20 prompts to the end of a 64-token context: next-token agreement 0.992, identical generations 0.65, perplexity 3.167 (reference 3.159), 11 s (2026-10-22). `vchip conform` passes on the reference and numeric chips of stories260K and on the reference chip of tiny Qwen3 |
@@ -550,6 +599,10 @@ Without the container images, `calibration`, `m3-flow`, `ui-latency` and `contai
 | `packages/kernel/tests/main.spec.ts`, `tests/cli.spec.ts` | `harnessd` and `llmchip` command lines | FR-INT-07 | always |
 | `tests/kernel-api.spec.ts` | token, param validation, uploads, gapless subscriptions, no secrets in logs, single kernel per home | IF-1 | always |
 | `tests/runs.spec.ts` | queueing checks, crashes, invalid outputs, timeout, cancel, pause, orphan kill and retry | K4, AC-M1-04 | always |
+| `tests/resources.spec.ts` | scheduling by capacity: a run that does not fit waits in queue order (and the runs behind it too), small runs side by side, GPUs to one run at a time (with two GPUs too) and hidden from the others, a run larger than the whole capacity runs alone | NFR-15 | always |
+| `tests/checkpoint.spec.ts` | a checkpoint is stored at once as an artifact of the running run; a crashed run leaves its checkpoint and the retry resumes with the input `resume`; a checkpoint outside the work directory is refused | FR-TRC-10, IF-2 | always |
+| `tests/pipelines.spec.ts` | plan and missing inputs, slots bound by earlier nodes in `all`, development pipeline (enter, run, bind, judge), tests reusing development runs, a failure stays failed and its dependents are skipped, resume after the fix, cancel, resume right after a cancel; one running pipeline per stage; hard-constraint slots not overwritten by pipelines; a flow pack with a dependency cycle refused; after a graceful kernel stop or a kill the pipeline continues and the interrupted node resumes from its checkpoint | FR-PRJ-07/08, FR-TRC-10, AC-15 | always |
+| `tests/pipelines-flow.spec.ts` | bundled plugins: on a fresh project the development and the tests of every step of S0–S3 pass, the tests reuse the development runs; `all` runs the development and all tests of S0–S7 | FR-PRJ-07/08 | S0–S3 always (needs `.venv`); S0–S7 only with `LLMCHIP_FULL_FLOW=1` **and** the EDA image; 1 passed in 1967 s (2026-10-24) |
 | `tests/recovery.spec.ts` | acknowledged writes survive repeated SIGKILL | NFR-04 | always |
 | `tests/workflow.spec.ts` | indeterminate on incomplete parse, crash or unqualified capability; no waivers: a failure stays a failure and opens an incident, only a fixed design passes, the history stays; stages entered without gates, the old methods are gone; a home written before R0 (projects on an old flow pack, approval/waiver/export events, `waived` verdicts, migration events with `gates`) still opens, replays and verifies its hash chain; a newly registered flow pack that still declares gates is refused; branches | AC-M1-03, architecture ADR-011 | always |
 | `tests/agents.spec.ts` | iteration loop on change sets, permissions, loop and budget stops, fake-PDK egress, handoff, lowered standards | AC-M1-02/07/08/09/13 | always |
@@ -608,7 +661,8 @@ After any change to the spatial generator (`llmchip_rtl/spatial/`) or to the tes
 - **Spatial engine** (measured 2026-10-21, proxy, 8 MHz): 1,327 cycles per token (6,029 tok/s); with the host's START and STATUS frames 2,059 cycles (about 3,900 tok/s). Synthesized cells 5.96 mm²: KV rings 2.09, matrix circuits 1.94 (serial adders 0.80, row outputs 0.75, delay lines 0.39), core logic 0.97 and its 16 softmax dividers 0.05, core registers 0.42, attention multipliers 0.41, tables 0.07, host 0.02. The core logic per dimension and the table cost are extrapolated for other shapes. The KV registers get their reset value from a zero pass after reset (AGENTS.md, owner decision 2026-10-21); the gate-level proof is due with the physical implementation. The generator implements dim a power of two (head size at least 4), 2 heads, 1 KV head and a context of 64, any number of layers and any hidden size up to 255, and refuses other shapes with a reason. Without a `die` (or `targetAreaMm2`) the area limit is the profile's prerun area (2.4 mm²), which the spatial engine does not fit; the PPA states the die it suggests (`suggestedDie`), and the design is made with that die until the prerun constraint is updated (P4).
 - **Migration**: the assessment works, and a confirmed one records the stage to restart. Downstream artifacts and verdicts are not marked invalid (FR-MIG-03, FR-TRC-05). Restarting at S3 or earlier needs a human (FR-MIG-04); this is untested: the only non-human caller is the external token, and `migration.apply` is not on the external allow-list. There is no NDA PDK import channel with automatic labelling (FR-INT-04, FR-SEC-01).
 - **Agents**: no change set size threshold (FR-AGT-06). No soft-constraint path (FR-AGT-09). No per-role tool profiles or LLMs (FR-AGT-14/19). The declassified handoff pack is suggested, not generated (FR-AGT-13a).
-- **UI**: no incident filters or jump links. No RTL, waveform or layout viewer beyond PNG. Settings lack LLM, quota and egress configuration (FR-UI-10/11/13, FR-AGT-25/26). The two entries of every step, run its development and run all its tests, are not built yet (R1). The Flow page's "done" is an approximation: every check judged in the stage has a passing latest verdict, the latest run of every handler succeeded, and the next stage was entered (except for the last stage); each step's list of required tests is defined in the flow pack only from R1.
+- **Scheduling and pipelines** (R1): the bundled plugins do not declare `resources` yet, so all are scheduled with the defaults (process plugins 1 core and 1 GiB, container plugins 4 cores and 8 GiB); their real needs follow once each plugin is measured. So on the 15 GB development machine, two container runs at the default limit (8 GiB) no longer run side by side but one after the other (before, they overcommitted memory); `tests/ui-latency.spec.ts` declares a capacity of 32 GiB to create its load. The queue is strict: a run that does not fit holds back the runs behind it, which costs utilization but starves none. Container plugins are not given GPUs. A test reuses an earlier run by comparing handler, params and inputs, not the plugin version (run records do not store it). Resuming "run all tests" after a kernel kill has no test (resuming a development pipeline does; both take the same path). Whether a pipeline may write hard-constraint slots (now: only while empty) is for the owner to decide. The params of `flow-default`'s pipelines are fixed in the flow pack and drive the 5K proxy only; the pipelines for Qwen come with the six-step flow pack from R2 on.
+- **UI**: no incident filters or jump links. No RTL, waveform or layout viewer beyond PNG. Settings lack LLM, quota and egress configuration (FR-UI-10/11/13, FR-AGT-25/26). The pipeline panel lists the nodes' states, runs, verdicts and reasons, but not each node's duration, resources or live log (the node graph of FR-UI-14 is only partly built). The Flow page's "done" is still an approximation: every check judged in the stage has a passing latest verdict, the latest run of every handler succeeded, and the next stage was entered (except for the last stage); it does not yet judge by the flow pack's required tests.
 - **Tool versions**: a run record holds the plugin and handler, not the container image of that run; the image is found only in the plugin's manifest (pinned by digest), so after the manifest changes the run itself does not tell the old image (FR-TRC-02, AC-08).
 - **Verdicts from before R0**: in an old home, a version-1 verdict `waived` of `accuracy.budget` or `phy.drc` followed by a version-2 pass opens a `standard_lowered` incident, although the standard became stricter (no waivers). Say so when closing the incident.
 - **CLI**: declassification and migration have no dedicated commands. Use `llmchip call` (FR-INT-07).
@@ -628,7 +682,7 @@ After any change to the spatial generator (`llmchip_rtl/spatial/`) or to the tes
 | C3 | Architecture §14 layout (`agent-runtime/`, `llm-providers/`, `mcp-server/`, `plugin-sdk-ts/` packages) | agent runtime and providers are in `packages/kernel/src/agents/`, MCP in `packages/cli/src/mcp.ts`, SDK in `packages/plugin-sdk` | layout ("Proposed") |
 | C4 | Architecture §6.2: change set writing into the project git working directory "arrives with the generators in M2" | not implemented in M2–M4 | §6 |
 | C5 | Architecture §3, §6.1: the agent runtime and LLM providers are in-kernel system plugins | `AgentRuntime` is a plain class built by the `Kernel` constructor; providers are kernel code; nothing goes through `PluginHost` | §6, ADR-001 |
-| C6 | Architecture §4.3: a run's outputs are registered all at once, only after the run succeeds | outputs are stored one by one; an invalid later output leaves the earlier ones in the store, unlisted by the run | K3/K4 |
+| C6 | Architecture §4.3: a run's outputs are registered all at once, only after the run succeeds (checkpoints excepted, R1) | outputs are stored one by one; an invalid later output leaves the earlier ones in the store, unlisted by the run | K3/K4 |
 | C7 | Architecture §5 item 5: shutdown stops the agent runtime before flushing the event store | `Kernel.shutdown` never stops `AgentRuntime`; a running `tasks.run` loop is not ended first. Whether it can append after the database closes has not been checked | K1, §6 |
 
 
