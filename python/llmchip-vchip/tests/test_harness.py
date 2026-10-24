@@ -414,3 +414,13 @@ def test_a_stopping_host_ends_its_chips_and_starts_no_new_one(tmp_path, make_pro
             process.ProcessChip(m)
     finally:
         process._stopping = False
+
+
+def test_the_bridge_removes_a_container_by_killing_it_first(monkeypatch):
+    """Podman 3.4 has no `rm -t`: the cleanup kills, then removes (the testbench ignores SIGTERM)."""
+    from llmchip_vchip.bridges import verilator
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(verilator.subprocess, "run", lambda command, **kw: calls.append(command))
+    verilator.remove_container("vchip-tb-1", timeout=1.0)
+    assert calls == [["podman", "kill", "vchip-tb-1"], ["podman", "rm", "-f", "vchip-tb-1"]]

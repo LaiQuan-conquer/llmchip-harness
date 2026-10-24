@@ -9,6 +9,7 @@ gets a network and sees the build directory read-only when it runs.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import secrets
@@ -49,9 +50,17 @@ FLAGS = [
 _BUILDS: set[str] = set()
 
 
+def remove_container(name: str, timeout: float = 10.0) -> None:
+    """Kills, then removes, a container. Podman 3.4 (this machine) has no `rm -t`, and the
+    testbench is PID 1 of its container and ignores SIGTERM, so the kill comes first."""
+    for command in (["podman", "kill", name], ["podman", "rm", "-f", name]):
+        with contextlib.suppress(subprocess.TimeoutExpired, FileNotFoundError):
+            subprocess.run(command, capture_output=True, timeout=timeout)
+
+
 def remove_builds() -> None:
     for name in list(_BUILDS):
-        subprocess.run(["podman", "rm", "-f", "-t", "0", name], capture_output=True, timeout=60)
+        remove_container(name)
 
 
 def testbench_source() -> bytes:
@@ -156,7 +165,7 @@ def build(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> Path:
             except subprocess.TimeoutExpired as e:
                 raise ChipError("timeout", f"the Verilator build took more than {timeout:g} s") from e
             finally:
-                subprocess.run(["podman", "rm", "-f", "-t", "0", name], capture_output=True, timeout=60)
+                remove_container(name)
                 _BUILDS.discard(name)
             if proc.returncode != 0 or not (tmp / BINARY).is_file():
                 raise ChipError("crash", f"Verilator failed ({proc.returncode}): {(proc.stdout + proc.stderr)[-2000:]}")

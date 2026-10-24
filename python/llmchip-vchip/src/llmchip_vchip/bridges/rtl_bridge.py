@@ -25,7 +25,7 @@ import numpy as np
 from ..interface import BaseChip, ChipError, StepResult
 from ..manifest import load
 from ..serve import serve
-from .verilator import BINARY, container
+from .verilator import BINARY, container, remove_container
 
 POINT_NAMES = {1: "attn_residual", 2: "ffn_residual", 3: "logits"}
 # The checks of op_host_check; conform's T-17 requires exactly these, all true.
@@ -75,8 +75,9 @@ class RtlSim(BaseChip):
         sys.exit(143)
 
     def _remove(self) -> None:
-        # -t 0: the testbench is PID 1 of its container and ignores SIGTERM; do not wait for it.
-        subprocess.run(["podman", "rm", "-f", "-t", "0", self.name], capture_output=True, timeout=60)
+        # The testbench is PID 1 of its container and ignores SIGTERM: kill it, then remove it,
+        # within the kernel's 2 s cancel grace.
+        remove_container(self.name, timeout=1.0)
 
     def _cmd(self, line: str, expect: str) -> list[str]:
         assert self.proc.stdin and self.proc.stdout
