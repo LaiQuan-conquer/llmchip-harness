@@ -19,7 +19,7 @@ from llmchip_model.census import census
 from llmchip_model.formats import WeightLoader, read_layout
 from llmchip_model.graph import recover
 from llmchip_numeric import graph_l2
-from llmchip_rtl.tile import checks, generator, rom
+from llmchip_rtl.tile import checks, generator, rom, views
 
 TOOLS = Path(os.environ.get("LLMCHIP_TOOLS", Path.home() / "projects" / "deepseek-harness" / "tools"))
 VERILATOR = TOOLS / "oss-cad-suite" / "bin" / "verilator"
@@ -147,3 +147,24 @@ def test_a_rule_violation_is_reported(built, tmp_path):
     top.write_text(top.read_text() + "\n/* verilator lint_off UNUSED */\n")
     report = checks.rules(tmp_path)
     assert report["violations"] >= 1
+
+
+@pytest.mark.skipif(not YOSYS.is_file(), reason="Yosys is not installed in the tools directory")
+def test_the_two_rom_views_are_equivalent(built, tmp_path):
+    graph, spec, arrays = built
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    report = views.rom_views(tmp_path, YOSYS)
+    assert report["equivalent"] is True, report["output"]
+
+
+@pytest.mark.skipif(not YOSYS.is_file(), reason="Yosys is not installed in the tools directory")
+def test_a_view_from_another_bundle_is_not_equivalent(built, tmp_path):
+    graph, spec, arrays = built
+    first, second = tmp_path / "a", tmp_path / "b"
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=first)
+    other = {key: value.copy() for key, value in arrays.items()}
+    other["0.q_proj.q"] = -other["0.q_proj.q"]
+    generator.generate(spec, other, slice_spec(graph, spec, "S-1"), macs=8, out=second)
+    assert views.synthesize_view2(first, YOSYS)["returncode"] == 0
+    shutil.copyfile(first / views.VIEW2_FILE, second / views.VIEW2_FILE)
+    assert views.equivalent(second, YOSYS)["equivalent"] is False

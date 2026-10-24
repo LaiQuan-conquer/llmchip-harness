@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 from . import rom
+from .views import rom_views
 
 
 def manifest(bundle: Path) -> dict:
@@ -84,10 +85,12 @@ def all_checks(bundle: Path, verilator: Path | None, yosys: Path | None) -> dict
     report = {"roundtrip": roundtrip(bundle), "rules": rules(bundle)}
     report["lint"] = lint(bundle, verilator) if verilator else {"skipped": "verilator not found"}
     report["synthesizable"] = synthesizable(bundle, yosys) if yosys else {"skipped": "yosys not found"}
+    report["romViews"] = rom_views(bundle, yosys) if yosys else {"skipped": "yosys not found"}
     report["passed"] = (
         report["roundtrip"]["roundtrip_mismatches"] == 0
         and report["rules"]["violations"] == 0
         and report["lint"].get("warnings") == 0
         and report["synthesizable"].get("returncode") == 0
+        and (report["romViews"].get("equivalent") is True or "skipped" in report["romViews"])
     )
     return report
