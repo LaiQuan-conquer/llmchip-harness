@@ -3,14 +3,40 @@
 import json
 from pathlib import Path
 
-from llmchip_numeric import L2Model, storage_bits
+import numpy as np
+from llmchip_numeric import L2Model, graph_l2, storage_bits
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 
-from . import design, explore, spatial, verify
+from . import design, explore, spatial, tile, verify
+from .slicing import slice_spec
 
 
 def handle_design(ctx: InvokeContext) -> Result:
     spec_in, weights_in = ctx.input("spec"), ctx.input("weights")
+    if ctx.params.get("architecture") == tile.ARCHITECTURE:
+        spec = json.loads(Path(spec_in.path).read_text())
+        with np.load(weights_in.path, allow_pickle=False) as z:
+            arrays = {k: z[k] for k in z.files if k != "meta"}
+        chip = tile.design(
+            spec,
+            ctx.params,
+            graph_l2.storage_bits(spec, arrays),
+            json.loads(Path(ctx.input("profile").path).read_text()),
+            json.loads(Path(ctx.input("library").path).read_text()),
+        )
+        Path(ctx.out_dir, "chip-spec.json").write_text(json.dumps(chip, indent=2, ensure_ascii=False))
+        return Result(
+            outputs=[Output("chip", "chip-spec.json", "chip.spec", "application/json")],
+            metrics={
+                "architecture": chip["architecture"],
+                "engines": chip["dataflow"]["engines"],
+                "macs_per_engine": chip["dataflow"]["macsPerEngine"],
+                "cycles_per_token": chip["performance"]["cyclesPerToken"],
+                "tokens_per_second": chip["performance"]["tokensPerSecond"],
+                "clock_mhz": chip["targets"]["clockMHz"],
+            },
+            parse={"status": "complete", "parser": "llmchip-arch/design-tile"},
+        )
     l2 = L2Model.load(spec_in.path, weights_in.path)  # checks that the weights belong to the spec
     profile = json.loads(Path(ctx.input("profile").path).read_text())
     library = json.loads(Path(ctx.input("library").path).read_text())
@@ -56,6 +82,8 @@ def handle_design(ctx: InvokeContext) -> Result:
 
 def handle_verify(ctx: InvokeContext) -> Result:
     chip = json.loads(Path(ctx.input("chip").path).read_text())
+    if chip.get("architecture") == tile.ARCHITECTURE:
+        return Result(metrics=tile.verify(chip), parse={"status": "complete", "parser": "llmchip-arch/verify-tile"})
     spec_in = ctx.input("spec")
     spec = json.loads(Path(spec_in.path).read_text())
     ppa = json.loads(Path(ctx.input("ppa").path).read_text())
@@ -64,6 +92,27 @@ def handle_verify(ctx: InvokeContext) -> Result:
     return Result(
         metrics=verify(chip, spec, spec_in.hash, ppa, arrays),
         parse={"status": "complete", "parser": "llmchip-arch/verify"},
+    )
+
+
+def handle_slice(ctx: InvokeContext) -> Result:
+    """The slice of layer 0 at a level of the plan: its matrices, their alignment and its points."""
+    graph = json.loads(Path(ctx.input("graph").path).read_text())
+    spec = json.loads(Path(ctx.input("spec").path).read_text())
+    report = slice_spec(
+        graph, spec, ctx.params.get("level", "S-1"), ctx.params.get("layer", 0), ctx.params.get("channels", 128)
+    )
+    Path(ctx.out_dir, "slice.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    return Result(
+        outputs=[Output("slice", "slice.json", "arch.slice", "application/json")],
+        metrics={
+            "level": report["level"],
+            "matrices": len(report["matrices"]),
+            "weights": report["total"]["weights"],
+            "bits": report["total"]["bits"],
+            "observation_points": len(report["observationPoints"]),
+        },
+        parse={"status": "complete", "parser": "llmchip-arch/slice"},
     )
 
 
@@ -120,5 +169,12 @@ def handle_explore(ctx: InvokeContext) -> Result:
 
 if __name__ == "__main__":
     run_plugin(
-        "arch-taalas", "0.2.0", {"design": handle_design, "verify_spec": handle_verify, "explore": handle_explore}
+        "arch-taalas",
+        "0.3.0",
+        {
+            "design": handle_design,
+            "verify_spec": handle_verify,
+            "explore": handle_explore,
+            "slice": handle_slice,
+        },
     )

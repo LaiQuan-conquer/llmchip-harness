@@ -40,6 +40,14 @@
             "bind": { "spec": "numeric-spec", "weights": "l2-weights" }
           },
           {
+            "id": "slice",
+            "plugin": "arch-taalas",
+            "handler": "slice",
+            "params": { "level": "S-1" },
+            "inputs": { "graph": "node:recover.graph", "spec": "node:calibrate.spec" },
+            "judge": ["spec.slice"]
+          },
+          {
             "id": "l2-fast",
             "plugin": "numeric",
             "handler": "l2_fast_check",
@@ -108,6 +116,7 @@
       },
       "tests": [
         { "check": "model.upstream", "inputs": { "graph": "slot:model-graph", "census": "slot:model-census", "model": "slot:model" } },
+        { "check": "spec.slice", "inputs": { "graph": "slot:model-graph", "spec": "slot:numeric-spec" } },
         {
           "check": "spec.l2.fast",
           "inputs": {
@@ -284,6 +293,15 @@
         { "metric": "drop_high.mbpp", "op": "<=", "value": 5, "when": { "metric": "drop.mbpp", "op": "<=", "value": 5 } }
       ],
       "criteria": [{ "metric": "drop.mbpp", "op": "<=", "value": 5 }]
+    },
+    {
+      "id": "spec.slice",
+      "version": "1",
+      "title": "The slice is aligned to the weight groups and reproduces L2 observation points",
+      "plugin": "arch-taalas",
+      "handler": "slice",
+      "completeness": [{ "metric": "weights", "op": ">", "value": 0 }],
+      "criteria": [{ "metric": "observation_points", "op": ">=", "value": 1 }]
     },
     {
       "id": "spec.diagnosis",

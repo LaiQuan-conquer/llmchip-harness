@@ -419,6 +419,25 @@
         }
       },
       "timeoutMs": 3600000
+    },
+    {
+      "name": "slice",
+      "title": "The slice of layer 0 at a level of the plan: matrices, group alignment, L2 observation points",
+      "inputs": [
+        { "name": "graph", "types": ["model.graph"], "required": true },
+        { "name": "spec", "types": ["numeric.spec"], "required": true }
+      ],
+      "outputs": [{ "name": "slice", "type": "arch.slice", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "level": { "enum": ["S-1", "S-2", "S-3"], "default": "S-1" },
+          "layer": { "type": "integer", "minimum": 0, "default": 0 },
+          "channels": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 128 }
+        }
+      },
+      "timeoutMs": 600000
     }
   ]
 }
