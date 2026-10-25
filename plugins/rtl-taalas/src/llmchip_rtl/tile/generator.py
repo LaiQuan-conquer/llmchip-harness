@@ -141,6 +141,7 @@ def generate(
     (rtl / "tile_lut.v").write_text((_templates_dir() / "tile_lut.v").read_text())
     (rtl / "tile_rmsnorm.v").write_text((_templates_dir() / "tile_rmsnorm.v").read_text())
     (rtl / "tile_rope.v").write_text((_templates_dir() / "tile_rope.v").read_text())
+    (rtl / "tile_kv.v").write_text((_templates_dir() / "tile_kv.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     top = top.replace('parameter         INIT = "rom.hex"', f'parameter         INIT = "{banks[0]["hex"]}"')

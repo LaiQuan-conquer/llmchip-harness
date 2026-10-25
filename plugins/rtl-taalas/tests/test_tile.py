@@ -69,6 +69,7 @@ def test_the_generated_bundle_carries_the_lookup_tables(built, tmp_path):
     assert (tmp_path / "rtl" / "tile_rmsnorm.v").is_file()
     assert (tmp_path / "rsqrt.hex").is_file()
     assert (tmp_path / "rtl" / "tile_rope.v").is_file()
+    assert (tmp_path / "rtl" / "tile_kv.v").is_file()
 
 
 def test_the_full_model_writes_one_bank_per_matrix_and_the_classifier(built, tmp_path):
@@ -97,7 +98,7 @@ def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     lines = (tmp_path / bank["hex"]).read_text().split()
     assert len(lines) == bank["words"]
     assert (tmp_path / "rtl" / "tile_top.v").is_file()
-    assert len(manifest["files"]) == 6
+    assert len(manifest["files"]) == 7
 
 
 @pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")
