@@ -45,11 +45,26 @@ module tile_mac #(
   integer pi;
   integer gs;
 
+  // The group sum is a tree, not a chain: the products are combined eight at a time and the eight
+  // partial sums by a three-level tree (GroupSize/8 + 3 adders of depth instead of GroupSize).
+  // Addition modulo 2^ACC is associative, so the value is bit identical.
+  reg signed [ACC-1:0] sub [0:7];
+  integer si;
   always @(*) begin
     for (gi = 0; gi < GROUPS; gi = gi + 1) begin
-      gsum[gi] = {ACC{1'b0}};
-      for (pi = 0; pi < GROUP; pi = pi + 1) begin
-        gsum[gi] = gsum[gi] + prod[gi*GROUP + pi];
+      if (GROUP >= 8) begin
+        for (si = 0; si < 8; si = si + 1) begin
+          sub[si] = {ACC{1'b0}};
+          for (pi = si * (GROUP / 8); pi < (si + 1) * (GROUP / 8); pi = pi + 1) begin
+            sub[si] = sub[si] + prod[gi*GROUP + pi];
+          end
+        end
+        gsum[gi] = ((sub[0] + sub[1]) + (sub[2] + sub[3])) + ((sub[4] + sub[5]) + (sub[6] + sub[7]));
+      end else begin
+        gsum[gi] = {ACC{1'b0}};
+        for (pi = 0; pi < GROUP; pi = pi + 1) begin
+          gsum[gi] = gsum[gi] + prod[gi*GROUP + pi];
+        end
       end
     end
   end
