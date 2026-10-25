@@ -113,6 +113,13 @@
             "exclusiveMinimum": 0,
             "default": 50
           },
+          "batch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "default": 1,
+            "description": "Tokens that share one weight stream (taalas-tile/1): the matvec phases keep their cycles, the attention and vector phases scale with the batch."
+          },
           "offchipBandwidthMBps": {
             "type": "number",
             "exclusiveMinimum": 0,
@@ -320,6 +327,13 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "default": 50
+          },
+          "batch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "default": 1,
+            "description": "Tokens that share one weight stream (taalas-tile/1): the matvec phases keep their cycles, the attention and vector phases scale with the batch."
           },
           "offchipBandwidthMBps": {
             "type": "number",

@@ -28,8 +28,13 @@ def _matrix_cycles(rows: int, cols: int, macs: int) -> int:
     return rows * math.ceil(cols / macs)
 
 
-def layer_phases(h: dict, macs: int, context: int) -> list[dict]:
-    """The phases of one decoder layer: its matrices, attention, and the vector operations."""
+def layer_phases(h: dict, macs: int, context: int, batch: int = 1) -> list[dict]:
+    """The phases of one decoder layer: its matrices, attention, and the vector operations.
+
+    With `batch` tokens sharing one weight stream, the matvec phases keep their cycles (one word
+    serves every token's activation), while the attention and the vector phases - which are per
+    token - scale with the batch.
+    """
     hd, hidden, inter = h["headDim"], h["hidden"], h["intermediate"]
     kv = h["kvHeads"] * hd
     attn = h["heads"] * hd
@@ -89,16 +94,22 @@ def layer_phases(h: dict, macs: int, context: int) -> list[dict]:
         {"phase": "rope", "kind": "vector", "cycles": 2},
     ]
     for phase in phases:
+        if batch > 1 and phase["kind"] in ("attention", "vector"):
+            phase["cycles"] *= batch
         phase["cycles"] += PIPE_CYCLES
     return phases
 
 
-def schedule(spec: dict, macs: int, engines: int) -> dict:
+def schedule(spec: dict, macs: int, engines: int, batch: int = 1) -> dict:
     """The schedule table: the phases of the slowest engine (Q-full: one engine per layer) or of
-    the single engine of a slice, and the token's cycle count."""
+    the single engine of a slice, and the pass and per-token cycle counts. One pass produces
+    `batch` tokens: the matvec phases stream the weights once for all of them, so a token costs
+    `cyclesPerPass / batch` on average."""
+    if batch < 1:
+        raise ValueError("batch must be at least 1")
     h = spec["hyper"]
     context = spec["context"]["maxTokens"]
-    phases = layer_phases(h, macs, context)
+    phases = layer_phases(h, macs, context, batch)
     per_layer = sum(p["cycles"] for p in phases)
     if engines == 1:
         rows = [{"engine": 0, "phases": phases}]
@@ -124,13 +135,16 @@ def schedule(spec: dict, macs: int, engines: int) -> dict:
                 )
         cycles = max(sum(p["cycles"] for p in row["phases"]) for row in rows) + HOST_CYCLES
     return {
-        "cyclesPerToken": cycles,
+        "cyclesPerToken": -(-cycles // batch),
+        "cyclesPerPass": cycles,
+        "batch": batch,
         "cyclesPerLayer": per_layer,
         "engines": engines,
         "rows": rows,
         "hostCycles": HOST_CYCLES,
-        "rule": "one ROM word (macs weights) per cycle; a matrix takes columns x ceil(rows/macs); "
-        "the schedule table is the cycle model",
+        "rule": "one ROM word (macs weights) per cycle; a matrix takes rows x ceil(columns/macs) "
+        "words; a batch of tokens shares each word, so attention and the vector phases scale with "
+        "the batch and the matvec phases do not; the schedule table is the cycle model",
     }
 
 
@@ -139,15 +153,19 @@ def verify(chip: dict) -> dict:
     sched = chip["schedule"]
     if not sched["rows"]:
         raise ValueError("the schedule has no engine row")
-    recomputed = max(sum(p["cycles"] for p in row["phases"]) for row in sched["rows"]) + sched["hostCycles"]
+    per_pass = max(sum(p["cycles"] for p in row["phases"]) for row in sched["rows"]) + sched["hostCycles"]
+    batch = sched.get("batch", 1)
+    recomputed = -(-per_pass // batch)
     dataflow = chip["dataflow"]
     clocks = chip["targets"]["clockMHz"]
     return {
         "architecture": chip["architecture"],
         "engines": dataflow["engines"],
+        "batch": batch,
         "macs_per_engine": dataflow["macsPerEngine"],
         "rom_word_bits": dataflow["romWordBits"],
         "cycles_per_token": chip["performance"]["cyclesPerToken"],
+        "cycles_per_pass": chip["performance"]["cyclesPerPass"],
         "cycles_recomputed": recomputed,
         "schedule_agrees": recomputed == chip["performance"]["cyclesPerToken"],
         "tokens_per_second": chip["performance"]["tokensPerSecond"],
@@ -181,8 +199,10 @@ def design(
     # clock once its timing is closed (drafts/tile-180nm-pipeline.md, N4 and N8).
     clock = float(params.get("clockMHz", 8))
     engines = h["layers"] if params.get("engines", "per-layer") == "per-layer" else 1
-    sched = schedule(spec, macs, engines)
+    batch = int(params.get("batch", 1))
+    sched = schedule(spec, macs, engines, batch)
     cycles = sched["cyclesPerToken"]
+    per_pass = sched["cyclesPerPass"]
     chip = {
         "architecture": ARCHITECTURE,
         "model": {
@@ -205,6 +225,7 @@ def design(
             "romBanks": math.ceil(sum(storage.values()) / (macs * wbits)) if storage else None,
             "kvLocation": "onchip",
             "contextLength": spec["context"]["maxTokens"],
+            "batch": batch,
             "argmax": "segmented over the output rows of each engine",
         },
         "ports": [
@@ -219,7 +240,8 @@ def design(
         "targets": {"clockMHz": clock},
         "performance": {
             "cyclesPerToken": cycles,
-            "tokensPerSecond": round(clock * 1e6 / cycles, 3),
+            "cyclesPerPass": per_pass,
+            "tokensPerSecond": round(batch * clock * 1e6 / per_pass, 3),
             "macsPerToken": 2
             * sum(p.get("rows", 0) * p.get("columns", 0) for row in sched["rows"] for p in row["phases"]),
         },
