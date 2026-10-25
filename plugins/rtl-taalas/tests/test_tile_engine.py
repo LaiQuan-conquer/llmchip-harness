@@ -65,6 +65,7 @@ def _run(
         f"-GLOG2CHUNKS={max(1, (chunks - 1).bit_length())}",
         f"-GLOG2ROWS={max(1, (rows - 1).bit_length())}",
         f"-GLOG2ADDR={max(1, (rows * chunks - 1).bit_length())}",
+        f"-GLOG2MACS={max(1, (macs - 1).bit_length())}",
         "tile_engine_tb.v",
         "tile_engine.v",
         "tile_rom.v",

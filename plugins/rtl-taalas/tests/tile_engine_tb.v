@@ -13,13 +13,15 @@ module tile_engine_tb;
   parameter integer LOG2CHUNKS = 2;
   parameter integer LOG2ROWS = 3;
   parameter integer LOG2ADDR = 5;
+  parameter integer LOG2MACS = 7;
 
   reg clk = 1'b0;
   reg rst_n = 1'b0;
   reg start = 1'b0;
   reg x_wr_en = 1'b0;
-  reg [LOG2CHUNKS-1:0] x_wr_addr = {LOG2CHUNKS{1'b0}};
-  reg [MACS*16-1:0] x_wr_data = {MACS*16{1'b0}};
+  reg [LOG2CHUNKS-1:0] x_wr_chunk = {LOG2CHUNKS{1'b0}};
+  reg [31:0] x_wr_lane = 32'd0;
+  reg signed [15:0] x_wr_data = 16'sd0;
   wire signed [ACC-1:0] y;
   wire y_valid;
   wire done;
@@ -28,19 +30,21 @@ module tile_engine_tb;
   reg [ACC-1:0] ev [0:ROWS-1];
 
   integer i;
+  integer j;
   integer seen;
   integer failures;
 
   tile_engine #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS),
     .ROWS(ROWS), .CHUNKS(CHUNKS), .LOG2CHUNKS(LOG2CHUNKS),
-    .LOG2ROWS(LOG2ROWS), .LOG2ADDR(LOG2ADDR)
+    .LOG2ROWS(LOG2ROWS), .LOG2ADDR(LOG2ADDR), .LOG2MACS(LOG2MACS)
   ) dut (
     .clk(clk),
     .rst_n(rst_n),
     .start(start),
     .x_wr_en(x_wr_en),
-    .x_wr_addr(x_wr_addr),
+    .x_wr_chunk(x_wr_chunk),
+    .x_wr_lane(x_wr_lane[31:0]),
     .x_wr_data(x_wr_data),
     .y(y),
     .y_valid(y_valid),
@@ -73,10 +77,13 @@ module tile_engine_tb;
     rst_n = 1'b1;
     repeat (2) @(posedge clk);
     for (i = 0; i < CHUNKS; i = i + 1) begin
-      x_wr_en = 1'b1;
-      x_wr_addr = i[LOG2CHUNKS-1:0];
-      x_wr_data = xv[i];
-      @(posedge clk);
+      for (j = 0; j < MACS; j = j + 1) begin
+        x_wr_en = 1'b1;
+        x_wr_chunk = i[LOG2CHUNKS-1:0];
+        x_wr_lane = j[31:0];
+        x_wr_data = xv[i][j*16 +: 16];
+        @(posedge clk);
+      end
     end
     x_wr_en = 1'b0;
     @(posedge clk);

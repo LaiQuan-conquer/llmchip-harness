@@ -16,14 +16,16 @@ module tile_engine #(
   parameter integer LOG2CHUNKS = 2,
   parameter integer LOG2ROWS = 3,
   parameter integer LOG2ADDR = 5,
+  parameter integer LOG2MACS = 7,
   parameter         INIT = "rom.hex"
 ) (
   input  wire                          clk,
   input  wire                          rst_n,
   input  wire                          start,
   input  wire                          x_wr_en,
-  input  wire [LOG2CHUNKS-1:0]         x_wr_addr,
-  input  wire [MACS*16-1:0]            x_wr_data,
+  input  wire [LOG2CHUNKS-1:0]         x_wr_chunk,
+  input  wire [LOG2MACS-1:0]           x_wr_lane,
+  input  wire signed [15:0]            x_wr_data,
   output reg  signed [ACC-1:0]         y,
   output reg                           y_valid,
   output reg                           done
@@ -54,9 +56,11 @@ module tile_engine #(
     .addr(address), .q(rom_q)
   );
 
+  // The host writes the activation buffer one 16-bit lane per cycle: one chunk is MACS cycles,
+  // which keeps the pad ring small enough for a compact die.
   always @(posedge clk) begin
     if (x_wr_en) begin
-      x_mem[x_wr_addr] <= x_wr_data;
+      x_mem[x_wr_chunk][x_wr_lane*16 +: 16] <= x_wr_data;
     end
   end
 
