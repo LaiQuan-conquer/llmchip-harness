@@ -174,6 +174,11 @@ def design(
     for size in (h["hidden"], h["intermediate"]):
         if size % macs:
             raise ValueError(f"{macs} MACs do not divide {size}")
+    # 8 MHz is R2c's default: the single-cycle datapath (ROM decode, 512-bit read, 128
+    # multiplies, the accumulator tree, a register) was estimated at 125 ns. It is not a process
+    # limit: the GF180MCU flop alone costs 9.48 ns at ss/125C/1.62V (so ~50 MHz leaves logic room)
+    # and 3.50 ns at tt/25C/1.80V (so 100 MHz is reachable there). The pipelined engine raises the
+    # clock once its timing is closed (drafts/tile-180nm-pipeline.md, N4 and N8).
     clock = float(params.get("clockMHz", 8))
     engines = h["layers"] if params.get("engines", "per-layer") == "per-layer" else 1
     sched = schedule(spec, macs, engines)
