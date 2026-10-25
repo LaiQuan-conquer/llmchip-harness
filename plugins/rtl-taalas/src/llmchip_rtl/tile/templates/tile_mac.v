@@ -1,56 +1,79 @@
-// The parallel MAC array of taalas-tile/1, pipelined for GF180MCU (drafts/tile-180nm-pipeline.md):
-// S2 multiplies every lane's `BITS`-wide level by the shared 16-bit activation and registers the
-// products, S3 adds them into one 32-bit accumulator per lane. One word per cycle; the ROM read is
-// the stage before, so a word reaches the accumulator three cycles after its address.
-// `phase_start` marks the phase's first word at this port; the first product then overwrites the
-// accumulator instead of adding to it.
+// The parallel MAC array of taalas-tile/1 with a group tree (drafts/tile-180nm-pipeline.md): one
+// ROM word carries MACS consecutive weights of one output row, so the array computes MACS products
+// against the row's MACS activations and sums them with GROUPS partial adders (each over MACS/GROUPS
+// products), S2 registering the group sums and S3 accumulating them. The group accumulators are
+// combined into the row's value once per row (by the engine); `clear` marks the row's first chunk.
 `default_nettype none
 
 module tile_mac #(
   parameter integer MACS = 128,
   parameter integer BITS = 4,
-  parameter integer ACC  = 32
+  parameter integer ACC  = 32,
+  parameter integer GROUPS = 8
 ) (
   input  wire                         clk,
   input  wire                         rst_n,
   input  wire                         en,
-  input  wire                         phase_start,
-  input  wire signed [15:0]           x,
+  input  wire                         clear,
+  input  wire signed [MACS*16-1:0]    x,
   input  wire [MACS*BITS-1:0]         w,
-  output wire [MACS*ACC-1:0]          y
+  output wire [GROUPS*ACC-1:0]        y
 );
 
-  genvar k;
+  localparam integer GROUP = MACS / GROUPS;
 
-  reg [MACS*ACC-1:0] product;
-  reg [MACS*ACC-1:0] acc;
-  reg                first_d;
+  genvar k;
+  genvar g;
+
+  wire signed [ACC-1:0] prod [0:MACS-1];
 
   generate
     for (k = 0; k < MACS; k = k + 1) begin : lane
       wire signed [BITS-1:0] level = w[k*BITS +: BITS];
-      wire signed [ACC-1:0]  xa    = {{(ACC-16){x[15]}}, x};
+      wire signed [ACC-1:0]  xa    = {{(ACC-16){x[k*16+15]}}, x[k*16 +: 16]};
       wire signed [ACC-1:0]  wa    = {{(ACC-BITS){level[BITS-1]}}, level};
-      wire signed [ACC-1:0]  prod  = xa * wa;
-      assign y[k*ACC +: ACC] = acc[k*ACC +: ACC];
-      always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-          product[k*ACC +: ACC] <= {ACC{1'b0}};
-          acc[k*ACC +: ACC]     <= {ACC{1'b0}};
-        end else if (en) begin
-          product[k*ACC +: ACC] <= prod;
-          acc[k*ACC +: ACC]     <= first_d ? product[k*ACC +: ACC] : acc[k*ACC +: ACC] + product[k*ACC +: ACC];
-        end
-      end
+      assign prod[k] = xa * wa;
     end
   endgenerate
 
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      first_d <= 1'b0;
-    end else if (en) begin
-      first_d <= phase_start;
+  reg signed [ACC-1:0] gsum [0:GROUPS-1];
+  reg signed [ACC-1:0] gsum_d [0:GROUPS-1];
+  reg signed [ACC-1:0] gacc [0:GROUPS-1];
+  reg                  clear_d;
+
+  integer gi;
+  integer pi;
+  integer gs;
+
+  always @(*) begin
+    for (gi = 0; gi < GROUPS; gi = gi + 1) begin
+      gsum[gi] = {ACC{1'b0}};
+      for (pi = 0; pi < GROUP; pi = pi + 1) begin
+        gsum[gi] = gsum[gi] + prod[gi*GROUP + pi];
+      end
     end
   end
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      clear_d <= 1'b0;
+      for (gs = 0; gs < GROUPS; gs = gs + 1) begin
+        gsum_d[gs] <= {ACC{1'b0}};
+        gacc[gs]   <= {ACC{1'b0}};
+      end
+    end else if (en) begin
+      clear_d <= clear;
+      for (gs = 0; gs < GROUPS; gs = gs + 1) begin
+        gsum_d[gs] <= gsum[gs];
+        gacc[gs]   <= clear_d ? gsum_d[gs] : gacc[gs] + gsum_d[gs];
+      end
+    end
+  end
+
+  generate
+    for (g = 0; g < GROUPS; g = g + 1) begin : group_out
+      assign y[g*ACC +: ACC] = gacc[g];
+    end
+  endgenerate
 
 endmodule

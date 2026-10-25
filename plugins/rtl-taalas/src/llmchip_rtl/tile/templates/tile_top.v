@@ -77,19 +77,20 @@ module tile_top #(
   reg            tx_latch;
 
   wire [MACS*BITS-1:0] rom_data;
-  wire [MACS*ACC-1:0]  mac_y;
+  localparam integer GROUPS = 8;
+  wire [GROUPS*ACC-1:0] mac_y;
   wire [ADDR-1:0]      last_address = {ADDR{1'b1}};
 
   tile_rom #(.WIDTH(MACS*BITS), .DEPTH(1 << ADDR), .ADDR(ADDR), .INIT(INIT)) rom (
     .addr(address), .q(rom_data)
   );
 
-  tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC)) mac (
+  tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS)) mac (
     .clk(clk),
     .rst_n(rst_n),
     .en(1'b1),
-    .phase_start(1'b0),
-    .x(16'sd0),
+    .clear(1'b0),
+    .x({MACS{16'sd0}}),
     .w(rom_data),
     .y(mac_y)
   );

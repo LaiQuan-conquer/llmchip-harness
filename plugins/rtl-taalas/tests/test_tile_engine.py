@@ -1,9 +1,8 @@
-"""The pipelined datapath of the tile: `tile_engine` against a Python reference (design N3 of
-drafts/tile-180nm-pipeline.md). The engine walks the ROM's words, each word holding MACS levels of
-one input column, and accumulates per lane; the reference is the same sum computed here.
-
-The testbench is Verilog, run by Verilator's --binary mode; the vectors and the expected values are
-written from Python. It skips visibly when Verilator is not in the tools directory.
+"""The row-major pipelined datapath of the tile: `tile_engine` against a Python reference (design
+N3 of drafts/tile-180nm-pipeline.md). One ROM word holds MACS consecutive weights of one output
+row, so the engine's group tree sums each word's products and the chunk sums accumulate into the
+row's value: y[r] = sum over columns of level[r, c] * x[c]. The testbench is Verilog, run by
+Verilator's --binary mode; the vectors and the expected values are written from Python.
 """
 
 from __future__ import annotations
@@ -22,23 +21,32 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "llmchip_rtl" / "tile"
 TB = Path(__file__).with_name("tile_engine_tb.v")
 
 
-def _vectors(seed: int, macs: int, words: int, bits: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _vectors(seed: int, macs: int, rows: int, chunks: int, bits: int):
     rng = np.random.default_rng(seed)
     lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
-    levels = rng.integers(lo, hi + 1, size=(macs, words), dtype=np.int64)
-    x = rng.integers(-(1 << 14), 1 << 14, size=words, dtype=np.int64)
-    expected = np.array([int((levels[k] * x).sum()) for k in range(macs)])
+    columns = chunks * macs
+    levels = rng.integers(lo, hi + 1, size=(rows, columns), dtype=np.int64)
+    x = rng.integers(-(1 << 14), 1 << 14, size=columns, dtype=np.int64)
+    expected = np.array([int((levels[r] * x).sum()) for r in range(rows)])
     return levels, x, expected
 
 
-def _run(tmp_path: Path, macs: int, words: int, bits: int, seed: int) -> subprocess.CompletedProcess:
-    levels, x, expected = _vectors(seed, macs, words, bits)
-    (tmp_path / "x.hex").write_text("\n".join(f"{int(v) & 0xFFFF:04x}" for v in x) + "\n")
+def _x_line(values: np.ndarray) -> str:
+    word = 0
+    for k, value in enumerate(values):
+        word |= (int(value) & 0xFFFF) << (16 * k)
+    return f"{word:0{len(values) * 4}x}"
+
+
+def _run(
+    tmp_path: Path, macs: int, rows: int, chunks: int, bits: int, groups: int, seed: int
+) -> subprocess.CompletedProcess:
+    levels, x, expected = _vectors(seed, macs, rows, chunks, bits)
+    (tmp_path / "x.hex").write_text("\n".join(_x_line(x[c * macs : (c + 1) * macs]) for c in range(chunks)) + "\n")
     packed = rom.to_words(levels, macs, bits)
     (tmp_path / "rom.hex").write_text("\n".join(rom.hexfile(packed, macs, bits)) + "\n")
     mask = (1 << 32) - 1
     (tmp_path / "expected.hex").write_text("\n".join(f"{int(v) & mask:08x}" for v in expected) + "\n")
-    log2words = max(1, (words - 1).bit_length())
     for name in ("tile_engine.v", "tile_rom.v", "tile_mac.v"):
         shutil.copyfile(TEMPLATES / name, tmp_path / name)
     shutil.copyfile(TB, tmp_path / "tile_engine_tb.v")
@@ -47,13 +55,16 @@ def _run(tmp_path: Path, macs: int, words: int, bits: int, seed: int) -> subproc
         "--binary",
         "--timing",
         "-Wno-fatal",
-        f"-GMACS={macs}",
-        f"-GBITS={bits}",
-        f"-GWORDS={words}",
-        f"-GLOG2WORDS={log2words}",
-        f"-GLOG2ADDR={log2words}",
         "--top-module",
         "tile_engine_tb",
+        f"-GMACS={macs}",
+        f"-GBITS={bits}",
+        f"-GGROUPS={groups}",
+        f"-GROWS={rows}",
+        f"-GCHUNKS={chunks}",
+        f"-GLOG2CHUNKS={max(1, (chunks - 1).bit_length())}",
+        f"-GLOG2ROWS={max(1, (rows - 1).bit_length())}",
+        f"-GLOG2ADDR={max(1, (rows * chunks - 1).bit_length())}",
         "tile_engine_tb.v",
         "tile_engine.v",
         "tile_rom.v",
@@ -68,7 +79,10 @@ def _run(tmp_path: Path, macs: int, words: int, bits: int, seed: int) -> subproc
 pytestmark = pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not in the tools directory")
 
 
-@pytest.mark.parametrize("macs,words,bits", [(8, 4, 4), (8, 8, 4), (16, 5, 8), (4, 3, 4)])
-def test_the_engine_matches_the_reference(tmp_path, macs, words, bits):
-    result = _run(tmp_path, macs, words, bits, seed=macs * 100 + words * 10 + bits)
+@pytest.mark.parametrize(
+    "macs,rows,chunks,bits,groups",
+    [(16, 4, 2, 4, 8), (16, 6, 3, 4, 8), (32, 4, 2, 8, 8), (8, 3, 2, 4, 4)],
+)
+def test_the_engine_matches_the_reference(tmp_path, macs, rows, chunks, bits, groups):
+    result = _run(tmp_path, macs, rows, chunks, bits, groups, seed=macs * 100 + rows * 10 + chunks + bits)
     assert "PASS" in result.stdout, result.stdout + result.stderr
