@@ -88,7 +88,7 @@ module tile_engine #(
   tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS)) mac (
     .clk(clk),
     .rst_n(rst_n),
-    .en(valid_d || (drain != 4'd0)),
+    .en(1'b1),
     .clear(clear_d),
     .x(valid_d ? x_d : {MACS*16{1'b0}}),
     .w(word_d),
