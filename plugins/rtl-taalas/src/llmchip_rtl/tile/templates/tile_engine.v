@@ -48,7 +48,8 @@ module tile_engine #(
   reg                  last1;
   reg                  last2;
   reg                  last3;
-  reg                  clear_d;
+  reg                  last4;
+  reg                  first_d;
   wire [MACS*BITS-1:0] rom_q;
   wire [MACS*16-1:0]   x_now;
 
@@ -72,18 +73,20 @@ module tile_engine #(
       word_d  <= {MACS*BITS{1'b0}};
       x_d     <= {MACS*16{1'b0}};
       valid_d <= 1'b0;
-      clear_d <= 1'b0;
+      first_d <= 1'b0;
       last1   <= 1'b0;
       last2   <= 1'b0;
       last3   <= 1'b0;
+      last4   <= 1'b0;
     end else begin
       word_d  <= rom_q;
       x_d     <= x_now;
       valid_d <= (state == RUN);
-      clear_d <= (state == RUN) && (chunk == {LOG2CHUNKS{1'b0}});
+      first_d <= (state == RUN) && (chunk == {LOG2CHUNKS{1'b0}});
       last1   <= (state == RUN) && (chunk_left == 32'd1);
       last2   <= last1;
       last3   <= last2;
+      last4   <= last3;
     end
   end
 
@@ -93,7 +96,7 @@ module tile_engine #(
     .clk(clk),
     .rst_n(rst_n),
     .en(1'b1),
-    .clear(clear_d),
+    .first(first_d),
     .x(valid_d ? x_d : {MACS*16{1'b0}}),
     .w(word_d),
     .y(groups)
@@ -167,8 +170,8 @@ module tile_engine #(
         end
         default: state <= IDLE;
       endcase
-      // Row outputs: last3 marks the cycle in which the row's last chunk has been accumulated.
-      if (last3) begin
+      // Row outputs: last4 marks the cycle in which the row's last chunk has been accumulated.
+      if (last4) begin
         y       <= row_sum;
         y_valid <= 1'b1;
       end

@@ -88,7 +88,7 @@ module tile_top #(
     .clk(clk),
     .rst_n(rst_n),
     .en(1'b1),
-    .clear(1'b0),
+    .first(1'b0),
     .x({MACS{16'sd0}}),
     .w(rom_data),
     .y(mac_y)

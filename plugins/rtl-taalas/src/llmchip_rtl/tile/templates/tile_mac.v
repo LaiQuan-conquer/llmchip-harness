@@ -14,7 +14,7 @@ module tile_mac #(
   input  wire                         clk,
   input  wire                         rst_n,
   input  wire                         en,
-  input  wire                         clear,
+  input  wire                         first,
   input  wire signed [MACS*16-1:0]    x,
   input  wire [MACS*BITS-1:0]         w,
   output wire [GROUPS*ACC-1:0]        y
@@ -36,10 +36,12 @@ module tile_mac #(
     end
   endgenerate
 
+  reg [MACS*ACC-1:0]   prod_d;
   reg signed [ACC-1:0] gsum [0:GROUPS-1];
   reg signed [ACC-1:0] gsum_d [0:GROUPS-1];
   reg signed [ACC-1:0] gacc [0:GROUPS-1];
-  reg                  clear_d;
+  reg                  first_d1;
+  reg                  first_d2;
 
   integer gi;
   integer pi;
@@ -56,31 +58,45 @@ module tile_mac #(
         for (si = 0; si < 8; si = si + 1) begin
           sub[si] = {ACC{1'b0}};
           for (pi = si * (GROUP / 8); pi < (si + 1) * (GROUP / 8); pi = pi + 1) begin
-            sub[si] = sub[si] + prod[gi*GROUP + pi];
+            sub[si] = sub[si] + $signed(prod_d[(gi*GROUP + pi)*ACC +: ACC]);
           end
         end
         gsum[gi] = ((sub[0] + sub[1]) + (sub[2] + sub[3])) + ((sub[4] + sub[5]) + (sub[6] + sub[7]));
       end else begin
         gsum[gi] = {ACC{1'b0}};
         for (pi = 0; pi < GROUP; pi = pi + 1) begin
-          gsum[gi] = gsum[gi] + prod[gi*GROUP + pi];
+          gsum[gi] = gsum[gi] + $signed(prod_d[(gi*GROUP + pi)*ACC +: ACC]);
         end
       end
     end
   end
 
+  generate
+    for (k = 0; k < MACS; k = k + 1) begin : product_stage
+      always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+          prod_d[k*ACC +: ACC] <= {ACC{1'b0}};
+        end else if (en) begin
+          prod_d[k*ACC +: ACC] <= prod[k];
+        end
+      end
+    end
+  endgenerate
+
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      clear_d <= 1'b0;
+      first_d1 <= 1'b0;
+      first_d2 <= 1'b0;
       for (gs = 0; gs < GROUPS; gs = gs + 1) begin
         gsum_d[gs] <= {ACC{1'b0}};
         gacc[gs]   <= {ACC{1'b0}};
       end
     end else if (en) begin
-      clear_d <= clear;
+      first_d1 <= first;
+      first_d2 <= first_d1;
       for (gs = 0; gs < GROUPS; gs = gs + 1) begin
         gsum_d[gs] <= gsum[gs];
-        gacc[gs]   <= clear_d ? gsum_d[gs] : gacc[gs] + gsum_d[gs];
+        gacc[gs]   <= first_d2 ? gsum_d[gs] : gacc[gs] + gsum_d[gs];
       end
     end
   end
