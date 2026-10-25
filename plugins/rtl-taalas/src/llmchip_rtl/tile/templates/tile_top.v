@@ -70,7 +70,7 @@ module tile_top #(
   reg [1:0]      state;
   reg [7:0]      last_command;
   reg [ADDR-1:0] address;
-  reg            rom_en;
+
   reg [7:0]      checksum;
   reg            busylevel;
   reg [7:0]      status_reg;
@@ -81,11 +81,17 @@ module tile_top #(
   wire [ADDR-1:0]      last_address = {ADDR{1'b1}};
 
   tile_rom #(.WIDTH(MACS*BITS), .DEPTH(1 << ADDR), .ADDR(ADDR), .INIT(INIT)) rom (
-    .clk(clk), .rst_n(rst_n), .en(rom_en), .addr(address), .dout(rom_data)
+    .addr(address), .q(rom_data)
   );
 
   tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC)) mac (
-    .x(16'sd0), .w(rom_data), .y(mac_y)
+    .clk(clk),
+    .rst_n(rst_n),
+    .en(1'b1),
+    .phase_start(1'b0),
+    .x(16'sd0),
+    .w(rom_data),
+    .y(mac_y)
   );
 
   always @(posedge clk or negedge rst_n) begin
@@ -93,13 +99,11 @@ module tile_top #(
       state        <= IDLE;
       last_command <= 8'd0;
       address      <= {ADDR{1'b0}};
-      rom_en       <= 1'b0;
       checksum     <= 8'd0;
       busylevel    <= 1'b0;
       status_reg   <= 8'h5a;
       tx_latch     <= 1'b0;
     end else begin
-      rom_en <= 1'b0;
       if (byte_valid) begin
         last_command <= byte_in;
         if (byte_in == CMD_START) begin
@@ -117,7 +121,6 @@ module tile_top #(
           busylevel <= 1'b0;
         end
         RUN: begin
-          rom_en   <= 1'b1;
           checksum <= checksum + {7'd0, ^mac_y} + rom_data[7:0];
           if (address == last_address) begin
             state     <= DONE;

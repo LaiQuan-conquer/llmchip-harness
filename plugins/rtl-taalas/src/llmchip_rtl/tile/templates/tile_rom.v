@@ -1,16 +1,14 @@
-// Synchronous single-port ROM of taalas-tile/1, view 1: behavioural model with $readmemh.
-// The generator writes one instance per bank, with INIT pointing at the bank's hex file.
+// The combinational ROM of taalas-tile/1, view 1: a behavioural model with $readmemh. The register
+// that makes S1 of the pipeline is the consumer's (tile_engine's word register), so the ROM is one
+// memory and one mux tree.
 module tile_rom #(
   parameter integer WIDTH = 512,
   parameter integer DEPTH = 1024,
   parameter integer ADDR = 10,
   parameter         INIT = "rom.hex"
 ) (
-  input  wire                clk,
-  input  wire                rst_n,
-  input  wire                en,
   input  wire [ADDR-1:0]     addr,
-  output reg  [WIDTH-1:0]    dout
+  output wire [WIDTH-1:0]    q
 );
 
   reg [WIDTH-1:0] mem [0:DEPTH-1];
@@ -19,12 +17,6 @@ module tile_rom #(
     $readmemh(INIT, mem);
   end
 
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      dout <= {WIDTH{1'b0}};
-    end else if (en) begin
-      dout <= mem[addr];
-    end
-  end
+  assign q = mem[addr];
 
 endmodule
