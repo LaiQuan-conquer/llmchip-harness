@@ -53,6 +53,7 @@ module tile_engine #(
   reg                  last2;
   reg                  last3;
   reg                  last4;
+  reg                  last5;
   reg                  first_d;
   wire [MACS*BITS-1:0] rom_q;
   wire [MACS*16-1:0]   x_now;
@@ -82,6 +83,7 @@ module tile_engine #(
       last2   <= 1'b0;
       last3   <= 1'b0;
       last4   <= 1'b0;
+      last5   <= 1'b0;
     end else begin
       word_d  <= rom_q;
       x_d     <= x_now;
@@ -91,6 +93,7 @@ module tile_engine #(
       last2   <= last1;
       last3   <= last2;
       last4   <= last3;
+      last5   <= last4;
     end
   end
 
@@ -109,6 +112,7 @@ module tile_engine #(
   // The row's value is the tree of the group accumulators, registered one cycle after the row's
   // last chunk has been accumulated (last4 marks it).
   reg signed [ACC-1:0] row_sum;
+  reg signed [ACC-1:0] row_sum_d;
   integer gi;
   always @(*) begin
     row_sum = {ACC{1'b0}};
@@ -128,6 +132,7 @@ module tile_engine #(
       left       <= 32'd0;
       chunk_left <= 32'd0;
       y       <= {ACC{1'b0}};
+      row_sum_d <= {ACC{1'b0}};
       y_valid <= 1'b0;
       done    <= 1'b0;
     end else begin
@@ -175,8 +180,9 @@ module tile_engine #(
         default: state <= IDLE;
       endcase
       // Row outputs: last4 marks the cycle in which the row's last chunk has been accumulated.
-      if (last4) begin
-        y       <= row_sum;
+      row_sum_d <= row_sum;
+      if (last5) begin
+        y       <= row_sum_d;
         y_valid <= 1'b1;
       end
     end
