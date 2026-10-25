@@ -28,7 +28,7 @@ def _matrix_cycles(rows: int, cols: int, macs: int) -> int:
     return rows * math.ceil(cols / macs)
 
 
-def layer_phases(h: dict, macs: int, context: int, batch: int = 1) -> list[dict]:
+def layer_phases(h: dict, macs: int, context: int, batch: int = 1, dual_mlp: bool = False) -> list[dict]:
     """The phases of one decoder layer: its matrices, attention, and the vector operations.
 
     With `batch` tokens sharing one weight stream, the matvec phases keep their cycles (one word
@@ -68,20 +68,35 @@ def layer_phases(h: dict, macs: int, context: int, batch: int = 1) -> list[dict]
             "columns": attn,
             "cycles": _matrix_cycles(hidden, attn, macs),
         },
-        {
-            "phase": "gate_proj",
-            "kind": "matvec",
-            "rows": inter,
-            "columns": hidden,
-            "cycles": _matrix_cycles(inter, hidden, macs),
-        },
-        {
-            "phase": "up_proj",
-            "kind": "matvec",
-            "rows": inter,
-            "columns": hidden,
-            "cycles": _matrix_cycles(inter, hidden, macs),
-        },
+        *(
+            [
+                {
+                    "phase": "gate_up",
+                    "kind": "matvec",
+                    "rows": inter,
+                    "columns": hidden,
+                    "cycles": _matrix_cycles(inter, hidden, macs),
+                    "streams": 2,
+                }
+            ]
+            if dual_mlp
+            else [
+                {
+                    "phase": "gate_proj",
+                    "kind": "matvec",
+                    "rows": inter,
+                    "columns": hidden,
+                    "cycles": _matrix_cycles(inter, hidden, macs),
+                },
+                {
+                    "phase": "up_proj",
+                    "kind": "matvec",
+                    "rows": inter,
+                    "columns": hidden,
+                    "cycles": _matrix_cycles(inter, hidden, macs),
+                },
+            ]
+        ),
         {"phase": "silu_gate", "kind": "vector", "cycles": math.ceil(inter / macs)},
         {
             "phase": "down_proj",
@@ -100,7 +115,9 @@ def layer_phases(h: dict, macs: int, context: int, batch: int = 1) -> list[dict]
     return phases
 
 
-def schedule(spec: dict, macs: int, engines: int, batch: int = 1) -> dict:
+def schedule(
+    spec: dict, macs: int, engines: int, batch: int = 1, overlap: bool = False, dual_mlp: bool = False
+) -> dict:
     """The schedule table: the phases of the slowest engine (Q-full: one engine per layer) or of
     the single engine of a slice, and the pass and per-token cycle counts. One pass produces
     `batch` tokens: the matvec phases stream the weights once for all of them, so a token costs
@@ -109,7 +126,7 @@ def schedule(spec: dict, macs: int, engines: int, batch: int = 1) -> dict:
         raise ValueError("batch must be at least 1")
     h = spec["hyper"]
     context = spec["context"]["maxTokens"]
-    phases = layer_phases(h, macs, context, batch)
+    phases = layer_phases(h, macs, context, batch, dual_mlp)
     per_layer = sum(p["cycles"] for p in phases)
     if engines == 1:
         rows = [{"engine": 0, "phases": phases}]
@@ -120,24 +137,32 @@ def schedule(spec: dict, macs: int, engines: int, batch: int = 1) -> dict:
         # segmented argmax - so one engine does not serialize the whole vocabulary.
         segment = -(-h["vocab"] // engines)
         rows = [{"engine": i, "phases": list(phases)} for i in range(engines)]
+        classifier = []
         for i, row in enumerate(rows):
             first = i * segment
             rows_of_segment = max(0, min(segment, h["vocab"] - first))
             if rows_of_segment:
-                row["phases"].append(
-                    {
-                        "phase": f"lm_head[{first}:{first + rows_of_segment}]",
-                        "kind": "matvec",
-                        "rows": rows_of_segment,
-                        "columns": h["hidden"],
-                        "cycles": _matrix_cycles(rows_of_segment, h["hidden"], macs),
-                    }
-                )
+                entry = {
+                    "phase": f"lm_head[{first}:{first + rows_of_segment}]",
+                    "kind": "matvec",
+                    "rows": rows_of_segment,
+                    "columns": h["hidden"],
+                    "cycles": _matrix_cycles(rows_of_segment, h["hidden"], macs),
+                }
+                if overlap:
+                    # The classifier stream runs beside the layer pipeline (its own row), so a
+                    # token pays whichever of the two is slower instead of their sum.
+                    classifier.append({"engine": f"lm_head[{first}:{first + rows_of_segment}]", "phases": [entry]})
+                else:
+                    row["phases"].append(entry)
+        rows = rows + classifier
         cycles = max(sum(p["cycles"] for p in row["phases"]) for row in rows) + HOST_CYCLES
     return {
         "cyclesPerToken": -(-cycles // batch),
         "cyclesPerPass": cycles,
         "batch": batch,
+        "overlap": overlap,
+        "dualMlp": dual_mlp,
         "cyclesPerLayer": per_layer,
         "engines": engines,
         "rows": rows,
@@ -200,7 +225,9 @@ def design(
     clock = float(params.get("clockMHz", 8))
     engines = h["layers"] if params.get("engines", "per-layer") == "per-layer" else 1
     batch = int(params.get("batch", 1))
-    sched = schedule(spec, macs, engines, batch)
+    overlap = bool(params.get("classifierOverlap", False))
+    dual_mlp = bool(params.get("dualMlp", False))
+    sched = schedule(spec, macs, engines, batch, overlap, dual_mlp)
     cycles = sched["cyclesPerToken"]
     per_pass = sched["cyclesPerPass"]
     chip = {
@@ -219,6 +246,8 @@ def design(
         },
         "hyper": h,
         "dataflow": {
+            "classifierOverlap": overlap,
+            "dualMlp": dual_mlp,
             "engines": engines,
             "macsPerEngine": macs,
             "romWordBits": macs * wbits,

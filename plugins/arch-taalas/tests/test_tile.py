@@ -61,3 +61,29 @@ def test_a_tampered_schedule_is_caught(spec):
     chip = tile.design(spec, {"macsPerEngine": 8})
     chip["schedule"]["rows"][0]["phases"][0]["cycles"] += 1
     assert tile.verify(chip)["schedule_agrees"] is False
+
+
+def test_the_classifier_overlap_and_the_dual_mlp_cut_the_pass(spec):
+    base = tile.schedule(spec, 8, 2)
+    dual = tile.schedule(spec, 8, 2, 1, False, True)
+    overlap = tile.schedule(spec, 8, 2, 1, True, False)
+    both = tile.schedule(spec, 8, 2, 1, True, True)
+    assert dual["cyclesPerPass"] < base["cyclesPerPass"]
+    assert overlap["cyclesPerPass"] < base["cyclesPerPass"]
+    assert both["cyclesPerPass"] < min(dual["cyclesPerPass"], overlap["cyclesPerPass"])
+    assert dual["dualMlp"] is True and overlap["overlap"] is True
+    # the classifier stream is its own row when it overlaps, and part of the engine row otherwise
+    assert len(overlap["rows"]) == 2 * len(base["rows"])
+    assert [row["engine"] for row in base["rows"]] == list(range(len(base["rows"])))
+
+
+def test_a_design_with_both_switches_verifies(spec):
+    chip = tile.design(
+        spec,
+        {"macsPerEngine": 8, "clockMHz": 50, "classifierOverlap": True, "dualMlp": True},
+    )
+    assert chip["dataflow"]["classifierOverlap"] is True
+    assert chip["dataflow"]["dualMlp"] is True
+    checked = tile.verify(chip)
+    assert checked["schedule_agrees"] is True
+    assert chip["performance"]["cyclesPerToken"] < tile.schedule(spec, 8, 2)["cyclesPerToken"]

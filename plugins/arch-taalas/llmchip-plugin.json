@@ -114,6 +114,16 @@
             "default": 50
           },
           "batch": {
+          "classifierOverlap": {
+            "type": "boolean",
+            "default": false,
+            "description": "Run the classifier stream beside the layer pipeline (its own schedule row) instead of appending it to every engine row."
+          },
+          "dualMlp": {
+            "type": "boolean",
+            "default": false,
+            "description": "Run gate_proj and up_proj as one phase with two weight streams, halving their cycles (the engine reads two words per cycle for those matrices)."
+          },
             "type": "integer",
             "minimum": 1,
             "maximum": 64,
@@ -329,6 +339,16 @@
             "default": 50
           },
           "batch": {
+          "classifierOverlap": {
+            "type": "boolean",
+            "default": false,
+            "description": "Run the classifier stream beside the layer pipeline (its own schedule row) instead of appending it to every engine row."
+          },
+          "dualMlp": {
+            "type": "boolean",
+            "default": false,
+            "description": "Run gate_proj and up_proj as one phase with two weight streams, halving their cycles (the engine reads two words per cycle for those matrices)."
+          },
             "type": "integer",
             "minimum": 1,
             "maximum": 64,
