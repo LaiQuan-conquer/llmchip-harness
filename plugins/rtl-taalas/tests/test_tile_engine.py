@@ -94,3 +94,71 @@ pytestmark = pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is no
 def test_the_engine_matches_the_reference(tmp_path, macs, rows, chunks, bits, groups):
     result = _run(tmp_path, macs, rows, chunks, bits, groups, seed=macs * 100 + rows * 10 + chunks + bits)
     assert "PASS" in result.stdout, result.stdout + result.stderr
+
+
+def _run_dual(tmp_path, macs, rows, chunks, bits, groups, seed):
+    rng = np.random.default_rng(seed)
+    lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    columns = chunks * macs
+    levels_a = rng.integers(lo, hi + 1, size=(rows, columns), dtype=np.int64)
+    levels_b = rng.integers(lo, hi + 1, size=(rows, columns), dtype=np.int64)
+    x = rng.integers(-(1 << 14), 1 << 14, size=columns, dtype=np.int64)
+    expected_a = np.array([int((levels_a[r] * x).sum()) for r in range(rows)])
+    expected_b = np.array([int((levels_b[r] * x).sum()) for r in range(rows)])
+    lines_x = []
+    for chunk in range(chunks):
+        word = 0
+        for k in range(macs):
+            word |= (int(x[chunk * macs + k]) & 0xFFFF) << (16 * k)
+        lines_x.append(f"{word:0{macs * 4}x}")
+    (tmp_path / "x.hex").write_text("\n".join(lines_x) + "\n")
+    for prefix, levels in (("rom_a", levels_a), ("rom_b", levels_b)):
+        packed = rom.to_words(levels, macs, bits)
+        lines = rom.hexfile(packed, macs, bits)
+        (tmp_path / f"{prefix}.hex").write_text("\n".join(lines) + "\n")
+        addr_bits = max(2, (len(lines) - 1).bit_length())
+        per = 1 << (addr_bits - 2)
+        for bank in range(4):
+            chunk = lines[bank * per : (bank + 1) * per]
+            chunk += ["0" * len(lines[0])] * (per - len(chunk))
+            (tmp_path / f"{prefix}_bank{bank}.hex").write_text("\n".join(chunk) + "\n")
+    mask = (1 << 32) - 1
+    for name, expected in (("expected_a.hex", expected_a), ("expected_b.hex", expected_b)):
+        (tmp_path / name).write_text("\n".join(f"{int(v) & mask:08x}" for v in expected) + "\n")
+    for name in ("tile_engine2.v", "tile_engine.v", "tile_rom.v", "tile_mac.v"):
+        shutil.copyfile(TEMPLATES / name, tmp_path / name)
+    shutil.copyfile(Path(__file__).with_name("tile_engine2_tb.v"), tmp_path / "tile_engine2_tb.v")
+    command = [
+        str(VERILATOR),
+        "--binary",
+        "--timing",
+        "-Wno-fatal",
+        "--top-module",
+        "tile_engine2_tb",
+        f"-GMACS={macs}",
+        f"-GBITS={bits}",
+        f"-GGROUPS={groups}",
+        f"-GROWS={rows}",
+        f"-GCHUNKS={chunks}",
+        f"-GLOG2CHUNKS={max(1, (chunks - 1).bit_length())}",
+        f"-GLOG2ROWS={max(1, (rows - 1).bit_length())}",
+        f"-GLOG2ADDR={max(1, (rows * chunks - 1).bit_length())}",
+        f"-GLOG2MACS={max(1, (macs - 1).bit_length())}",
+        "tile_engine2_tb.v",
+        "tile_engine2.v",
+        "tile_engine.v",
+        "tile_rom.v",
+        "tile_mac.v",
+    ]
+    build = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    if build.returncode != 0:
+        return subprocess.CompletedProcess(command, 1, build.stdout + build.stderr, "")
+    return subprocess.run(
+        [str(tmp_path / "obj_dir" / "Vtile_engine2_tb")], cwd=tmp_path, capture_output=True, text=True
+    )
+
+
+@pytest.mark.parametrize("macs,rows,chunks,bits,groups", [(16, 4, 2, 4, 8), (8, 3, 2, 4, 4)])
+def test_two_streams_match_their_references(tmp_path, macs, rows, chunks, bits, groups):
+    result = _run_dual(tmp_path, macs, rows, chunks, bits, groups, seed=macs * 7 + rows)
+    assert "PASS" in result.stdout, result.stdout + result.stderr

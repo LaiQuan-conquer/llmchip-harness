@@ -17,6 +17,10 @@ module tile_engine #(
   parameter integer LOG2ROWS = 3,
   parameter integer LOG2ADDR = 5,
   parameter integer LOG2MACS = 7,
+  parameter         INIT0 = "rom_bank0.hex",
+  parameter         INIT1 = "rom_bank1.hex",
+  parameter         INIT2 = "rom_bank2.hex",
+  parameter         INIT3 = "rom_bank3.hex",
   parameter         INIT = "rom.hex"
 ) (
   input  wire                          clk,
@@ -53,7 +57,7 @@ module tile_engine #(
   wire [MACS*BITS-1:0] rom_q;
   wire [MACS*16-1:0]   x_now;
 
-  tile_rom #(.WIDTH(MACS*BITS), .ADDR(LOG2ADDR)) rom (
+  tile_rom #(.WIDTH(MACS*BITS), .ADDR(LOG2ADDR), .INIT0(INIT0), .INIT1(INIT1), .INIT2(INIT2), .INIT3(INIT3)) rom (
     .addr(address), .q(rom_q)
   );
 

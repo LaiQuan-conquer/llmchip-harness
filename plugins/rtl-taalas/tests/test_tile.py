@@ -98,7 +98,7 @@ def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     lines = (tmp_path / bank["hex"]).read_text().split()
     assert len(lines) == bank["words"]
     assert (tmp_path / "rtl" / "tile_top.v").is_file()
-    assert len(manifest["files"]) == 8
+    assert len(manifest["files"]) == 9
 
 
 @pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")

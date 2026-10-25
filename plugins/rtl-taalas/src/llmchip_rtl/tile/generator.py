@@ -152,6 +152,7 @@ def generate(
     (rtl / "tile_rope.v").write_text((_templates_dir() / "tile_rope.v").read_text())
     (rtl / "tile_kv.v").write_text((_templates_dir() / "tile_kv.v").read_text())
     (rtl / "tile_engine.v").write_text((_templates_dir() / "tile_engine.v").read_text())
+    (rtl / "tile_engine2.v").write_text((_templates_dir() / "tile_engine2.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     (rtl / "tile_top.v").write_text(top)
