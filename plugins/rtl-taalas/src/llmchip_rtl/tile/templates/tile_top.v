@@ -11,8 +11,7 @@ module tile_top #(
   parameter integer MACS = /*MACS*/ 128,
   parameter integer BITS = /*BITS*/ 4,
   parameter integer ACC  = 32,
-  parameter integer ADDR = 20,
-  parameter         INIT = "rom.hex"
+  parameter integer ADDR = 20
 ) (
   input  wire        clk,
   input  wire        rst_n,
@@ -81,7 +80,7 @@ module tile_top #(
   wire [GROUPS*ACC-1:0] mac_y;
   wire [ADDR-1:0]      last_address = {ADDR{1'b1}};
 
-  tile_rom #(.WIDTH(MACS*BITS), .DEPTH(1 << ADDR), .ADDR(ADDR), .INIT(INIT)) rom (
+  tile_rom #(.WIDTH(MACS*BITS), .ADDR(ADDR)) rom (
     .addr(address), .q(rom_data)
   );
 

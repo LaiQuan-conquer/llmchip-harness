@@ -52,7 +52,7 @@ module tile_engine #(
   wire [MACS*BITS-1:0] rom_q;
   wire [MACS*16-1:0]   x_now;
 
-  tile_rom #(.WIDTH(MACS*BITS), .DEPTH(WORDS), .ADDR(LOG2ADDR), .INIT(INIT)) rom (
+  tile_rom #(.WIDTH(MACS*BITS), .ADDR(LOG2ADDR)) rom (
     .addr(address), .q(rom_q)
   );
 

@@ -44,7 +44,14 @@ def _run(
     levels, x, expected = _vectors(seed, macs, rows, chunks, bits)
     (tmp_path / "x.hex").write_text("\n".join(_x_line(x[c * macs : (c + 1) * macs]) for c in range(chunks)) + "\n")
     packed = rom.to_words(levels, macs, bits)
-    (tmp_path / "rom.hex").write_text("\n".join(rom.hexfile(packed, macs, bits)) + "\n")
+    lines = rom.hexfile(packed, macs, bits)
+    (tmp_path / "rom.hex").write_text("\n".join(lines) + "\n")
+    addr_bits = max(2, (len(lines) - 1).bit_length())
+    per = 1 << (addr_bits - 2)
+    for bank in range(4):
+        chunk = lines[bank * per : (bank + 1) * per]
+        chunk += ["0" * len(lines[0])] * (per - len(chunk))
+        (tmp_path / f"rom_bank{bank}.hex").write_text("\n".join(chunk) + "\n")
     mask = (1 << 32) - 1
     (tmp_path / "expected.hex").write_text("\n".join(f"{int(v) & mask:08x}" for v in expected) + "\n")
     for name in ("tile_engine.v", "tile_rom.v", "tile_mac.v"):

@@ -23,7 +23,8 @@ def _params(bundle: Path) -> tuple[int, int]:
 
     manifest = json.loads((bundle / "design.json").read_text())
     width = int(manifest["mapping"]["macs"]) * int(manifest["mapping"]["bits"])
-    return width, DEPTH_BITS
+    words = len((bundle / "rom.hex").read_text().split())
+    return width, max(2, (words - 1).bit_length())
 
 
 def synthesize_view2(bundle: Path, yosys: Path) -> dict:
@@ -31,7 +32,7 @@ def synthesize_view2(bundle: Path, yosys: Path) -> dict:
     script = "; ".join(
         [
             f"read_verilog {(bundle / 'rtl' / 'tile_rom.v').as_posix()}",
-            f"chparam -set ADDR {depth_bits} -set DEPTH {1 << depth_bits} -set WIDTH {width} {ROM_MODULE}",
+            f"chparam -set ADDR {depth_bits} -set WIDTH {width} {ROM_MODULE}",
             f"hierarchy -top {ROM_MODULE}",
             "proc",
             "opt",
@@ -51,7 +52,7 @@ def equivalent(bundle: Path, yosys: Path) -> dict:
     script = "; ".join(
         [
             f"read_verilog {(bundle / 'rtl' / 'tile_rom.v').as_posix()}",
-            f"chparam -set ADDR {depth_bits} -set DEPTH {1 << depth_bits} -set WIDTH {width} {ROM_MODULE}",
+            f"chparam -set ADDR {depth_bits} -set WIDTH {width} {ROM_MODULE}",
             f"hierarchy -top {ROM_MODULE}",
             "proc",
             "memory",

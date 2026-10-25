@@ -136,6 +136,15 @@ def generate(
     # Tools that read the ROM module with its default parameter (Yosys does) take this copy;
     # simulators use each instance's INIT from the generated top.
     (out / "rom.hex").write_text((data / f"{banks[0]['matrix']}.hex").read_text())
+    # The banked ROM reads one file per bank: 4 banks of 2^(ADDR-2) words, zero padded.
+    first_lines = (data / f"{banks[0]['matrix']}.hex").read_text().split()
+    addr_bits = max(2, (len(first_lines) - 1).bit_length())
+    per = 1 << (addr_bits - 2)
+    width_chars = len(first_lines[0]) if first_lines else 128
+    for bank in range(4):
+        chunk = first_lines[bank * per : (bank + 1) * per]
+        chunk += ["0" * width_chars] * (per - len(chunk))
+        (out / f"rom_bank{bank}.hex").write_text("\n".join(chunk) + "\n")
     (rtl / "tile_rom.v").write_text((_templates_dir() / "tile_rom.v").read_text())
     (rtl / "tile_mac.v").write_text((_templates_dir() / "tile_mac.v").read_text())
     (rtl / "tile_lut.v").write_text((_templates_dir() / "tile_lut.v").read_text())
@@ -145,7 +154,6 @@ def generate(
     (rtl / "tile_engine.v").write_text((_templates_dir() / "tile_engine.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
-    top = top.replace('parameter         INIT = "rom.hex"', f'parameter         INIT = "{banks[0]["hex"]}"')
     (rtl / "tile_top.v").write_text(top)
 
     manifest = {
