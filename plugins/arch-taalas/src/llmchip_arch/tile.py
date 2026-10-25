@@ -1,11 +1,12 @@
 """The `taalas-tile/1` architecture: ROM arrays, parallel MACs and a fixed schedule (FR-ARC).
 
 One engine owns a set of ROM banks (the quantized weights) and `macs` multipliers. In one cycle
-it reads one ROM word - `macs` weights for one input column across `macs` output rows - and
-multiplies it by one activation; the products accumulate into `macs` accumulators. A matrix of
-(rows, columns) therefore takes `columns * ceil(rows / macs)` cycles, and the schedule table of
-the design is the cycle model: the RTL generator emits one state per phase, and `verify_spec`
-recomputes the cycles from the table.
+it reads one ROM word - `macs` consecutive weights of one output row - and multiplies them by that
+column chunk's `macs` activations; the products of the row's chunk are summed by the group tree and
+accumulated, so a matrix of (rows, columns) takes `rows * ceil(columns / macs)` words. The pipeline
+adds `PIPE_CYCLES` of latency per phase (S1 word, S2 group sums, S3 accumulators, one more for the
+row's tree). The schedule table of the design is the cycle model: the RTL generator emits one state
+per phase, and `verify_spec` recomputes the cycles from the table.
 
 Q-full gives every decoder layer an engine of its own (the layers run as a pipeline, so a token
 costs the slowest layer plus the host frames); a slice has one engine. The model is deliberately
@@ -19,10 +20,12 @@ import math
 ARCHITECTURE = "taalas-tile/1"
 DEFAULT_MACS = 448  # divides 896 (Qwen's hidden) and 4864 (its intermediate size)
 HOST_CYCLES = 8  # START and STATUS frames, as the vector engine's host interface
+PIPE_CYCLES = 3  # S1 word register, S2 group sums, S3 accumulators (the row tree adds one more)
 
 
 def _matrix_cycles(rows: int, cols: int, macs: int) -> int:
-    return cols * math.ceil(rows / macs)
+    """Row major: one word is a row's chunk of `macs` columns, so the words are rows * chunks."""
+    return rows * math.ceil(cols / macs)
 
 
 def layer_phases(h: dict, macs: int, context: int) -> list[dict]:
@@ -85,6 +88,8 @@ def layer_phases(h: dict, macs: int, context: int) -> list[dict]:
         {"phase": "rmsnorm", "kind": "vector", "cycles": 2 * math.ceil(hidden / macs)},
         {"phase": "rope", "kind": "vector", "cycles": 2},
     ]
+    for phase in phases:
+        phase["cycles"] += PIPE_CYCLES
     return phases
 
 
