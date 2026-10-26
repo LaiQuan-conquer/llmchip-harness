@@ -471,6 +471,12 @@ module tile_layer_attn_tb;
     `CHECK(u, eu, INTER, "u")
     `CHECK(m, em, INTER, "m")
     `CHECK(f, ef, HIDDEN, "f")
+    begin : dump_x2
+      integer fd;
+      fd = $fopen("x2.hex", "w");
+      for (i = 0; i < HIDDEN; i = i + 1) $fwrite(fd, "%04x\n", x2[i*16 +: 16]);
+      $fclose(fd);
+    end
     `CHECK(x2, ex2, HIDDEN, "x2")
     if (errors == 0) $display("PASS");
     else $display("FAIL %0d errors", errors);

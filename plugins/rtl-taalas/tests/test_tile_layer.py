@@ -74,7 +74,7 @@ def _matrix_files(tmp_path, arrays, spec, key: str, prefix: str) -> None:
 
 
 def _run(
-    tmp_path, l2, position: int, tokens: list[int], layer_no: int, coverage: bool = False
+    tmp_path, l2, position: int, tokens: list[int], layer_no: int, coverage: bool = False, x_override=None
 ) -> subprocess.CompletedProcess:
     _graph, spec, arrays = l2.graph, l2.spec, l2.a
     generator.generate(spec, arrays, macs=8, out=tmp_path)
@@ -129,7 +129,7 @@ def _run(
             hold["x2"] = env["x"].copy()
 
     l2.forward(tokens[: position + 1], observe=observe)
-    x = hold["x"][-1].astype(np.int64)
+    x = hold["x"][-1].astype(np.int64) if x_override is None else np.asarray(x_override, dtype=np.int64)
     expected = {
         name: hold[name][-1].astype(np.int64)
         for name in ("h", "q", "k", "v", "qn", "kn", "qr", "kr", "a", "o", "x1", "h2", "g", "u", "m", "f", "x2")

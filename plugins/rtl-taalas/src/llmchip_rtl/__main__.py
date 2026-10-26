@@ -236,6 +236,7 @@ def verify_tile(ctx: InvokeContext) -> Result:
         "ver_mutation": passed("ver.mutation"),
         "ver_dft": passed("ver.dft"),
         "rtl_equivalence": passed("rtl.equivalence"),
+        "rtl_equivalence_logits": int(items.get("rtl.equivalence", {}).get("metrics", {}).get("logits", 0)),
         "ver_unit_tests": int(items.get("ver.unit", {}).get("metrics", {}).get("tests", 0)),
         "ver_slice_tests": int(items.get("ver.slice", {}).get("metrics", {}).get("tests", 0)),
         "ver_cdc_domains": int(items.get("ver.cdc", {}).get("metrics", {}).get("domains", 0)),

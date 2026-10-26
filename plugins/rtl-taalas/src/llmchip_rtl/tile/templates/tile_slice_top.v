@@ -39,7 +39,9 @@ module tile_slice_top #(
   output wire [LOG2ROWS-1:0]           y_index,
   output wire                          done,
   output wire signed [ACC-1:0]         raw_y,
-  output wire                          raw_y_valid
+  output wire                          raw_y_valid,
+  output wire signed [63:0]            total_y,
+  output wire                          total_valid
 );
 
   tile_linear #(
@@ -50,7 +52,8 @@ module tile_slice_top #(
   ) linear (
     .clk(clk), .rst_n(rst_n), .start(start),
     .x_wr_en(x_wr_en), .x_wr_chunk(x_wr_chunk), .x_wr_lane(x_wr_lane), .x_wr_data(x_wr_data),
-    .y(y), .y_valid(y_valid), .y_index(y_index), .done(done), .raw_y(raw_y), .raw_y_valid(raw_y_valid)
+    .y(y), .y_valid(y_valid), .y_index(y_index), .done(done), .raw_y(raw_y), .raw_y_valid(raw_y_valid),
+    .total_y(total_y), .total_valid(total_valid)
   );
 
 endmodule

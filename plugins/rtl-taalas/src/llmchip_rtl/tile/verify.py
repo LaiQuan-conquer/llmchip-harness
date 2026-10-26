@@ -44,7 +44,7 @@ COVERAGE_FILES = ("test_tile_coverage.py",)
 FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)
 DFT_FILES = ("test_dft.py",)
-EQUIV_FILES = ("test_tile_layer.py",)
+EQUIV_FILES = ("test_full_model.py",)
 
 PLAN_ITEMS = (
     {"id": "ver.unit", "category": "unit", "description": "Every template against its Python reference"},
@@ -251,11 +251,13 @@ def report(
 
     if run_equiv:
         equiv = _pytest(EQUIV_FILES)
+        match = re.search(r"FULL_MODEL logits=([0-9]+)", equiv["output"])
+        logits = int(match.group(1)) if match else 0
         items.append(
             {
                 "id": "rtl.equivalence",
-                "status": "passed" if equiv["returncode"] == 0 else "failed",
-                "metrics": {"tests": equiv["passed"] + equiv["failed"], "layers": equiv["passed"]},
+                "status": "passed" if equiv["returncode"] == 0 and logits > 0 else "failed",
+                "metrics": {"tests": equiv["passed"] + equiv["failed"], "logits": logits},
                 "detail": equiv["output"],
             }
         )

@@ -42,7 +42,9 @@ module tile_linear #(
   output reg  [LOG2ROWS-1:0]           y_index,
   output wire                          done,
   output wire signed [ACC-1:0]         raw_y,
-  output wire                          raw_y_valid
+  output wire                          raw_y_valid,
+  output reg  signed [63:0]            total_y,
+  output reg                           total_valid
 );
 
   localparam integer SHIFT = FRAC_IN + EXP - FRAC_OUT;
@@ -112,8 +114,11 @@ module tile_linear #(
       y       <= 16'sd0;
       y_valid <= 1'b0;
       y_index <= {LOG2ROWS{1'b0}};
+      total_y <= 64'sd0;
+      total_valid <= 1'b0;
     end else begin
       y_valid <= 1'b0;
+      total_valid <= 1'b0;
       if (word_valid) begin
         for (gi = 0; gi < NGROUPS; gi = gi + 1) begin
           raw[gi] <= raw_next[gi];
@@ -122,6 +127,8 @@ module tile_linear #(
           y       <= y_next;
           y_index <= word_row;
           y_valid <= 1'b1;
+          total_y <= total_next;
+          total_valid <= 1'b1;
         end
       end
     end

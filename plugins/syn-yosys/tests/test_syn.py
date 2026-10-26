@@ -238,7 +238,7 @@ def test_the_scan_chain_covers_every_internal_flop(bundle, tmp_path):
     assert dft.returncode == 0, dft.stdout + dft.stderr
     lines = [line for line in dft.stdout.splitlines() if line.startswith("{")]
     report = json.loads(lines[-1])
-    assert report["internal"] == 1506
+    assert report["internal"] == 1553
     assert report["total"] > report["internal"]
     assert report["ok"] is True
 

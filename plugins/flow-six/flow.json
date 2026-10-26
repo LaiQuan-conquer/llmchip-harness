@@ -2025,12 +2025,17 @@
     {
       "id": "rtl.equivalence",
       "version": "1",
-      "title": "The Q-full layer harness is the chip-level equivalence against L2",
+      "title": "The tiny full model produces 128 logits through RTL layer 0, layer 1, final_norm and lm_head and matches L2",
       "plugin": "rtl-taalas",
       "handler": "tile_verify",
       "completeness": [
         {
           "metric": "rtl_equivalence",
+          "op": ">",
+          "value": 0
+        },
+        {
+          "metric": "rtl_equivalence_logits",
           "op": ">",
           "value": 0
         }
