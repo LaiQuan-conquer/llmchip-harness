@@ -590,7 +590,7 @@ Measured on the development machine (WSL2, Node 24.22, uv 0.13, Podman 3.4 with 
 |---|---|---|
 | `yarn check:workspace` | packages, references, `workspace:*` deps, vendor manifest and licenses | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` matches the schema | "up to date (2 files)" |
-| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 301 passed, 1 skipped, 15 min 38 s with the EDA image, the sandbox image and a GPU (2026-10-26, R5); at R1, 165 passed, 1 skipped, 6 min 43 s; at R0, 164 passed, 1 skipped (R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
+| `yarn check:python` | ruff lint and format, pytest of the SDK, the test harness and all Python plugins | 306 passed, 1 skipped, 17 min 49 s with the EDA image, the sandbox image and a GPU (2026-10-26, R5); at R1, 165 passed, 1 skipped, 6 min 43 s; at R0, 164 passed, 1 skipped (R0 removed the `packager` tests); before, 158 passed, 1 skipped, 4 min 52 s (2026-10-22); 32 of them the test harness, 7 its L3 simulator tests (skipped visibly without the image; the skip is the check of the behaviour without it) |
 | `yarn typecheck` | project references, then sources, tests, scripts and the Web UI | clean |
 | `yarn build` | `lib/` of every package, `apps/web/dist` | clean |
 | `yarn test` | all Vitest specs (below) | 34 files passed, 2 skipped (m4-flow, qwen-spec); 129 tests passed, 3 skipped (m4-flow, S0–S7 of `pipelines-flow` and qwen-spec, all opt-in; 2026-10-26, R4) |

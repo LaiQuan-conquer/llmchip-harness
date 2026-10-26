@@ -638,7 +638,7 @@ yarn llmchip pipeline list --project demo
 |---|---|---|
 | `yarn check:workspace` | 包、引用、`workspace:*` 依赖、vendor 清单与许可证 | "5 packages, 9 vendored packages" |
 | `yarn check:generated` | `kernel-api/src/generated` 与 schema 一致 | "up to date (2 files)" |
-| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 301 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 15 分 38 秒（2026-10-26，R5）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
+| `yarn check:python` | ruff lint 与格式检查，SDK、测试环境和全部 Python 插件的 pytest | 306 passed、1 skipped，有 EDA 镜像、沙箱镜像与 GPU 时 17 分 49 秒（2026-10-26，R5）；R1 时 165 passed、1 skipped，6 分 43 秒；R0 时 164 passed、1 skipped（R0 删除了 `packager` 的测试）；此前 158 passed、1 skipped，4 分 52 秒（2026-10-22）；其中 32 个属于测试环境，7 个是其 L3 仿真测试（无镜像时可见地跳过；跳过的那个是检查无镜像时行为的测试） |
 | `yarn typecheck` | 先构建项目引用，再检查源码、测试、脚本与 Web UI 的类型 | 通过 |
 | `yarn build` | 各包的 `lib/`，以及 `apps/web/dist` | 通过 |
 | `yarn test` | 全部 Vitest 用例（见下表） | 33 个文件通过、2 个跳过（m4-flow、qwen-spec）；126 个测试通过、3 个跳过（m4-flow、`pipelines-flow` 的 S0–S7 与 qwen-spec，都须显式开启；2026-10-24，R2a） |
