@@ -20,6 +20,7 @@ from .spatial.generator import Spatial
 from .spatial.sp_model import Machine as SpatialModel
 from .tile import checks as tile_checks
 from .tile import generator as tile_generator
+from .tile import verify as tile_verify
 
 SPATIAL_RULE = (
     "taalas-spatial/1: each matrix row is a bit-serial adder tree; weight q at input i adds the input "
@@ -207,8 +208,57 @@ def tile_generate(ctx: InvokeContext) -> Result:
     )
 
 
+def verify_tile(ctx: InvokeContext) -> Result:
+    """R4: the template suite, the functional S-1 slice and the clock-domain check."""
+    bundle = Path(ctx.work_dir, "bundle")
+    bundle.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(ctx.input("rtl").path) as archive:
+        archive.extractall(bundle)
+    report = tile_verify.report(
+        bundle,
+        run_unit=bool(ctx.params.get("unit", True)),
+        run_slice=bool(ctx.params.get("slice", True)),
+        run_layer=bool(ctx.params.get("layer", True)),
+    )
+    Path(ctx.out_dir, "verification.json").write_text(json.dumps(report, indent=2))
+    items = {item["id"]: item for item in report["items"]}
+
+    def passed(item_id: str) -> int:
+        return int(items.get(item_id, {}).get("status") == "passed")
+
+    metrics = {
+        "ver_unit": passed("ver.unit"),
+        "ver_slice": passed("ver.slice"),
+        "ver_cdc": passed("ver.cdc"),
+        "ver_layer": passed("ver.layer"),
+        "ver_coverage": passed("ver.coverage"),
+        "ver_formal": passed("ver.formal"),
+        "ver_mutation": passed("ver.mutation"),
+        "ver_dft": passed("ver.dft"),
+        "rtl_equivalence": passed("rtl.equivalence"),
+        "ver_unit_tests": int(items.get("ver.unit", {}).get("metrics", {}).get("tests", 0)),
+        "ver_slice_tests": int(items.get("ver.slice", {}).get("metrics", {}).get("tests", 0)),
+        "ver_cdc_domains": int(items.get("ver.cdc", {}).get("metrics", {}).get("domains", 0)),
+        "ver_cdc_violations": int(items.get("ver.cdc", {}).get("metrics", {}).get("violations", 0)),
+        "ver_layer_layers": int(items.get("ver.layer", {}).get("metrics", {}).get("layers", 0)),
+        "ver_layer_observations": int(items.get("ver.layer", {}).get("metrics", {}).get("observations", 0)),
+        "ver_layer_tests": int(items.get("ver.layer", {}).get("metrics", {}).get("tests", 0)),
+        "ver_coverage_line": float(items.get("ver.coverage", {}).get("metrics", {}).get("line", 0.0)),
+        "ver_formal_tests": int(items.get("ver.formal", {}).get("metrics", {}).get("tests", 0)),
+        "ver_mutation_score": float(items.get("ver.mutation", {}).get("metrics", {}).get("score", 0.0)),
+        "ver_dft_tests": int(items.get("ver.dft", {}).get("metrics", {}).get("tests", 0)),
+        "ver_not_run": len(report["summary"]["notRun"]),
+        "ver_complete": int(bool(report["summary"]["complete"])),
+    }
+    return Result(
+        outputs=[Output("report", "verification.json", "verification.report", "application/json")],
+        metrics=metrics,
+        parse={"status": "complete", "parser": "llmchip-rtl/tile-verify"},
+    )
+
+
 def tile_check(ctx: InvokeContext) -> Result:
-    """The RTL checks of a tile bundle: roundtrip, rules, Verilator lint, Yosys (FR-RTL-03)."""
+    """The RTL checks of a tile bundle: roundtrip, rules, the three linters, Yosys (FR-RTL-03)."""
     bundle = Path(ctx.work_dir, "bundle")
     bundle.mkdir(parents=True, exist_ok=True)
     with tarfile.open(ctx.input("rtl").path) as archive:
@@ -216,8 +266,14 @@ def tile_check(ctx: InvokeContext) -> Result:
     tools = Path(os.environ.get("LLMCHIP_TOOLS", Path.home() / "projects" / "deepseek-harness" / "tools"))
     verilator = tools / "oss-cad-suite" / "bin" / "verilator"
     yosys = tools / "oss-cad-suite" / "bin" / "yosys"
+    verible = tools / "verible" / "bin" / "verible-verilog-lint"
+    slang = tools / "oss-cad-suite" / "bin" / "slang-tidy"
     report = tile_checks.all_checks(
-        bundle, verilator if verilator.is_file() else None, yosys if yosys.is_file() else None
+        bundle,
+        verilator if verilator.is_file() else None,
+        yosys if yosys.is_file() else None,
+        verible if verible.is_file() else None,
+        slang if slang.is_file() else None,
     )
     Path(ctx.out_dir, "rtl-checks.json").write_text(json.dumps(report, indent=2))
     return Result(
@@ -227,8 +283,11 @@ def tile_check(ctx: InvokeContext) -> Result:
             "roundtrip_mismatches": report["roundtrip"]["roundtrip_mismatches"],
             "rule_violations": report["rules"]["violations"],
             "lint_warnings": report["lint"].get("warnings", -1),
+            "lint_returncode": report["lint"].get("returncode", -1),
+            "lint_tools": report["lint"].get("tools", 0),
             "synthesizable": int(report["synthesizable"].get("returncode", -1) == 0),
             "rom_views": int(bool(report["romViews"].get("equivalent"))),
+            "rom_views3": int(bool(report["romViews"].get("equivalent3"))),
             "checked": int(bool(report["passed"])),
         },
         parse={"status": "complete", "parser": "llmchip-rtl/tile-check"},
@@ -239,5 +298,11 @@ if __name__ == "__main__":
     run_plugin(
         "rtl-taalas",
         "0.2.0",
-        {"generate": generate, "check_isa": check_isa, "tile_generate": tile_generate, "tile_check": tile_check},
+        {
+            "generate": generate,
+            "check_isa": check_isa,
+            "tile_generate": tile_generate,
+            "tile_check": tile_check,
+            "tile_verify": verify_tile,
+        },
     )

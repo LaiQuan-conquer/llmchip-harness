@@ -17,7 +17,8 @@ module tile_mac #(
   input  wire                         first,
   input  wire signed [MACS*16-1:0]    x,
   input  wire [MACS*BITS-1:0]         w,
-  output wire [GROUPS*ACC-1:0]        y
+  output wire [GROUPS*ACC-1:0]        y,
+  output wire [GROUPS*ACC-1:0]        word_groups
 );
 
   localparam integer GROUP = MACS / GROUPS;
@@ -104,6 +105,7 @@ module tile_mac #(
   generate
     for (g = 0; g < GROUPS; g = g + 1) begin : group_out
       assign y[g*ACC +: ACC] = gacc[g];
+      assign word_groups[g*ACC +: ACC] = gsum_d[g];
     end
   endgenerate
 

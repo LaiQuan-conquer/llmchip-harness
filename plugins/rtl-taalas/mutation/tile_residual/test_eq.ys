@@ -1,0 +1,8 @@
+read_verilog tile_residual.v
+rename tile_residual gold
+read_rtlil mutated.il
+rename tile_residual gate
+equiv_make gold gate equiv
+hierarchy -top equiv
+equiv_simple
+equiv_status -assert

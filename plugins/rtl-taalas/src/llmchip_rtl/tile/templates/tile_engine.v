@@ -20,8 +20,7 @@ module tile_engine #(
   parameter         INIT0 = "rom_bank0.hex",
   parameter         INIT1 = "rom_bank1.hex",
   parameter         INIT2 = "rom_bank2.hex",
-  parameter         INIT3 = "rom_bank3.hex",
-  parameter         INIT = "rom.hex"
+  parameter         INIT3 = "rom_bank3.hex"
 ) (
   input  wire                          clk,
   input  wire                          rst_n,
@@ -32,7 +31,11 @@ module tile_engine #(
   input  wire signed [15:0]            x_wr_data,
   output reg  signed [ACC-1:0]         y,
   output reg                           y_valid,
-  output reg                           done
+  output reg                           done,
+  output reg  signed [ACC-1:0]         word_sum,
+  output reg                           word_valid,
+  output reg  [LOG2ROWS-1:0]           word_row,
+  output reg  [LOG2CHUNKS-1:0]         word_chunk
 );
 
   localparam [1:0] IDLE = 2'd0, RUN = 2'd1, DRAIN = 2'd2, DONE = 2'd3;
@@ -55,8 +58,14 @@ module tile_engine #(
   reg                  last4;
   reg                  last5;
   reg                  first_d;
+  reg                  valid_d2;
+  reg [LOG2ROWS-1:0]   row_d2;
+  reg [LOG2ROWS-1:0]   row_d3;
+  reg [LOG2CHUNKS-1:0] chunk_d2;
+  reg [LOG2CHUNKS-1:0] chunk_d3;
   wire [MACS*BITS-1:0] rom_q;
   wire [MACS*16-1:0]   x_now;
+  wire [GROUPS*ACC-1:0] word_groups;
 
   tile_rom #(.WIDTH(MACS*BITS), .ADDR(LOG2ADDR), .INIT0(INIT0), .INIT1(INIT1), .INIT2(INIT2), .INIT3(INIT3)) rom (
     .addr(address), .q(rom_q)
@@ -106,7 +115,8 @@ module tile_engine #(
     .first(first_d),
     .x(valid_d ? x_d : {MACS*16{1'b0}}),
     .w(word_d),
-    .y(groups)
+    .y(groups),
+    .word_groups(word_groups)
   );
 
   // The row's value is the tree of the group accumulators, registered one cycle after the row's
@@ -118,6 +128,16 @@ module tile_engine #(
     row_sum = {ACC{1'b0}};
     for (gi = 0; gi < GROUPS; gi = gi + 1) begin
       row_sum = row_sum + $signed(groups[gi*ACC +: ACC]);
+    end
+  end
+
+  // The word-level sum travels with its row and chunk three stages behind the marcher: the
+  // product register (S2a), the group-sum register (S2b) and the word-sum wires are aligned with
+  // valid_d2, row_d3 and chunk_d3. `tile_linear` uses this to scale every quantization group.
+  always @(*) begin
+    word_sum = {ACC{1'b0}};
+    for (gi = 0; gi < GROUPS; gi = gi + 1) begin
+      word_sum = word_sum + $signed(word_groups[gi*ACC +: ACC]);
     end
   end
 
@@ -135,9 +155,25 @@ module tile_engine #(
       row_sum_d <= {ACC{1'b0}};
       y_valid <= 1'b0;
       done    <= 1'b0;
+      valid_d2 <= 1'b0;
+      word_valid <= 1'b0;
+      row_d2   <= {LOG2ROWS{1'b0}};
+      row_d3   <= {LOG2ROWS{1'b0}};
+      chunk_d2 <= {LOG2CHUNKS{1'b0}};
+      chunk_d3 <= {LOG2CHUNKS{1'b0}};
+      word_row <= {LOG2ROWS{1'b0}};
+      word_chunk <= {LOG2CHUNKS{1'b0}};
     end else begin
       y_valid <= 1'b0;
       done    <= 1'b0;
+      valid_d2 <= valid_d;
+      word_valid <= valid_d2;
+      row_d2   <= row;
+      row_d3   <= row_d2;
+      chunk_d2 <= chunk;
+      chunk_d3 <= chunk_d2;
+      word_row <= row_d3;
+      word_chunk <= chunk_d3;
       case (state)
         IDLE: begin
           if (start) begin

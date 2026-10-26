@@ -43,6 +43,14 @@ module tile_engine2 #(
   wire signed [ACC-1:0] y_b_int;
   wire valid_a;
   wire valid_b;
+  wire signed [ACC-1:0] sum_a;
+  wire signed [ACC-1:0] sum_b;
+  wire wvalid_a;
+  wire wvalid_b;
+  wire [LOG2ROWS-1:0] wrow_a;
+  wire [LOG2ROWS-1:0] wrow_b;
+  wire [LOG2CHUNKS-1:0] wchunk_a;
+  wire [LOG2CHUNKS-1:0] wchunk_b;
 
   tile_engine #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS),
@@ -52,7 +60,8 @@ module tile_engine2 #(
   ) a (
     .clk(clk), .rst_n(rst_n), .start(start),
     .x_wr_en(x_wr_en), .x_wr_chunk(x_wr_chunk), .x_wr_lane(x_wr_lane), .x_wr_data(x_wr_data),
-    .y(y_a_int), .y_valid(valid_a), .done(done_a)
+    .y(y_a_int), .y_valid(valid_a), .done(done_a),
+    .word_sum(sum_a), .word_valid(wvalid_a), .word_row(wrow_a), .word_chunk(wchunk_a)
   );
 
   tile_engine #(
@@ -63,7 +72,8 @@ module tile_engine2 #(
   ) b (
     .clk(clk), .rst_n(rst_n), .start(start),
     .x_wr_en(x_wr_en), .x_wr_chunk(x_wr_chunk), .x_wr_lane(x_wr_lane), .x_wr_data(x_wr_data),
-    .y(y_b_int), .y_valid(valid_b), .done(done_b)
+    .y(y_b_int), .y_valid(valid_b), .done(done_b),
+    .word_sum(sum_b), .word_valid(wvalid_b), .word_row(wrow_b), .word_chunk(wchunk_b)
   );
 
   assign y_a = y_a_int;

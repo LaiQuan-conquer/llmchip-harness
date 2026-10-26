@@ -1,0 +1,14 @@
+[options]
+mode bmc
+depth 2
+
+[engines]
+smtbmc
+
+[script]
+read_verilog -formal tile_residual_formal.v tile_residual.v
+prep -top tile_residual_formal
+
+[files]
+tile_residual_formal.v
+tile_residual.v

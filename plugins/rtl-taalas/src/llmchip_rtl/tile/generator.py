@@ -20,9 +20,9 @@ from pathlib import Path
 
 import numpy as np
 
-from . import rom
+from . import macro, rom, views
 
-TEMPLATE_VERSION = "taalas-tile-templates/1"
+TEMPLATE_VERSION = "taalas-tile-templates/2"
 CLASSIFIER = "embed"  # the tied classifier: the embedding table's integers
 
 
@@ -109,6 +109,87 @@ def generate(
             }
         )
 
+    # The bit-exact linear stage of the first bank and, for a slice, its top. The mantissas and
+    # biases are the numeric spec's own arrays, so the stage rounds exactly as GraphL2.linear.
+    entries = _entries(spec, slice_report, layers)
+    layer0, node0, r0, r1, c0, c1 = entries[0]
+    key0 = f"{layer0}.{node0}"
+    rows, columns = r1 - r0, c1 - c0
+    group = int(spec["weights"]["groupSize"])
+    groups0 = c0 // group
+    groups1 = -(-c1 // group)
+    ngroups = groups1 - groups0
+    chunks = -(-columns // macs)
+    cpg = group // macs
+    log2cpg = cpg.bit_length() - 1
+    if cpg < 1 or 1 << log2cpg != cpg:
+        raise ValueError(f"groupSize {group} is not a power-of-two multiple of MACS {macs}")
+    mant = arrays[f"{key0}.m"].astype(np.int64)[r0:r1, groups0:groups1]
+    bias = arrays.get(f"{key0}.b")
+    bias = np.zeros(rows, dtype=np.int64) if bias is None else bias.astype(np.int64)[r0:r1]
+    (out / "slice_m.hex").write_text("\n".join(f"{int(v) & 0xFFFF:04x}" for v in mant.ravel()) + "\n")
+    (out / "slice_b.hex").write_text("\n".join(f"{int(v) & 0xFFFF:04x}" for v in bias.ravel()) + "\n")
+    kinds_out = {
+        "q_proj": "q",
+        "k_proj": "k",
+        "v_proj": "v",
+        "o_proj": "x",
+        "gate_proj": "h1",
+        "up_proj": "h3",
+        "down_proj": "x",
+    }
+    kinds_in = {
+        "q_proj": "xn",
+        "k_proj": "xn",
+        "v_proj": "xn",
+        "o_proj": "v",
+        "gate_proj": "xn",
+        "up_proj": "xn",
+        "down_proj": "g",
+    }
+    layer_frac = spec["activations"].get("layerFrac") or {}
+    frac = layer_frac.get(str(layer0), spec["activations"]["frac"])
+    frac_in, frac_out = int(frac[kinds_in[node0]]), int(frac[kinds_out[node0]])
+    exponent = int(spec["weights"]["exponents"][key0])
+    linear = {
+        "matrix": key0,
+        "rows": rows,
+        "columns": columns,
+        "quantGroups": ngroups,
+        "groupSize": group,
+        "macs": macs,
+        "chunks": chunks,
+        "chunksPerGroup": cpg,
+        "fracIn": frac_in,
+        "fracOut": frac_out,
+        "exponent": exponent,
+        "mantissaHex": "slice_m.hex",
+        "biasHex": "slice_b.hex",
+        "mantissaDigest": hashlib.sha256(mant.astype("<i8").tobytes()).hexdigest(),
+        "biasDigest": hashlib.sha256(bias.astype("<i8").tobytes()).hexdigest(),
+    }
+    (rtl / "tile_linear.v").write_text((_templates_dir() / "tile_linear.v").read_text())
+    if slice_report is not None:
+        slice_top = (_templates_dir() / "tile_slice_top.v").read_text()
+        replacements = {
+            "/*MACS*/ 8": f"/*MACS*/ {macs}",
+            "/*BITS*/ 4": f"/*BITS*/ {bits}",
+            "/*ROWS*/ 8": f"/*ROWS*/ {rows}",
+            "/*CHUNKS*/ 4": f"/*CHUNKS*/ {chunks}",
+            "/*LOG2CHUNKS*/ 2": f"/*LOG2CHUNKS*/ {max(1, (chunks - 1).bit_length())}",
+            "/*LOG2ROWS*/ 3": f"/*LOG2ROWS*/ {max(1, (rows - 1).bit_length())}",
+            "/*LOG2ADDR*/ 5": f"/*LOG2ADDR*/ {max(2, (banks[0]['words'] - 1).bit_length())}",
+            "/*LOG2MACS*/ 3": f"/*LOG2MACS*/ {max(1, (macs - 1).bit_length())}",
+            "/*LOG2CPG*/ 1": f"/*LOG2CPG*/ {log2cpg}",
+            "/*NGROUPS*/ 2": f"/*NGROUPS*/ {ngroups}",
+            "/*FRAC_IN*/ 12": f"/*FRAC_IN*/ {frac_in}",
+            "/*FRAC_OUT*/ 15": f"/*FRAC_OUT*/ {frac_out}",
+            "/*EXP*/ 21": f"/*EXP*/ {exponent}",
+        }
+        for old, new in replacements.items():
+            slice_top = slice_top.replace(old, new)
+        (rtl / "tile_slice_top.v").write_text(slice_top)
+
     luts = {}
     for name in ("rsqrt", "exp", "sigmoid", "rope_cos", "rope_sin"):
         array = arrays.get(f"lut.{name}")
@@ -154,15 +235,119 @@ def generate(
     (rtl / "tile_engine.v").write_text((_templates_dir() / "tile_engine.v").read_text())
     (rtl / "tile_engine2.v").write_text((_templates_dir() / "tile_engine2.v").read_text())
     (rtl / "tile_engine_b.v").write_text((_templates_dir() / "tile_engine_b.v").read_text())
+    (rtl / "tile_attention.v").write_text((_templates_dir() / "tile_attention.v").read_text())
+    (rtl / "tile_silu.v").write_text((_templates_dir() / "tile_silu.v").read_text())
+    (rtl / "tile_residual.v").write_text((_templates_dir() / "tile_residual.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     (rtl / "tile_top.v").write_text(top)
+    # The Q-full top's layer count is the model's; a slice bundle still carries the template (the
+    # layer chain is only exercised by a Q-full bundle).
+    qfull_layers = max(2, int(spec["hyper"]["layers"]))
+    qfull = (_templates_dir() / "tile_qfull_top.v").read_text()
+    qfull = (
+        qfull.replace("/*LAYERS*/ 2", f"/*LAYERS*/ {qfull_layers}")
+        .replace("/*MACS*/ 8", f"/*MACS*/ {macs}")
+        .replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
+    )
+    (rtl / "tile_qfull_top.v").write_text(qfull)
+
+    # One 4-bank file set per decoder layer: the layer's seven matrices in schedule order, row
+    # major, padded to the banked ROM's power-of-two depth. These are the inputs of the Q-full
+    # top's per-layer engines and of a banked hard ROM macro; `rom_bank0..3.hex` remains the
+    # slice's set.
+    layer_banks = []
+    if slice_report is None:
+        by_layer: dict[int, dict] = {}
+        for layer, node, r0, r1, c0, c1 in _entries(spec, None, layers):
+            if node == CLASSIFIER:
+                continue
+            key = f"{layer}.{node}"
+            q = arrays[f"{key}.q"].astype(np.int64)[r0:r1, c0:c1]
+            entry = by_layer.setdefault(layer, {"matrices": [], "words": []})
+            entry["matrices"].append(key)
+            entry["words"].extend(rom.to_words(q, macs, bits))
+        for layer in sorted(by_layer):
+            words = by_layer[layer]["words"]
+            addr_bits = max(2, (len(words) - 1).bit_length())
+            per = 1 << (addr_bits - 2)
+            padded = words + [0] * (4 * per - len(words))
+            files = []
+            digests = []
+            for bank in range(4):
+                chunk = padded[bank * per : (bank + 1) * per]
+                name = f"layer{layer}_bank{bank}.hex"
+                (out / name).write_text("\n".join(rom.hexfile(chunk, macs, bits)) + "\n")
+                files.append(name)
+                digests.append(rom.digest(chunk, macs, bits))
+            layer_banks.append(
+                {
+                    "layer": layer,
+                    "matrices": by_layer[layer]["matrices"],
+                    "words": len(words),
+                    "addrBits": addr_bits,
+                    "perBank": per,
+                    "files": files,
+                    "digests": digests,
+                }
+            )
+
+    # The banked Q-full top: one explicit engine per layer, each loading that layer's four bank
+    # files. A slice bundle has no layer banks, so it keeps only the generic `tile_qfull_top.v`.
+    if len(layer_banks) >= 2:
+        banked = (_templates_dir() / "tile_qfull_banked.v").read_text()
+        instances = []
+        for index, entry in enumerate(layer_banks):
+            layer = int(entry["layer"])
+            instances.append(
+                f"""  tile_engine #(
+    .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS), .ROWS(ROWS), .CHUNKS(CHUNKS),
+    .LOG2CHUNKS(LOG2CHUNKS), .LOG2ROWS(LOG2ROWS), .LOG2ADDR(LOG2ADDR), .LOG2MACS(LOG2MACS),
+    .INIT0("layer{layer}_bank0.hex"), .INIT1("layer{layer}_bank1.hex"),
+    .INIT2("layer{layer}_bank2.hex"), .INIT3("layer{layer}_bank3.hex")
+  ) engine{index} (
+    .clk(clk), .rst_n(rst_n), .start(start_w[{index}]),
+    .x_wr_en(x_wr_en), .x_wr_chunk(x_wr_chunk), .x_wr_lane(x_wr_lane), .x_wr_data(x_wr_data),
+    .y(y_w[{index}*ACC +: ACC]), .y_valid(y_valid_w[{index}]), .done(done_w[{index}]),
+    .word_sum(word_sum_w[{index}*ACC +: ACC]), .word_valid(word_valid_w[{index}]),
+    .word_row(word_row_w[{index}*LOG2ROWS +: LOG2ROWS]),
+    .word_chunk(word_chunk_w[{index}*LOG2CHUNKS +: LOG2CHUNKS])
+  );"""
+            )
+        banked = (
+            banked.replace("/*LAYERS*/ 2", f"/*LAYERS*/ {len(layer_banks)}")
+            .replace("/*MACS*/ 8", f"/*MACS*/ {macs}")
+            .replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
+            .replace("/*LOG2ADDR*/ 10", f"/*LOG2ADDR*/ {layer_banks[0]['addrBits']}")
+            .replace("/*ENGINES*/", "\n".join(instances))
+        )
+        (rtl / "tile_qfull_banked.v").write_text(banked)
+
+    via_manifest = views.write_view3(out, width=macs * bits)
+
+    macro_manifest = macro.generate(out, width=macs * bits)
 
     manifest = {
         "format": "llmchip-rtl-bundle/2",
         "architecture": "taalas-tile/1",
         "mapping": {"rule": rom.MAPPING_VERSION, "macs": macs, "bits": bits},
-        "templates": {"version": TEMPLATE_VERSION, "files": ["tile_rom.v", "tile_mac.v", "tile_top.v"]},
+        "templates": {
+            "version": TEMPLATE_VERSION,
+            "files": [
+                "tile_rom.v",
+                "tile_mac.v",
+                "tile_top.v",
+                "tile_attention.v",
+                "tile_qfull_top.v",
+                "tile_linear.v",
+                "tile_slice_top.v",
+                "tile_silu.v",
+                "tile_residual.v",
+            ],
+        },
+        "layerBanks": layer_banks,
+        "linear": linear,
+        "macro": macro_manifest,
         "slice": (
             {
                 "level": slice_report["level"],
@@ -181,8 +366,9 @@ def generate(
         "views": {
             "1": "behavioural $readmemh (this bundle)",
             "2": "standard-cell ROM netlist, synthesised by views.py",
-            "3": "via-programmed, not built",
+            "3": "via-programmed array (rom_view3.v, rom_via.json)",
         },
+        "via": via_manifest,
         "files": {str(p.relative_to(out)): _hash(p) for p in sorted(rtl.iterdir()) if p.suffix == ".v"},
     }
     (out / "design.json").write_text(json.dumps(manifest, indent=2))

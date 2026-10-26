@@ -56,6 +56,21 @@
       "timeoutMs": 1800000
     },
     {
+      "name": "tile_verify",
+      "title": "R4 verification: template suite, functional S-1 slice and clock domains",
+      "inputs": [{ "name": "rtl", "types": ["rtl.bundle"], "required": true }],
+      "outputs": [{ "name": "report", "type": "verification.report", "mediaType": "application/json" }],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unit": { "type": "boolean", "default": true },
+          "slice": { "type": "boolean", "default": true }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
       "name": "tile_check",
       "title": "The RTL checks of a tile bundle: ROM round trip, rules, Verilator lint, Yosys",
       "inputs": [{ "name": "rtl", "types": ["rtl.bundle"], "required": true }],

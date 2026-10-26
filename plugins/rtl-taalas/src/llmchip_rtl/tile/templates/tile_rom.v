@@ -18,8 +18,16 @@ module tile_rom #(
 
   localparam integer PER = 1 << (ADDR - 2);
 
-  wire [1:0]      bank = addr[ADDR-1 -: 2];
-  wire [ADDR-3:0] off = addr[ADDR-3:0];
+  localparam integer OFFBITS = (ADDR > 2) ? (ADDR - 2) : 1;
+  wire [1:0]        bank = addr[ADDR-1 -: 2];
+  wire [OFFBITS-1:0] off;
+  generate
+    if (ADDR > 2) begin : g_off
+      assign off = addr[ADDR-3:0];
+    end else begin : g_flat
+      assign off = 1'b0;
+    end
+  endgenerate
 
   reg [WIDTH-1:0] mem0 [0:PER-1];
   reg [WIDTH-1:0] mem1 [0:PER-1];

@@ -38,6 +38,10 @@ module tile_engine_b #(
 
   wire [B-1:0] valid;
   wire [B-1:0] finished;
+  wire [B*ACC-1:0] word_sum;
+  wire [B-1:0] word_valid;
+  wire [B*LOG2ROWS-1:0] word_row;
+  wire [B*LOG2CHUNKS-1:0] word_chunk;
 
   genvar b;
   generate
@@ -51,7 +55,9 @@ module tile_engine_b #(
       ) engine (
         .clk(clk), .rst_n(rst_n), .start(start),
         .x_wr_en(en_b), .x_wr_chunk(x_wr_chunk), .x_wr_lane(x_wr_lane), .x_wr_data(x_wr_data),
-        .y(y[b*ACC +: ACC]), .y_valid(valid[b]), .done(finished[b])
+        .y(y[b*ACC +: ACC]), .y_valid(valid[b]), .done(finished[b]),
+        .word_sum(word_sum[b*ACC +: ACC]), .word_valid(word_valid[b]),
+        .word_row(word_row[b*LOG2ROWS +: LOG2ROWS]), .word_chunk(word_chunk[b*LOG2CHUNKS +: LOG2CHUNKS])
       );
     end
   endgenerate

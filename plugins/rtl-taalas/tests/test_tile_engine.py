@@ -89,7 +89,7 @@ pytestmark = pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is no
 
 @pytest.mark.parametrize(
     "macs,rows,chunks,bits,groups",
-    [(16, 4, 2, 4, 8), (16, 6, 3, 4, 8), (32, 4, 2, 8, 8), (8, 3, 2, 4, 4)],
+    [(16, 4, 2, 4, 8), (16, 6, 3, 4, 8), (32, 4, 2, 8, 8), (8, 3, 2, 4, 4), (8, 2, 2, 4, 4)],
 )
 def test_the_engine_matches_the_reference(tmp_path, macs, rows, chunks, bits, groups):
     result = _run(tmp_path, macs, rows, chunks, bits, groups, seed=macs * 100 + rows * 10 + chunks + bits)

@@ -18,22 +18,20 @@ module tile_rope #(
   input  wire                      rst_n,
   input  wire                      start,
   input  wire [15:0]               position,
-  input  wire signed [HEADS*HD-1:0] x,
-  output reg  signed [HEADS*HD-1:0] y,
+  input  wire signed [HEADS*HD*16-1:0] x,
+  output reg  signed [HEADS*HD*16-1:0] y,
   output reg                       done
 );
 
   localparam [15:0] HALF = 16'd1 << (LOG2HD - 1);
   localparam [15:0] HEADS_M1 = (16'd1 << LOG2HEADS) - 16'd1;
 
-  localparam [1:0] IDLE = 2'd0, REQ = 2'd1, APPLY = 2'd2, DONE = 2'd3;
+  localparam [2:0] IDLE = 3'd0, REQ = 3'd1, WAIT = 3'd2, APPLY = 3'd3, DONE = 3'd4;
 
-  reg [1:0]               state;
+  reg [2:0]               state;
   reg [15:0]              head;
   reg [15:0]              pair;
-  reg signed [HEADS*HD-1:0] x_q;
-  reg signed [15:0]       cos_r;
-  reg signed [15:0]       sin_r;
+  reg signed [HEADS*HD*16-1:0] x_q;
   reg [ADDR-1:0]          index;
   reg                     cos_en;
   reg                     sin_en;
@@ -55,10 +53,10 @@ module tile_rope #(
 
   wire signed [15:0] a = x_q[lane_a*16 +: 16];
   wire signed [15:0] b = x_q[lane_b*16 +: 16];
-  wire signed [31:0] ac = a * cos_r;
-  wire signed [31:0] bs = b * sin_r;
-  wire signed [31:0] bc = b * cos_r;
-  wire signed [31:0] as = a * sin_r;
+  wire signed [31:0] ac = a * cos_value;
+  wire signed [31:0] bs = b * sin_value;
+  wire signed [31:0] bc = b * cos_value;
+  wire signed [31:0] as = a * sin_value;
   wire signed [32:0] diff = {ac[31], ac} - {bs[31], bs};
   wire signed [32:0] sum = {bc[31], bc} + {as[31], as};
   wire signed [32:0] out_a = (diff + 33'sd8192) >>> 14;
@@ -72,8 +70,6 @@ module tile_rope #(
       head   <= 16'd0;
       pair   <= 16'd0;
       x_q    <= {HEADS*HD{1'b0}};
-      cos_r  <= 16'sd0;
-      sin_r  <= 16'sd0;
       index  <= {ADDR{1'b0}};
       cos_en <= 1'b0;
       sin_en <= 1'b0;
@@ -96,11 +92,12 @@ module tile_rope #(
           index  <= position * HALF + pair;
           cos_en <= 1'b1;
           sin_en <= 1'b1;
-          state  <= APPLY;
+          state  <= WAIT;
+        end
+        WAIT: begin
+          state <= APPLY;
         end
         APPLY: begin
-          cos_r <= cos_value;
-          sin_r <= sin_value;
           y[lane_a*16 +: 16] <= sat_a;
           y[lane_b*16 +: 16] <= sat_b;
           if (pair == HALF - 16'd1) begin

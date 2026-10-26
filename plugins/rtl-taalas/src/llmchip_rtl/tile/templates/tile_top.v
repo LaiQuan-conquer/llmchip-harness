@@ -78,6 +78,7 @@ module tile_top #(
   wire [MACS*BITS-1:0] rom_data;
   localparam integer GROUPS = 8;
   wire [GROUPS*ACC-1:0] mac_y;
+  wire [GROUPS*ACC-1:0] mac_word_groups;
   wire [ADDR-1:0]      last_address = {ADDR{1'b1}};
 
   tile_rom #(.WIDTH(MACS*BITS), .ADDR(ADDR)) rom (
@@ -91,7 +92,8 @@ module tile_top #(
     .first(1'b0),
     .x({MACS{16'sd0}}),
     .w(rom_data),
-    .y(mac_y)
+    .y(mac_y),
+    .word_groups(mac_word_groups)
   );
 
   always @(posedge clk or negedge rst_n) begin
@@ -121,7 +123,7 @@ module tile_top #(
           busylevel <= 1'b0;
         end
         RUN: begin
-          checksum <= checksum + {7'd0, ^mac_y} + rom_data[7:0];
+          checksum <= checksum + {7'd0, ^mac_y} + rom_data[7:0] + ^mac_word_groups;
           if (address == last_address) begin
             state     <= DONE;
             busylevel <= 1'b0;

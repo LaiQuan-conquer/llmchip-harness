@@ -1,0 +1,186 @@
+{
+  "id": "syn-yosys",
+  "version": "0.4.0",
+  "title": "Yosys synthesis, OpenSTA timing and Fault DFT for the tile bundle on sky130, GF180MCU and IHP SG13G2",
+  "kinds": [
+    "synthesis",
+    "dft"
+  ],
+  "runtime": "container",
+  "entry": {
+    "command": [
+      "python3",
+      "/llmchip/plugin/main.py"
+    ],
+    "image": "docker.io/hpretl/iic-osic-tools@sha256:306585de35d198e70ea58950f77147c86f56c698726a19afea9f1c83009557be"
+  },
+  "kernelApi": "^0.3",
+  "handlers": [
+    {
+      "name": "synth",
+      "title": "Synthesize the S-1 slice with Yosys and a standard-cell library",
+      "inputs": [
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "syn.report",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "netlist",
+          "type": "syn.netlist",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pdk": {
+            "enum": [
+              "sky130",
+              "gf180mcuD",
+              "ihp-sg13g2"
+            ],
+            "default": "sky130"
+          },
+          "top": {
+            "type": "string",
+            "default": "tile_slice_top"
+          }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "dft",
+      "title": "Insert a Fault scan chain and report the chain lengths",
+      "inputs": [
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "syn.dft.report",
+          "mediaType": "application/json"
+        },
+        {
+          "name": "chained",
+          "type": "syn.netlist",
+          "mediaType": "text/plain"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pdk": {
+            "enum": [
+              "sky130",
+              "gf180mcuD",
+              "ihp-sg13g2"
+            ],
+            "default": "sky130"
+          },
+          "top": {
+            "type": "string",
+            "default": "tile_slice_top"
+          }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "timing",
+      "title": "OpenSTA worst slack and TNS of the synthesized S-1 slice",
+      "inputs": [
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "syn.timing.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pdk": {
+            "enum": [
+              "sky130",
+              "gf180mcuD",
+              "ihp-sg13g2"
+            ],
+            "default": "sky130"
+          },
+          "top": {
+            "type": "string",
+            "default": "tile_slice_top"
+          },
+          "period": {
+            "type": "number",
+            "default": 100.0
+          }
+        }
+      },
+      "timeoutMs": 3600000
+    },
+    {
+      "name": "atpg",
+      "title": "Fault stuck-at ATPG on the combinational residual DFT target",
+      "inputs": [
+        {
+          "name": "rtl",
+          "types": [
+            "rtl.bundle"
+          ],
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "type": "syn.dft.report",
+          "mediaType": "application/json"
+        }
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pdk": {
+            "enum": [
+              "sky130",
+              "gf180mcuD",
+              "ihp-sg13g2"
+            ],
+            "default": "sky130"
+          }
+        }
+      },
+      "timeoutMs": 3600000
+    }
+  ]
+}

@@ -24,6 +24,8 @@ from llmchip_rtl.tile import checks, generator, rom, views
 TOOLS = Path(os.environ.get("LLMCHIP_TOOLS", Path.home() / "projects" / "deepseek-harness" / "tools"))
 VERILATOR = TOOLS / "oss-cad-suite" / "bin" / "verilator"
 YOSYS = TOOLS / "oss-cad-suite" / "bin" / "yosys"
+VERIBLE = TOOLS / "verible" / "bin" / "verible-verilog-lint"
+SLANG = TOOLS / "oss-cad-suite" / "bin" / "slang-tidy"
 TINY_QWEN3 = Path(__file__).parents[3] / "tests" / "fixtures" / "models" / "tiny-qwen3"
 
 
@@ -98,7 +100,81 @@ def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     lines = (tmp_path / bank["hex"]).read_text().split()
     assert len(lines) == bank["words"]
     assert (tmp_path / "rtl" / "tile_top.v").is_file()
-    assert len(manifest["files"]) == 10
+    assert len(manifest["files"]) == 16
+    assert manifest["layerBanks"] == []
+    assert (tmp_path / "rom_view3.v").is_file()
+    assert (tmp_path / "rom_via.json").is_file()
+    assert (tmp_path / "rtl" / "tile_slice_top.v").is_file()
+    assert (tmp_path / "rtl" / "tile_linear.v").is_file()
+    assert (tmp_path / "slice_m.hex").is_file()
+    assert (tmp_path / "slice_b.hex").is_file()
+    assert manifest["linear"]["matrix"] == "0.q_proj"
+    assert manifest["via"]["depth"] == 4 * manifest["via"]["bankWords"]
+    assert manifest["via"]["vias"] > 0
+
+
+def test_the_full_model_writes_a_banked_layer_top(built, tmp_path):
+    _, spec, arrays = built
+    manifest = generator.generate(spec, arrays, macs=8, out=tmp_path)
+    top = (tmp_path / "rtl" / "tile_qfull_banked.v").read_text()
+    assert "engine0" in top and "engine1" in top
+    assert "layer0_bank0.hex" in top and "layer1_bank3.hex" in top
+    assert manifest["files"]["rtl/tile_qfull_banked.v"]
+    assert manifest["layerBanks"][0]["addrBits"] >= 2
+
+
+@pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")
+def test_the_banked_layer_top_lints(built, tmp_path):
+    _, spec, arrays = built
+    manifest = generator.generate(spec, arrays, macs=8, out=tmp_path)
+    layers = len(manifest["layerBanks"])
+    result = subprocess.run(
+        [
+            str(VERILATOR),
+            "--lint-only",
+            "-Wall",
+            "--top-module",
+            "tile_qfull_banked",
+            f"-GLAYERS={layers}",
+            "-GMACS=8",
+            "-GBITS=4",
+            "-GGROUPS=8",
+            "-GROWS=3",
+            "-GCHUNKS=2",
+            "-GLOG2CHUNKS=1",
+            "-GLOG2ROWS=2",
+            f"-GLOG2ADDR={manifest['layerBanks'][0]['addrBits']}",
+            "-GLOG2MACS=3",
+            "rtl/tile_qfull_banked.v",
+            "rtl/tile_engine.v",
+            "rtl/tile_rom.v",
+            "rtl/tile_mac.v",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Warning" not in result.stdout + result.stderr
+
+
+def test_the_full_model_writes_one_bank_set_per_layer(built, tmp_path):
+    _, spec, arrays = built
+    manifest = generator.generate(spec, arrays, macs=8, out=tmp_path)
+    assert len(manifest["layerBanks"]) == spec["hyper"]["layers"]
+    names = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
+    width = manifest["mapping"]["macs"] * manifest["mapping"]["bits"] // 4
+    for entry in manifest["layerBanks"]:
+        assert entry["matrices"] == [f"{entry['layer']}.{node}" for node in names]
+        assert entry["words"] == sum(rom.words_per_matrix(*generator._shape(spec["hyper"], node), 8) for node in names)
+        assert entry["addrBits"] >= 2
+        assert entry["perBank"] == 1 << (entry["addrBits"] - 2)
+        assert len(entry["files"]) == 4
+        for name in entry["files"]:
+            lines = (tmp_path / name).read_text().split()
+            assert len(lines) == entry["perBank"]
+            assert all(len(line) == width for line in lines)
+        assert sum(len((tmp_path / name).read_text().split()) for name in entry["files"]) == 4 * entry["perBank"]
 
 
 @pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")
@@ -151,13 +227,54 @@ def test_the_generated_rtl_elaborates_in_yosys(built, tmp_path):
 def test_the_bundle_passes_the_rtl_checks(built, tmp_path):
     graph, spec, arrays = built
     generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
-    report = checks.all_checks(tmp_path, VERILATOR if VERILATOR.is_file() else None, YOSYS if YOSYS.is_file() else None)
+    report = checks.all_checks(
+        tmp_path,
+        VERILATOR if VERILATOR.is_file() else None,
+        YOSYS if YOSYS.is_file() else None,
+        VERIBLE if VERIBLE.is_file() else None,
+        SLANG if SLANG.is_file() else None,
+    )
     assert report["roundtrip"]["roundtrip_mismatches"] == 0
     assert report["rules"]["violations"] == 0
-    if "warnings" in report["lint"]:
-        assert report["lint"]["warnings"] == 0, report["lint"]["output"]
+    assert report["lint"]["warnings"] == 0, report["lint"]["output"]
+    assert report["lint"]["returncode"] == 0, report["lint"]["output"]
+    if VERIBLE.is_file():
+        assert report["lint"]["verible"]["warnings"] == 0, report["lint"]["verible"]["output"]
+    if SLANG.is_file():
+        assert report["lint"]["slang"]["warnings"] == 0, report["lint"]["slang"]["output"]
     if "returncode" in report["synthesizable"]:
         assert report["synthesizable"]["returncode"] == 0, report["synthesizable"]["output"]
+
+
+@pytest.mark.skipif(not VERIBLE.is_file(), reason="Verible is not installed in the tools directory")
+def test_a_lint_violation_is_reported(built, tmp_path):
+    graph, spec, arrays = built
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    top = tmp_path / "rtl" / "tile_top.v"
+    top.write_text(top.read_text() + "\t// a tab is a lint violation\n")
+    report = checks.lint(
+        tmp_path,
+        VERILATOR if VERILATOR.is_file() else None,
+        VERIBLE if VERIBLE.is_file() else None,
+        SLANG if SLANG.is_file() else None,
+    )
+    assert report["verible"].get("warnings", 0) >= 1, report["verible"]["output"]
+
+
+@pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is not installed in the tools directory")
+def test_the_full_model_bundle_passes_the_rtl_checks(built, tmp_path):
+    _, spec, arrays = built
+    generator.generate(spec, arrays, macs=8, out=tmp_path)
+    report = checks.all_checks(
+        tmp_path,
+        VERILATOR if VERILATOR.is_file() else None,
+        YOSYS if YOSYS.is_file() else None,
+        VERIBLE if VERIBLE.is_file() else None,
+        SLANG if SLANG.is_file() else None,
+    )
+    assert report["passed"] is True, report
+    assert report["romViews"]["equivalent3"] is True
+    assert report["lint"]["warnings"] == 0
 
 
 def test_a_corrupted_bank_fails_the_roundtrip(built, tmp_path):
@@ -186,6 +303,15 @@ def test_the_two_rom_views_are_equivalent(built, tmp_path):
     generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
     report = views.rom_views(tmp_path, YOSYS)
     assert report["equivalent"] is True, report["output"]
+    assert report["equivalent3"] is True, report["output3"]
+
+
+@pytest.mark.skipif(not YOSYS.is_file(), reason="Yosys is not installed in the tools directory")
+def test_a_via_mismatch_is_not_equivalent(built, tmp_path):
+    graph, spec, arrays = built
+    generator.generate(spec, arrays, slice_spec(graph, spec, "S-1"), macs=8, out=tmp_path)
+    report = views.equivalent_view3(tmp_path, YOSYS, mismatch=True)
+    assert report["equivalent"] is False
 
 
 @pytest.mark.skipif(not YOSYS.is_file(), reason="Yosys is not installed in the tools directory")

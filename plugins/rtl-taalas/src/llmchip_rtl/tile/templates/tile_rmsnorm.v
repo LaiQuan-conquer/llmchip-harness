@@ -21,8 +21,9 @@ module tile_rmsnorm #(
   output reg                      done
 );
 
-  localparam [2:0] IDLE = 3'd0, SUM = 3'd1, PREP = 3'd2, PREP2 = 3'd3, LUT = 3'd4, SCALE0 = 3'd5, SCALE = 3'd6, DONE = 3'd7;
-  reg [2:0]               state;
+  localparam [3:0] IDLE = 4'd0, SUM = 4'd1, PREP = 4'd2, PREP2 = 4'd3,
+                   LUT = 4'd4, WAIT = 4'd5, SCALE0 = 4'd6, SCALE = 4'd7, DONE = 4'd8;
+  reg [3:0]               state;
   reg [31:0]              i;
   reg signed [63:0]       sumsq;
   reg signed [63:0]       v;
@@ -45,7 +46,7 @@ module tile_rmsnorm #(
   integer b;
   always @(*) begin
     msb = 7'd0;
-    for (b = 63; b >= 0; b = b - 1) begin
+    for (b = 0; b < 64; b = b + 1) begin
       if (v[b]) msb = b[6:0];
     end
   end
@@ -54,10 +55,14 @@ module tile_rmsnorm #(
   wire signed [15:0] w_i = w_q[i*16 +: 16];
   wire signed [31:0] sq = x_i * x_i;
   wire signed [63:0] sq_ext = {{32{sq[31]}}, sq};
-  wire signed [63:0] product = x_i * w_i * r;
+  wire signed [63:0] xw = x_i * w_i;
+  wire signed [63:0] product = xw * r;
   wire signed [7:0]  half = {e2[7], e2[7:1]};  // e2 / 2, e2 is even
-  wire signed [63:0] rounded = (shift > 8'sd0) ? ((product + (64'sd1 <<< (shift - 8'sd1))) >>> shift) : (product <<< (-shift));
-  wire signed [15:0] clamped = (rounded > 64'sd32767) ? 16'sh7fff : ((rounded < -64'sd32768) ? 16'sh8000 : rounded[15:0]);
+  wire signed [63:0] rounded = (shift > 8'sd0)
+      ? ((product + (64'sd1 <<< (shift - 8'sd1))) >>> shift)
+      : (product <<< (-shift));
+  wire signed [15:0] clamped = (rounded > 64'sd32767) ? 16'sh7fff :
+                               ((rounded < -64'sd32768) ? 16'sh8000 : rounded[15:0]);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -106,7 +111,10 @@ module tile_rmsnorm #(
         LUT: begin
           index  <= ((e2 >= 8'sd6) ? v[(e2[5:0] - 6'd6) +: 8] : (v[7:0] << (6'd6 - {3'd0, e2[2:0]}))) - 8'd64;
           lut_en <= 1'b1;
-          state  <= SCALE0;
+          state  <= WAIT;
+        end
+        WAIT: begin
+          state <= SCALE0;
         end
         SCALE0: begin
           r     <= lut_value;
