@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import macro, rom, views
+from . import chain, macro, rom, views
 
 TEMPLATE_VERSION = "taalas-tile-templates/4"
 CLASSIFIER = "embed"  # the tied classifier: the embedding table's integers
@@ -325,6 +325,11 @@ def generate(
         )
         (rtl / "tile_qfull_banked.v").write_text(banked)
 
+    chain_manifest = None
+    if slice_report is None:
+        chosen = layers if layers is not None else list(range(int(spec["hyper"]["layers"])))
+        chain_manifest = chain.generate(out, spec, arrays, macs, chosen)
+
     via_manifest = views.write_view3(out, width=macs * bits)
 
     macro_manifest = macro.generate(out, width=macs * bits)
@@ -347,9 +352,11 @@ def generate(
                 "tile_residual.v",
                 "tile_layer.v",
                 "tile_host.v",
+                "tile_chain.v",
             ],
         },
         "layerBanks": layer_banks,
+        "chain": chain_manifest,
         "linear": linear,
         "macro": macro_manifest,
         "slice": (
@@ -375,5 +382,7 @@ def generate(
         "via": via_manifest,
         "files": {str(p.relative_to(out)): _hash(p) for p in sorted(rtl.iterdir()) if p.suffix == ".v"},
     }
+    if chain_manifest is None:
+        manifest["templates"]["files"].remove("tile_chain.v")
     (out / "design.json").write_text(json.dumps(manifest, indent=2))
     return manifest

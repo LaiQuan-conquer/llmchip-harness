@@ -447,6 +447,7 @@
               "ver.slice",
               "ver.cdc",
               "ver.layer",
+              "ver.chain",
               "ver.directed",
               "ver.coverage",
               "ver.formal",
@@ -478,6 +479,12 @@
         },
         {
           "check": "ver.layer",
+          "inputs": {
+            "rtl": "slot:rtl-bundle"
+          }
+        },
+        {
+          "check": "ver.chain",
           "inputs": {
             "rtl": "slot:rtl-bundle"
           }
@@ -762,6 +769,27 @@
           "metric": "ver_layer_observations",
           "op": ">",
           "value": 0
+        }
+      ]
+    },
+    {
+      "id": "ver.chain",
+      "version": "1",
+      "title": "The Q-full layer chain, one tile_layer per layer chained by the residual handshake, matches GraphL2 at 16 and 24 bits",
+      "plugin": "rtl-taalas",
+      "handler": "tile_verify",
+      "completeness": [
+        {
+          "metric": "ver_chain_cases",
+          "op": ">=",
+          "value": 2
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "ver_chain",
+          "op": "==",
+          "value": 1
         }
       ]
     },

@@ -44,6 +44,7 @@ UNIT_FILES = (
 SLICE_FILES = ("test_tile_slice.py",)
 LAYER_FILES = ("test_tile_layer.py",)
 DIRECTED_FILES = ("test_tile_directed.py", "test_tile_host.py")
+CHAIN_FILES = ("test_tile_chain.py",)
 COVERAGE_FILES = ("test_tile_coverage.py",)
 FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)
@@ -62,6 +63,11 @@ PLAN_ITEMS = (
         "id": "ver.layer",
         "category": "layer",
         "description": "Q-full per-layer observation points against L2",
+    },
+    {
+        "id": "ver.chain",
+        "category": "chain",
+        "description": "The Q-full layer chain and its residual handshake against L2",
     },
     {
         "id": "ver.directed",
@@ -140,6 +146,7 @@ def report(
     run_slice: bool = True,
     run_layer: bool = True,
     run_directed: bool = True,
+    run_chain: bool = True,
     run_coverage: bool = True,
     run_formal: bool = True,
     run_mutation: bool = True,
@@ -202,6 +209,22 @@ def report(
         )
     else:
         items.append({"id": "ver.layer", "status": "not run", "reason": "disabled by the caller"})
+
+    if run_chain:
+        chain = _pytest(CHAIN_FILES, timeout=1800)
+        items.append(
+            {
+                "id": "ver.chain",
+                "status": "passed" if chain["returncode"] == 0 else "failed",
+                "metrics": {
+                    "tests": chain["passed"] + chain["failed"],
+                    "cases": chain["passed"] + chain["failed"],
+                },
+                "detail": chain["output"],
+            }
+        )
+    else:
+        items.append({"id": "ver.chain", "status": "not run", "reason": "disabled by the caller"})
 
     if run_directed:
         directed = _pytest(DIRECTED_FILES, timeout=1800)
