@@ -92,7 +92,7 @@ Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
-Planned directories still to be created: `apps/desktop/` and `images/` (architecture §14). Create them only when the corresponding work starts. `docs/adr/` exists and holds the decision records (local, not committed; "Decision records").
+Planned directories still to be created: `apps/desktop/` and `images/` (architecture §14). Create them only when the corresponding work starts. `docs/adr/` holds the decision records (local, not committed; "Decision records") and is created when the first decision is recorded.
 
 ### Implementation guide
 
