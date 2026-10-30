@@ -143,7 +143,7 @@ module tile_chip #(
   );
 
   tile_rmsnorm #(
-    .DIM(HIDDEN), .WIDTH(RES), .LOG2DIM($clog2(HIDDEN)), .FN(15), .FO({int(frac['xn'])}),
+    .DIM(HIDDEN), .WIDTH(RES), .LOG2DIM($clog2(HIDDEN)), .FN({int(spec['normWeights']['frac'])}), .FO({int(frac['xn'])}),
     .EPS_Q({eps_attn}), .INIT("rsqrt.hex")
   ) final_norm (
     .clk(clk), .rst_n(rst_n), .start(norm_start), .x(x_fin), .weight(final_w),

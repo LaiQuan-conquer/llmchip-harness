@@ -25,6 +25,7 @@ module tile_layer #(
   parameter integer GROUPS = 8,
   parameter integer CPG = 2,
   parameter integer RES = 16,
+  parameter integer QK_NORM = 1,
   parameter integer FRAC_H = 12,
   parameter integer FRAC_QK = 13,
   parameter integer NORM_FN = 15,
@@ -123,6 +124,9 @@ module tile_layer #(
   localparam integer L2A_G = $clog2(INTER * CH_H);
   localparam integer L2A_D = $clog2(HIDDEN * CH_I);
   localparam integer KV_ADDR = LOG2CONTEXT + $clog2(KVHEADS);
+  // The attention reads q/k at the head-norm output fraction, or at q/k themselves without QK norm.
+  localparam integer ATTN_FQ = (QK_NORM != 0) ? FRAC_QK : Q_FO;
+  localparam integer ATTN_FK = (QK_NORM != 0) ? FRAC_QK : K_FO;
   // At output fraction 24 a bias no longer fits int16 (the 16-bit residual's biases do).
   localparam integer BIAS_W = (RES > 16) ? 32 : 16;
 
@@ -171,8 +175,10 @@ module tile_layer #(
   initial begin
     $readmemh(ATTN_W_INIT, attn_w_mem);
     $readmemh(MLP_W_INIT, mlp_w_mem);
-    $readmemh(QNORM_W_INIT, qnorm_w_mem);
-    $readmemh(KNORM_W_INIT, knorm_w_mem);
+    if (QK_NORM != 0) begin
+      $readmemh(QNORM_W_INIT, qnorm_w_mem);
+      $readmemh(KNORM_W_INIT, knorm_w_mem);
+    end
   end
 `endif
 
@@ -207,6 +213,9 @@ module tile_layer #(
 
   wire signed [HD*16-1:0] qn_x = q0[head*HD*16 +: HD*16];
   wire signed [HD*16-1:0] kn_x = k0[kh*HD*16 +: HD*16];
+  // Qwen2.5 has no per-head q/k norm: the RoPE input is q/k itself (QK_NORM = 0).
+  wire signed [ATTN_W*16-1:0] qn_eff = (QK_NORM != 0) ? qn : q0;
+  wire signed [KV_W*16-1:0] kn_eff = (QK_NORM != 0) ? kn : k0;
 
   localparam integer HEADS_M1 = HEADS - 1;
   localparam integer KVHEADS_M1 = KVHEADS - 1;
@@ -329,7 +338,7 @@ module tile_layer #(
     .HEADS(HEADS), .HD(HD), .STYLE(0), .LOG2HD($clog2(HD)), .LOG2HEADS($clog2(HEADS)),
     .ADDR(ROPE_ADDR), .COS_INIT(ROPE_COS_INIT), .SIN_INIT(ROPE_SIN_INIT)
   ) q_rope (
-    .clk(clk), .rst_n(rst_n), .start(rope_start), .position(pos_q), .x(qn),
+    .clk(clk), .rst_n(rst_n), .start(rope_start), .position(pos_q), .x(qn_eff),
     .y(qrope_y), .done(qrope_done)
   );
 
@@ -337,7 +346,7 @@ module tile_layer #(
     .HEADS(KVHEADS), .HD(HD), .STYLE(0), .LOG2HD($clog2(HD)), .LOG2HEADS($clog2(KVHEADS)),
     .ADDR(ROPE_ADDR), .COS_INIT(ROPE_COS_INIT), .SIN_INIT(ROPE_SIN_INIT)
   ) k_rope (
-    .clk(clk), .rst_n(rst_n), .start(rope_start), .position(pos_q), .x(kn),
+    .clk(clk), .rst_n(rst_n), .start(rope_start), .position(pos_q), .x(kn_eff),
     .y(krope_y), .done(krope_done)
   );
 
@@ -355,7 +364,7 @@ module tile_layer #(
 
   tile_attention #(
     .HEADS(HEADS), .KVHEADS(KVHEADS), .HD(HD), .LOG2CONTEXT(LOG2CONTEXT), .ADDR(KV_ADDR),
-    .FQ(FRAC_QK), .FK(FRAC_QK), .ATTN_SCALE(ATTN_SCALE), .EXP_BITS(EXP_ADDR)
+    .FQ(ATTN_FQ), .FK(ATTN_FK), .ATTN_SCALE(ATTN_SCALE), .EXP_BITS(EXP_ADDR)
   ) attention (
     .clk(clk), .rst_n(rst_n), .start(attn_start), .length(pos_q), .q(qr),
     .out(attn_out), .out_valid(attn_ov), .done(attn_done),
@@ -485,7 +494,12 @@ module tile_layer #(
         S_QKVWT: begin
           if (q_done) begin
             head <= 32'd0;
-            state <= S_QN0;
+            if (QK_NORM != 0) begin
+              state <= S_QN0;
+            end else begin
+              kh <= 32'd0;
+              state <= S_RP0;
+            end
           end
         end
         S_QN0: state <= S_QN1;
@@ -633,12 +647,12 @@ module tile_layer #(
   assign obs_o = o_buf;
   assign obs_f = f_buf;
   assign obs_q = q0;
-  assign obs_qn = qn;
+  assign obs_qn = qn_eff;
   assign obs_qr = qr;
   assign obs_a = a_buf;
   assign obs_k = k0;
   assign obs_v = v0;
-  assign obs_kn = kn;
+  assign obs_kn = kn_eff;
   assign obs_kr = kr;
   assign obs_g = g_buf;
   assign obs_u = u_buf;

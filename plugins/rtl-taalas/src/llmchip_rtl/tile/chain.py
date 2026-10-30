@@ -105,7 +105,7 @@ def generate(out: Path, spec: dict, arrays: dict[str, np.ndarray], macs: int, la
             "HIDDEN": int(h["hidden"]), "INTER": int(h["intermediate"]), "HEADS": int(h["heads"]),
             "KVHEADS": int(h["kvHeads"]), "HD": int(h["headDim"]), "LOG2CONTEXT": log2context,
             "MACS": macs, "BITS": bits, "ACC": 32, "GROUPS": 8, "CPG": cpg, "RES": res,
-            "FRAC_H": int(fr["xn"]), "FRAC_QK": int(fr["qn"]), "NORM_FN": 15,
+            "FRAC_H": int(fr["xn"]), "FRAC_QK": int(fr["qn"]), "NORM_FN": int(spec["normWeights"]["frac"]),
             "EPS_ATTN": round(EPS * 2.0 ** (2 * int(fr["x"]))),
             "EPS_MLP": round(EPS * 2.0 ** (2 * int(fr["x"]))),
             "EPS_HEAD": round(EPS * 2.0 ** (2 * int(fr["q"]))),

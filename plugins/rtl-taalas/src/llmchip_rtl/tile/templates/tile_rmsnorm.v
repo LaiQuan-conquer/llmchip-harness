@@ -56,6 +56,8 @@ module tile_rmsnorm #(
   wire signed [15:0] w_i = w_q[i*16 +: 16];
   wire signed [2*WIDTH-1:0] sq = x_i * x_i;
   wire signed [63:0] sq_ext = {{(64-2*WIDTH){sq[2*WIDTH-1]}}, sq};
+  wire signed [63:0] mean = (((DIM & (DIM - 1)) == 0) && (DIM > 0))
+      ? (sumsq >>> LOG2DIM) : (sumsq / DIM);
   wire signed [63:0] xw = x_i * w_i;
   wire signed [63:0] product = xw * r;
   wire signed [7:0]  half = {e2[7], e2[7:1]};  // e2 / 2, e2 is even
@@ -102,7 +104,9 @@ module tile_rmsnorm #(
           end
         end
         PREP: begin
-          v     <= ((sumsq >>> LOG2DIM) + EPS_Q < 64'sd1) ? 64'sd1 : (sumsq >>> LOG2DIM) + EPS_Q;
+          // The integer mean is sumsq // DIM: a shift only when DIM is a power of two (the
+          // tiny fixtures), an exact division otherwise (Qwen's 896 and 4864).
+          v     <= ((mean + EPS_Q) < 64'sd1) ? 64'sd1 : mean + EPS_Q;
           state <= PREP2;
         end
         PREP2: begin
