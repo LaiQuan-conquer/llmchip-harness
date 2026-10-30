@@ -49,16 +49,25 @@ def _l2():
     return graph_l2.GraphL2(graph, spec, arrays)
 
 
+@pytest.fixture(scope="module")
+def qwen_l2():
+    return _l2()
+
+
+LAYERS = [int(x) for x in os.environ.get("LLMCHIP_QWEN_LAYERS", str(LAYER)).split(",")]
+
+
 @pytest.mark.skipif(not ready, reason="set LLMCHIP_QWEN=1 and install the model")
-def test_one_real_layer_matches_l2(tmp_path):
-    l2 = _l2()
+@pytest.mark.parametrize("layer", LAYERS)
+def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
+    l2 = qwen_l2
     spec, arrays = l2.spec, l2.a
     h = spec["hyper"]
     frac = spec["activations"]["frac"]
     hold: dict = {"x": None, "obs": {}}
 
-    def observe(node: dict, layer, env: dict) -> None:
-        if layer != LAYER:
+    def observe(node: dict, layer_no, env: dict) -> None:
+        if layer_no != layer:
             return
         if node["id"] == "attn_norm":
             hold["x"] = env["x"].astype(np.int64).copy()
@@ -88,15 +97,15 @@ def test_one_real_layer_matches_l2(tmp_path):
         (tmp_path / f"exp_{name}.hex").write_text(_pack(values, widths[name]) + "\n")
     (tmp_path / "rom").mkdir(exist_ok=True)
     for key in ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"):
-        q = np.asarray(arrays[f"{LAYER}.{key}.q"]).astype(np.int64)
+        q = np.asarray(arrays[f"{layer}.{key}.q"]).astype(np.int64)
         lines = rom.hexfile(rom.to_words(q, 128, 4), 128, 4)
-        (tmp_path / "rom" / f"{LAYER}.{key}.hex").write_text("\n".join(lines) + "\n")
+        (tmp_path / "rom" / f"{layer}.{key}.hex").write_text("\n".join(lines) + "\n")
     for key, prefix in (("q_proj", "q"), ("k_proj", "k"), ("v_proj", "v"), ("o_proj", "o"),
                         ("gate_proj", "gate"), ("up_proj", "up"), ("down_proj", "down")):
         bias_bits = 32 if (prefix in ("o", "down") and res > 16) else 16
-        _matrix_files(tmp_path, arrays, spec, f"{LAYER}.{key}", prefix, bias_bits)
-    (tmp_path / "attn_w.hex").write_text(_pack(arrays[f"{LAYER}.attn_norm.w"]) + "\n")
-    (tmp_path / "mlp_w.hex").write_text(_pack(arrays[f"{LAYER}.mlp_norm.w"]) + "\n")
+        _matrix_files(tmp_path, arrays, spec, f"{layer}.{key}", prefix, bias_bits)
+    (tmp_path / "attn_w.hex").write_text(_pack(arrays[f"{layer}.attn_norm.w"]) + "\n")
+    (tmp_path / "mlp_w.hex").write_text(_pack(arrays[f"{layer}.mlp_norm.w"]) + "\n")
     for name in ("rsqrt", "exp", "sigmoid", "rope_cos", "rope_sin"):
         _write_words(tmp_path, f"{name}.hex", arrays[f"lut.{name}"].ravel())
     shutil.copyfile(tmp_path / "exp.hex", tmp_path / "lut.exp.hex")
@@ -122,7 +131,7 @@ def test_one_real_layer_matches_l2(tmp_path):
                                 ("G", "gate_proj"), ("U", "up_proj"), ("D", "down_proj"))
           for arg in (f"-G{tag}_FI={int(frac[{'q_proj':'xn','k_proj':'xn','v_proj':'xn','o_proj':'v','gate_proj':'xn','up_proj':'xn','down_proj':'g'}[node]])}",
                       f"-G{tag}_FO={int(frac[{'q_proj':'q','k_proj':'k','v_proj':'v','o_proj':'x','gate_proj':'h1','up_proj':'h3','down_proj':'x'}[node]])}",
-                      f"-G{tag}_EXP={int(spec['weights']['exponents'][f'{LAYER}.{node}'])}")],
+                      f"-G{tag}_EXP={int(spec['weights']['exponents'][f'{layer}.{node}'])}")],
         "tile_layer_qwen_tb.v", "tile_layer.v", "tile_rmsnorm.v", "tile_linear.v", "tile_engine.v",
         "tile_rom.v", "tile_mac.v", "tile_rope.v", "tile_kv.v", "tile_attention.v", "tile_lut.v",
         "tile_residual.v", "tile_silu.v",
