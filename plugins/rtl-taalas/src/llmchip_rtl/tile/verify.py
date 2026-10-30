@@ -9,11 +9,13 @@ The items that can run on the current datapath are executed here and returned as
 - `ver.cdc`: the clock domains of the generated RTL (only `clk`, plus the host receiver's
   `host_sclk`, which is the documented second domain);
 - `ver.layer`: the chained layer harness, both Q-full layers, every observation point against
-  `GraphL2`.
+  `GraphL2`;
+- `ver.coverage`, `ver.formal`, `ver.mutation`, `ver.dft` and `rtl.tile.equivalence`: line coverage
+  of the layer harness, the residual add's bounded proof, the MCY campaign, the DFT readiness audit,
+  and the tiny full model's 128 logits through RTL layer 0, layer 1, final_norm and lm_head.
 
-The remaining R4 items are reported as `not run` with their reason instead of being counted as
-passes: `rtl.equivalence` needs the full-chip host path and coverage/mutation/formal/DFT are their
-own tool flows. This is deliberate: a check that did not run is not a pass (DP-10).
+An item the caller disables is reported as `not run` with its reason instead of being counted as a
+pass (DP-10).
 """
 
 from __future__ import annotations
@@ -60,7 +62,7 @@ PLAN_ITEMS = (
         "description": "Q-full per-layer observation points against L2",
     },
     {
-        "id": "rtl.equivalence",
+        "id": "rtl.tile.equivalence",
         "category": "regression",
         "description": "Q-full layer harness as the chip-level equivalence against L2",
     },
@@ -255,14 +257,14 @@ def report(
         logits = int(match.group(1)) if match else 0
         items.append(
             {
-                "id": "rtl.equivalence",
+                "id": "rtl.tile.equivalence",
                 "status": "passed" if equiv["returncode"] == 0 and logits > 0 else "failed",
                 "metrics": {"tests": equiv["passed"] + equiv["failed"], "logits": logits},
                 "detail": equiv["output"],
             }
         )
     else:
-        items.append({"id": "rtl.equivalence", "status": "not run", "reason": "disabled by the caller"})
+        items.append({"id": "rtl.tile.equivalence", "status": "not run", "reason": "disabled by the caller"})
 
     cdc = clocks(bundle)
     items.append(

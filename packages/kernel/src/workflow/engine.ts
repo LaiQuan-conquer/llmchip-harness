@@ -57,27 +57,101 @@ export class Workflow {
     this.events.registerProjection(workflowProjection)
   }
 
-  /** Loads flow packs and their check definitions from the registered data plugins. */
+  /**
+   * Loads flow packs and their check definitions from the registered data plugins. A pack is
+   * refused whole - no stage and no check of it is registered - when it cannot be read, when it
+   * repeats a check id, when its check ids clash with a pack that stays (the earlier pack wins), or
+   * when its pipelines declare a node judging a check of another handler (or an entry check or
+   * required test no pack defines). Refusing a pack can make another pack's clash disappear, so the
+   * set settles by repetition; a pack that is finally refused is reported with the reason of the
+   * last round. A pack used to be registered before its checks were validated, so a conflict left
+   * it half loaded: its stages ran while the checks after the conflict did not exist (2026-10-30,
+   * flow-six's `rtl.equivalence`).
+   */
   loadFlows(): Message[] {
     const problems: Message[] = []
-    this.flows = new Map()
-    this.checkDefs = new Map()
+    type Entry = { plugin: string; hash: string; pack: FlowPack }
+    const read: Entry[] = []
     for (const { plugin, hash } of this.registry.dataOfType(FLOW_PACK_TYPE)) {
       try {
         const pack = this.readFlow(hash)
-        if (this.flows.has(pack.id)) throw new KernelError('FLOW_DUPLICATE', `flow pack ${pack.id} is defined twice`)
-        this.flows.set(pack.id, { pack, hash })
-        for (const check of pack.checks ?? []) {
-          const existing = this.checkDefs.get(check.id)
-          if (existing && canonicalJson(existing) !== canonicalJson(check)) {
-            throw new KernelError('CHECK_CONFLICT', `check ${check.id} has conflicting definitions`)
-          }
-          this.checkDefs.set(check.id, check)
-        }
+        if (read.some((r) => r.pack.id === pack.id)) throw new KernelError('FLOW_DUPLICATE', `flow pack ${pack.id} is defined twice`)
+        read.push({ plugin, hash, pack })
       } catch (error) {
         problems.push({ code: 'FLOW_INVALID', params: { plugin, error: (error as Error).message } })
       }
     }
+    const reasons = new Map<Entry, string>()
+    let candidates = read
+    let accepted: Entry[] = []
+    let definitions = new Map<string, CheckDefinition>()
+    for (;;) {
+      // The checks of the candidates, the earlier pack winning a clash. A pack is judged against this
+      // union overlaid with its own definitions, so that a later pack's definition of the same id can
+      // neither shadow the check its node judges nor get the earlier pack refused before the clash
+      // pass below decides between them.
+      const union = new Map<string, CheckDefinition>()
+      for (const entry of candidates) {
+        for (const check of entry.pack.checks ?? []) if (!union.has(check.id)) union.set(check.id, check)
+      }
+      // Refusals that do not depend on the clash order: an id repeated inside one pack, or a
+      // pipeline that cannot be judged.
+      const definitive: { entry: Entry; problem: string }[] = []
+      for (const entry of candidates) {
+        const duplicate = duplicateCheck(entry.pack.checks ?? [])
+        const view = new Map(union)
+        for (const check of entry.pack.checks ?? []) view.set(check.id, check)
+        const problem = duplicate ? `check ${duplicate} has conflicting definitions` : flowProblem(entry.pack, view)
+        if (problem) definitive.push({ entry, problem })
+      }
+      if (definitive.length) {
+        for (const { entry, problem } of definitive) reasons.set(entry, problem)
+        candidates = candidates.filter((entry) => !definitive.some((d) => d.entry === entry))
+        if (!candidates.length) {
+          accepted = []
+          definitions = new Map()
+          break
+        }
+        continue
+      }
+      // Clashes among the packs that stay: the earlier pack wins, the later one is refused.
+      const clashes: { entry: Entry; problem: string }[] = []
+      const kept: Entry[] = []
+      const keptDefs = new Map<string, CheckDefinition>()
+      for (const entry of candidates) {
+        const clash = (entry.pack.checks ?? []).find((check) => {
+          const existing = keptDefs.get(check.id)
+          return existing !== undefined && canonicalJson(existing) !== canonicalJson(check)
+        })
+        if (clash) {
+          clashes.push({ entry, problem: `check ${clash.id} has conflicting definitions` })
+          continue
+        }
+        for (const check of entry.pack.checks ?? []) keptDefs.set(check.id, check)
+        kept.push(entry)
+      }
+      // A pack may have been judged against a check that the winning pack defines differently.
+      const stale: { entry: Entry; problem: string }[] = []
+      for (const entry of kept) {
+        const problem = flowProblem(entry.pack, keptDefs)
+        if (problem) stale.push({ entry, problem })
+      }
+      if (stale.length) {
+        for (const { entry, problem } of stale) reasons.set(entry, problem)
+        candidates = candidates.filter((entry) => !stale.some((s) => s.entry === entry))
+        continue
+      }
+      for (const { entry, problem } of clashes) reasons.set(entry, problem)
+      accepted = kept
+      definitions = keptDefs
+      break
+    }
+    for (const entry of read) {
+      const reason = reasons.get(entry)
+      if (reason && !accepted.includes(entry)) problems.push({ code: 'FLOW_INVALID', params: { plugin: entry.plugin, error: reason } })
+    }
+    this.flows = new Map(accepted.map((entry) => [entry.pack.id, { pack: entry.pack, hash: entry.hash }]))
+    this.checkDefs = definitions
     return problems
   }
 
@@ -469,6 +543,42 @@ function withoutHistory(pack: Record<string, any>): Record<string, any> {
   }
   for (const check of pack.checks ?? []) delete check.waiver
   return pack
+}
+
+/** The id of a check a pack declares twice, or undefined: a pack states each check once. */
+function duplicateCheck(checks: CheckDefinition[]): string | undefined {
+  const seen = new Set<string>()
+  for (const check of checks) {
+    if (seen.has(check.id)) return check.id
+    seen.add(check.id)
+  }
+  return undefined
+}
+
+/**
+ * Why a pack's pipelines cannot run as declared, or undefined. A node's checks are judged on its
+ * own run, so each must be defined on the node's own plugin and handler (Workflow.evaluate);
+ * a stage's entry checks and required tests must name a check some pack defines.
+ */
+function flowProblem(pack: FlowPack, checks: Map<string, CheckDefinition>): string | undefined {
+  for (const stage of pack.stages) {
+    for (const node of stage.develop?.nodes ?? []) {
+      for (const id of node.judge ?? []) {
+        const check = checks.get(id)
+        if (!check) return `node ${stage.id}/${node.id} judges ${id}, which no flow pack defines`
+        if (check.plugin !== node.plugin || check.handler !== node.handler) {
+          return `node ${stage.id}/${node.id} runs ${node.plugin}/${node.handler} and judges ${id}, which ${check.plugin}/${check.handler} defines`
+        }
+      }
+    }
+    for (const entry of stage.entry?.checks ?? []) {
+      if (!checks.has(entry.check)) return `stage ${stage.id} enters on ${entry.check}, which no flow pack defines`
+    }
+    for (const test of stage.tests ?? []) {
+      if (!checks.has(test.check)) return `stage ${stage.id} requires ${test.check}, which no flow pack defines`
+    }
+  }
+  return undefined
 }
 
 /**

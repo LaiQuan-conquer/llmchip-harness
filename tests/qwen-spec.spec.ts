@@ -86,9 +86,36 @@ describe.skipIf(!ready)('Qwen2.5-0.5B-Instruct: the SPEC step', () => {
     for (const n of develop.nodes.filter((n) => n.state === 'failed')) expect(n.reason?.code, n.id).toBe('PIPELINE_CHECK_FAILED')
     expect(verdicts).toMatchObject({ 'model.census': 'pass', 'model.graph': 'pass', 'model.upstream': 'pass', 'spec.l2.fast': 'pass' })
     const benchmarks = ['mmlu', 'cmmlu', 'ceval', 'gsm8k', 'ifeval', 'humaneval', 'mbpp']
-    // The provisional quantization fails these; what must not happen is an indeterminate one
-    // from a completeness metric that does not exist.
-    for (const b of benchmarks) expect(['pass', 'fail'], b).toContain(verdicts[`spec.accuracy.quick.${b}`])
+    // The provisional W4 spec fails six of them. MMLU is indeterminate because the quick set has 5
+    // questions per subject: its 0.35-point drop has a 95% interval whose upper bound lies above the
+    // 2-point allowance, so the result is honestly undecidable (requirements FR-QNT-08; conflict C8
+    // in the implementation guide §7.3). What must not happen is an indeterminate from a metric the
+    // handler did not report, or a verdict the accuracy run did not produce.
+    const accuracyNode = develop.nodes.find((n) => n.id === 'SPEC/accuracy')!
+    for (const b of benchmarks) {
+      const verdict = verdicts[`spec.accuracy.quick.${b}`]
+      expect(['pass', 'fail', 'indeterminate'], b).toContain(verdict)
+      const latest = (await client.call('verdicts.list', { check: `spec.accuracy.quick.${b}`, limit: 1 })).verdicts[0]!
+      expect(latest.run, b).toBe(accuracyNode.runs.at(-1))
+      const codes = latest.reasons.map((reason) => reason.code)
+      expect(codes, b).not.toContain('METRIC_MISSING')
+      if (verdict === 'indeterminate') {
+        // Only the interval of a small sample may make a result undecidable, and only because its
+        // upper bound lies above the allowance: the drop itself stays within it.
+        expect(codes, b).toEqual(['COVERAGE_INCOMPLETE'])
+        const params = (latest.reasons[0]!.params ?? {}) as Record<string, unknown>
+        expect(String(params.metric), b).toBe(`drop_high.${b}`)
+        expect(Number(params.actual), b).toBeGreaterThan(Number(params.value))
+      }
+    }
+    // The quick set as a whole must not become undecidable: today six of the seven fail (the split is
+    // recorded in the implementation guide §6.3 and moves when the numeric format changes), so at
+    // least one benchmark has to reach a definite verdict here.
+    const definite = benchmarks.filter((b) => {
+      const verdict = verdicts[`spec.accuracy.quick.${b}`]
+      return verdict === 'pass' || verdict === 'fail'
+    })
+    expect(definite.length, JSON.stringify(verdicts)).toBeGreaterThan(0)
 
     // The required tests judge the development runs again (nothing reruns).
     const tests = await finished(client, (await client.call('pipelines.start', { project: 'qwen', stage: 'SPEC', kind: 'test' })).id, 600_000)

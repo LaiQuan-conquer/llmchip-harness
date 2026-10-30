@@ -209,7 +209,8 @@ def tile_generate(ctx: InvokeContext) -> Result:
 
 
 def verify_tile(ctx: InvokeContext) -> Result:
-    """R4: the template suite, the functional S-1 slice and the clock-domain check."""
+    """R4: the verification report of a tile bundle: templates, the S-1 slice, the clock domains, the
+    layer harness, coverage, formal, mutation, DFT readiness and the tiny full-model equivalence."""
     bundle = Path(ctx.work_dir, "bundle")
     bundle.mkdir(parents=True, exist_ok=True)
     with tarfile.open(ctx.input("rtl").path) as archive:
@@ -235,8 +236,8 @@ def verify_tile(ctx: InvokeContext) -> Result:
         "ver_formal": passed("ver.formal"),
         "ver_mutation": passed("ver.mutation"),
         "ver_dft": passed("ver.dft"),
-        "rtl_equivalence": passed("rtl.equivalence"),
-        "rtl_equivalence_logits": int(items.get("rtl.equivalence", {}).get("metrics", {}).get("logits", 0)),
+        "rtl_equivalence": passed("rtl.tile.equivalence"),
+        "rtl_equivalence_logits": int(items.get("rtl.tile.equivalence", {}).get("metrics", {}).get("logits", 0)),
         "ver_unit_tests": int(items.get("ver.unit", {}).get("metrics", {}).get("tests", 0)),
         "ver_slice_tests": int(items.get("ver.slice", {}).get("metrics", {}).get("tests", 0)),
         "ver_cdc_domains": int(items.get("ver.cdc", {}).get("metrics", {}).get("domains", 0)),

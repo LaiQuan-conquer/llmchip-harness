@@ -33,7 +33,7 @@ def bundle(tmp_path_factory):
 def test_the_plan_names_the_runnable_and_blocked_items():
     plan = verify.plan()
     ids = {item["id"] for item in plan["items"]}
-    assert {"ver.unit", "ver.slice", "ver.cdc", "ver.layer", "rtl.equivalence"} <= ids
+    assert {"ver.unit", "ver.slice", "ver.cdc", "ver.layer", "rtl.tile.equivalence"} <= ids
     blocked = {item["id"] for item in plan["items"] if item.get("state") == "blocked"}
     assert not blocked
 

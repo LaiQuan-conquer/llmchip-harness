@@ -30,7 +30,7 @@ describe('estimator (AC-M1-10)', () => {
     const { client } = await setup()
     const { plugins, problems } = await client.call('plugins.list')
     expect(problems).toEqual([])
-    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'flow-six', 'model-llama', 'numeric', 'process-library', 'rtl-taalas', 'sim-verilator', 'vchip'])
+    expect(plugins.map((p) => p.id).sort()).toEqual(['arch-taalas', 'eda-gf180', 'estimator', 'flow-default', 'flow-six', 'model-llama', 'numeric', 'process-library', 'rtl-taalas', 'sim-verilator', 'syn-yosys', 'vchip'])
     const checks = (await client.call('checks.list')).checks.map((c) => c.id)
     expect(checks).toContain('estimate.feasibility')
     // A broken flow pack shows up neither in `plugins.list` (its problems are only logged) nor in

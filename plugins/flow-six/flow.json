@@ -113,6 +113,14 @@
             "bind": {
               "chip": "chip-spec",
               "ppa": "ppa-estimate"
+            }
+          },
+          {
+            "id": "verify",
+            "plugin": "arch-taalas",
+            "handler": "verify_spec",
+            "inputs": {
+              "chip": "node:design.chip"
             },
             "judge": [
               "spec.design"
@@ -254,10 +262,7 @@
         {
           "check": "spec.design",
           "inputs": {
-            "chip": "slot:chip-spec",
-            "ppa": "slot:ppa-estimate",
-            "spec": "slot:numeric-spec",
-            "weights": "slot:l2-weights"
+            "chip": "slot:chip-spec"
           }
         },
         {
@@ -267,6 +272,18 @@
             "graph": "slot:model-graph",
             "spec": "slot:numeric-spec",
             "weights": "slot:l2-weights"
+          },
+          "params": {
+            "tokens": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ]
           }
         },
         {
@@ -434,7 +451,7 @@
               "ver.formal",
               "ver.mutation",
               "ver.dft",
-              "rtl.equivalence"
+              "rtl.tile.equivalence"
             ]
           }
         ]
@@ -489,7 +506,7 @@
           }
         },
         {
-          "check": "rtl.equivalence",
+          "check": "rtl.tile.equivalence",
           "inputs": {
             "rtl": "slot:rtl-bundle"
           }
@@ -2023,7 +2040,7 @@
       ]
     },
     {
-      "id": "rtl.equivalence",
+      "id": "rtl.tile.equivalence",
       "version": "1",
       "title": "The tiny full model produces 128 logits through RTL layer 0, layer 1, final_norm and lm_head and matches L2",
       "plugin": "rtl-taalas",

@@ -222,3 +222,74 @@ describe('a home written before approval gates and waivers were removed', () => 
     expect(log).toMatch(/FLOW_INVALID.*old-flow.*must NOT have additional properties/)
   })
 })
+
+describe('two flow packs that define one check id differently', () => {
+  /** The test flow pack judging `stub.shared`, which it defines on the given handler. */
+  function packWithSharedCheck(handler: string): Record<string, any> {
+    const pack = JSON.parse(readFileSync(join(FIXTURE_PLUGINS, 'test-flow/flow.json'), 'utf8'))
+    const stage = pack.stages.find((s: { id: string }) => s.id === 'A')
+    const node = stage.develop.nodes.find((n: { id: string }) => n.id === 'drc')
+    // The node judges its own pack's definition, so each pack is valid on its own and only the
+    // duplicate id is a problem: that is what makes the later pack try to shadow the earlier one.
+    node.handler = handler
+    node.judge = ['stub.shared']
+    pack.checks.push({
+      id: 'stub.shared',
+      version: '1',
+      title: 'One id, two definitions',
+      plugin: 'stub-tool',
+      handler,
+      criteria: [{ metric: 'violations', op: '==', value: 0 }],
+    })
+    return pack
+  }
+
+  it('keeps the earlier pack and refuses the later one instead of letting it shadow the check', async () => {
+    const dir = tempDir()
+    for (const [name, handler] of [['early', 'report'], ['late', 'qualify']] as const) {
+      cpSync(join(FIXTURE_PLUGINS, 'test-flow'), join(dir, name), { recursive: true })
+      const manifest = JSON.parse(readFileSync(join(dir, `${name}/llmchip-plugin.json`), 'utf8'))
+      writeFileSync(join(dir, `${name}/llmchip-plugin.json`), JSON.stringify({ ...manifest, id: `flow-${name}` }))
+      writeFileSync(join(dir, `${name}/flow.json`), JSON.stringify({ ...packWithSharedCheck(handler), id: name }))
+    }
+    const { kernel, home } = await startKernel(undefined, { config: { plugins: { searchPaths: [FIXTURE_PLUGINS, dir] } } })
+    const client = await connect(kernel)
+    // The earlier pack judged its own definition, so its pipeline is usable...
+    await expect(client.call('projects.create', { id: 'p', title: 'p', flow: 'early' })).resolves.toBeTruthy()
+    // ...the later pack is refused for the clash, and the catalogue keeps the earlier definition.
+    await expect(client.call('projects.create', { id: 'q', title: 'q', flow: 'late' })).rejects.toMatchObject({ code: 'FLOW_NOT_FOUND' })
+    const shared = (await client.call('checks.list', {})).checks.find((check) => check.id === 'stub.shared')!
+    expect(shared.handler).toBe('report')
+    expect(readFileSync(join(home, 'logs/harnessd.log'), 'utf8')).toMatch(/FLOW_INVALID.*flow-late.*check stub\.shared has conflicting definitions/)
+  })
+})
+
+describe('a flow pack whose pipeline cannot be judged', () => {
+  /** The test flow pack with a node that judges a check another handler defines (the 2026-10-30 bug). */
+  function mismatchedPack(): Record<string, any> {
+    const pack = JSON.parse(readFileSync(join(FIXTURE_PLUGINS, 'test-flow/flow.json'), 'utf8'))
+    const stage = pack.stages.find((s: { id: string }) => s.id === 'A')
+    stage.develop.nodes.find((n: { id: string }) => n.id === 'drc').handler = 'qualify'
+    // A check only this pack defines: a refusal must not leave it in the catalogue either.
+    pack.checks.push({ id: 'stub.bad', version: '1', title: 'Only the refused pack defines this', plugin: 'stub-tool', handler: 'report', criteria: [{ metric: 'violations', op: '==', value: 0 }] })
+    return pack
+  }
+
+  it('is refused whole at load instead of failing its first node', async () => {
+    const dir = tempDir()
+    cpSync(join(FIXTURE_PLUGINS, 'test-flow'), join(dir, 'bad-flow'), { recursive: true })
+    const manifest = JSON.parse(readFileSync(join(dir, 'bad-flow/llmchip-plugin.json'), 'utf8'))
+    writeFileSync(join(dir, 'bad-flow/llmchip-plugin.json'), JSON.stringify({ ...manifest, id: 'bad-flow' }))
+    writeFileSync(join(dir, 'bad-flow/flow.json'), JSON.stringify({ ...mismatchedPack(), id: 'bad' }))
+    const { kernel, home } = await startKernel(undefined, { config: { plugins: { searchPaths: [FIXTURE_PLUGINS, dir] } } })
+    const client = await connect(kernel)
+    // The pack's stages are not registered: no project can be created on them.
+    await expect(client.call('projects.create', { id: 'p', title: 'p', flow: 'bad' })).rejects.toMatchObject({ code: 'FLOW_NOT_FOUND' })
+    // Nothing of the pack was registered: not its stages, and not a check that only it defines.
+    const listed = (await client.call('checks.list', {})).checks.map((check) => check.id)
+    expect(listed).not.toContain('stub.bad')
+    expect(listed).toContain('stub.drc')
+    const log = readFileSync(join(home, 'logs/harnessd.log'), 'utf8')
+    expect(log).toMatch(/FLOW_INVALID.*bad-flow.*node A\/drc runs stub-tool\/qualify and judges stub\.drc/)
+  })
+})

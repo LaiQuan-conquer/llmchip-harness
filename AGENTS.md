@@ -76,7 +76,7 @@ Current packages (responsibilities, entry points and allowed dependencies: imple
 
 Python (uv workspace, root `pyproject.toml`): `python/llmchip-sdk`, the Python SDK for out-of-process plugins (IF-2); `python/llmchip-vchip`, the test harness for virtual chips (`vchip`: loads a chip from its `chip.json`, drives generation from prompts, measures quality and speed against reference and golden chips; standalone, see its README, and inside the kernel as the plugin `vchip`).
 
-Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `flow-six` (data; the six steps for Qwen2.5-0.5B-Instruct, so far SPEC), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `vchip` (Python), and `sim-verilator`, `eda-gf180` (containers).
+Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `process-library` (data), `flow-default` (data), `flow-six` (data; the six steps for Qwen2.5-0.5B-Instruct, so far SPEC, RTL, VER and SYN), `model-llama`, `numeric`, `arch-taalas`, `rtl-taalas`, `vchip` (Python), and `sim-verilator`, `eda-gf180`, `syn-yosys` (containers).
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
