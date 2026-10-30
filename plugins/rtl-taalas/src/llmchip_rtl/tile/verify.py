@@ -43,7 +43,7 @@ UNIT_FILES = (
 )
 SLICE_FILES = ("test_tile_slice.py",)
 LAYER_FILES = ("test_tile_layer.py",)
-DIRECTED_FILES = ("test_tile_directed.py",)
+DIRECTED_FILES = ("test_tile_directed.py", "test_tile_host.py")
 COVERAGE_FILES = ("test_tile_coverage.py",)
 FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)

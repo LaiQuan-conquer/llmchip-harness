@@ -768,7 +768,7 @@
     {
       "id": "ver.directed",
       "version": "1",
-      "title": "Directed tests: power-on, start while busy, reset mid-inference, one token, context boundary",
+      "title": "Directed tests: power-on, start while busy, host frames, reset mid-inference, one token, context boundary",
       "plugin": "rtl-taalas",
       "handler": "tile_verify",
       "completeness": [

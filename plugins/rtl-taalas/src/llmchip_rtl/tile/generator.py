@@ -22,7 +22,7 @@ import numpy as np
 
 from . import macro, rom, views
 
-TEMPLATE_VERSION = "taalas-tile-templates/3"
+TEMPLATE_VERSION = "taalas-tile-templates/4"
 CLASSIFIER = "embed"  # the tied classifier: the embedding table's integers
 
 
@@ -239,6 +239,7 @@ def generate(
     (rtl / "tile_silu.v").write_text((_templates_dir() / "tile_silu.v").read_text())
     (rtl / "tile_residual.v").write_text((_templates_dir() / "tile_residual.v").read_text())
     (rtl / "tile_layer.v").write_text((_templates_dir() / "tile_layer.v").read_text())
+    (rtl / "tile_host.v").write_text((_templates_dir() / "tile_host.v").read_text())
     top = (_templates_dir() / "tile_top.v").read_text()
     top = top.replace("/*MACS*/ 128", f"/*MACS*/ {macs}").replace("/*BITS*/ 4", f"/*BITS*/ {bits}")
     (rtl / "tile_top.v").write_text(top)
@@ -345,6 +346,7 @@ def generate(
                 "tile_silu.v",
                 "tile_residual.v",
                 "tile_layer.v",
+                "tile_host.v",
             ],
         },
         "layerBanks": layer_banks,
