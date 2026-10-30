@@ -4,12 +4,17 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module tile_layer_chip_tb;
-  localparam integer HIDDEN = 32;
-  localparam integer INTER = 64;
-  localparam integer HEADS = 4;
-  localparam integer KVHEADS = 2;
-  localparam integer HD = 8;
+module tile_layer_chip_tb ();
+  parameter integer HIDDEN = 32;
+  parameter integer INTER = 64;
+  parameter integer HEADS = 4;
+  parameter integer KVHEADS = 2;
+  parameter integer HD = 8;
+  parameter integer RES = 16;
+  parameter integer O_FO = 18;
+  parameter integer D_FO = 18;
+  parameter signed [63:0] EPS_ATTN = 64'sd68719;
+  parameter signed [63:0] EPS_MLP = 64'sd68719;
   localparam integer POSITION = 3;
 
   reg clk = 1'b0;
@@ -18,12 +23,14 @@ module tile_layer_chip_tb;
 
   reg start = 1'b0;
   reg [15:0] position = 16'd3;
-  reg signed [HIDDEN*16-1:0] x = {HIDDEN*16{1'b0}};
-  wire signed [HIDDEN*16-1:0] x2;
+  reg signed [HIDDEN*RES-1:0] x = {HIDDEN*RES{1'b0}};
+  wire signed [HIDDEN*RES-1:0] x2;
   wire done;
   wire busy;
 
-  wire signed [HIDDEN*16-1:0] obs_h, obs_x1, obs_h2, obs_o, obs_f;
+  wire signed [HIDDEN*16-1:0] obs_h, obs_h2;
+  wire signed [HIDDEN*RES-1:0] obs_o, obs_f;
+  wire signed [HIDDEN*RES-1:0] obs_x1;
   wire signed [HEADS*HD*16-1:0] obs_q, obs_qn, obs_qr, obs_a;
   wire signed [KVHEADS*HD*16-1:0] obs_k, obs_v, obs_kn, obs_kr;
   wire signed [INTER*16-1:0] obs_g, obs_u, obs_m;
@@ -33,16 +40,17 @@ module tile_layer_chip_tb;
   tile_layer #(
     .HIDDEN(HIDDEN), .INTER(INTER), .HEADS(HEADS), .KVHEADS(KVHEADS), .HD(HD),
     .LOG2CONTEXT(4), .MACS(8), .BITS(4), .ACC(32), .GROUPS(8), .CPG(2),
-    .EPS_ATTN(64'sd68719), .EPS_MLP(64'sd68719), .EPS_HEAD(64'sd1074),
+    .EPS_HEAD(64'sd1074),
     .ROPE_ADDR(6), .EXP_ADDR(9), .ATTN_SCALE(11585),
     .SILU_F1(15), .SILU_F3(15), .SILU_FG(19),
+    .RES(RES), .EPS_ATTN(EPS_ATTN), .EPS_MLP(EPS_MLP),
     .Q_FI(12), .Q_FO(15), .Q_EXP(21),
     .K_FI(12), .K_FO(15), .K_EXP(21),
     .V_FI(12), .V_FO(15), .V_EXP(21),
-    .O_FI(15), .O_FO(18), .O_EXP(21),
+    .O_FI(15), .O_FO(O_FO), .O_EXP(21),
     .G_FI(12), .G_FO(15), .G_EXP(21),
     .U_FI(12), .U_FO(15), .U_EXP(21),
-    .D_FI(19), .D_FO(18), .D_EXP(21),
+    .D_FI(19), .D_FO(D_FO), .D_EXP(21),
     .Q_B0("q_bank0.hex"), .Q_B1("q_bank1.hex"), .Q_B2("q_bank2.hex"), .Q_B3("q_bank3.hex"),
     .Q_M("q_m.hex"), .Q_BIAS("q_b.hex"),
     .K_B0("k_bank0.hex"), .K_B1("k_bank1.hex"), .K_B2("k_bank2.hex"), .K_B3("k_bank3.hex"),
@@ -68,10 +76,12 @@ module tile_layer_chip_tb;
   );
 
   localparam integer STEPS = 4;
-  reg [HIDDEN*16-1:0] xmem [0:STEPS-1];
+  reg [HIDDEN*RES-1:0] xmem [0:STEPS-1];
   reg [1023:0] expbig [0:0];
   reg [HIDDEN*16-1:0] ehm [0:0];
-  reg [HIDDEN*16-1:0] eh, eo, ex1, eh2, ef, ex2;
+  reg [HIDDEN*RES-1:0] ex1, ex2;
+  reg [HIDDEN*RES-1:0] eo, ef;
+  reg [HIDDEN*16-1:0] eh, eh2;
   reg [INTER*16-1:0] eg, eu, em;
   reg [511:0] eqm [0:0], ekm [0:0], evm [0:0], eqnm [0:0], eknm [0:0];
   reg [511:0] eqrm [0:0], ekrm [0:0], eam [0:0];
@@ -80,10 +90,10 @@ module tile_layer_chip_tb;
   reg [HEADS*HD*16-1:0] eqn, eqr, ea;
   integer ci, errors, timeout, step, up;
 
-`define CHECK(GOT, EXP, LANES, LABEL) \
+`define CHECK(GOT, EXP, LANES, WIDTH, LABEL) \
   for (ci = 0; ci < (LANES); ci = ci + 1) begin \
-    if ($signed(GOT[ci*16 +: 16]) !== $signed(EXP[ci*16 +: 16])) begin \
-      $display("FAIL %s lane %0d: %0d != %0d", LABEL, ci, $signed(GOT[ci*16 +: 16]), $signed(EXP[ci*16 +: 16])); \
+    if ($signed(GOT[ci*WIDTH +: WIDTH]) !== $signed(EXP[ci*WIDTH +: WIDTH])) begin \
+      $display("FAIL %s lane %0d: %0d != %0d", LABEL, ci, $signed(GOT[ci*WIDTH +: WIDTH]), $signed(EXP[ci*WIDTH +: WIDTH])); \
       errors = errors + 1; \
     end \
   end
@@ -100,14 +110,14 @@ module tile_layer_chip_tb;
     $readmemh("exp_qr.hex", eqrm); eqr = eqrm[0][HEADS*HD*16-1:0];
     $readmemh("exp_kr.hex", ekrm); ekr = ekrm[0][KVHEADS*HD*16-1:0];
     $readmemh("exp_a.hex", eam); ea = eam[0][HEADS*HD*16-1:0];
-    $readmemh("exp_o.hex", ehm); eo = ehm[0];
-    $readmemh("exp_x1.hex", ehm); ex1 = ehm[0];
+    $readmemh("exp_o.hex", expbig); eo = expbig[0][HIDDEN*RES-1:0];
+    $readmemh("exp_x1.hex", expbig); ex1 = expbig[0][HIDDEN*RES-1:0];
     $readmemh("exp_h2.hex", ehm); eh2 = ehm[0];
     $readmemh("exp_g.hex", expbig); eg = expbig[0][INTER*16-1:0];
     $readmemh("exp_u.hex", expbig); eu = expbig[0][INTER*16-1:0];
     $readmemh("exp_m.hex", expbig); em = expbig[0][INTER*16-1:0];
-    $readmemh("exp_f.hex", ehm); ef = ehm[0];
-    $readmemh("exp_x2.hex", ehm); ex2 = ehm[0];
+    $readmemh("exp_f.hex", expbig); ef = expbig[0][HIDDEN*RES-1:0];
+    $readmemh("exp_x2.hex", expbig); ex2 = expbig[0][HIDDEN*RES-1:0];
     #1;
     repeat (3) @(posedge clk);
     rst_n = 1'b1;
@@ -148,23 +158,23 @@ module tile_layer_chip_tb;
     end
     #1;
     if (errors == 0) begin
-      `CHECK(obs_h, eh, HIDDEN, "h")
-      `CHECK(obs_q, eq, HIDDEN, "q0")
-      `CHECK(obs_k, ek, KVHEADS*HD, "k0")
-      `CHECK(obs_v, ev, KVHEADS*HD, "v0")
-      `CHECK(obs_qn, eqn, HEADS*HD, "qn")
-      `CHECK(obs_kn, ekn, KVHEADS*HD, "kn")
-      `CHECK(obs_qr, eqr, HEADS*HD, "qr")
-      `CHECK(obs_kr, ekr, KVHEADS*HD, "kr")
-      `CHECK(obs_a, ea, HEADS*HD, "a")
-      `CHECK(obs_o, eo, HIDDEN, "o")
-      `CHECK(obs_x1, ex1, HIDDEN, "x1")
-      `CHECK(obs_h2, eh2, HIDDEN, "h2")
-      `CHECK(obs_g, eg, INTER, "g")
-      `CHECK(obs_u, eu, INTER, "u")
-      `CHECK(obs_m, em, INTER, "m")
-      `CHECK(obs_f, ef, HIDDEN, "f")
-      `CHECK(x2, ex2, HIDDEN, "x2")
+      `CHECK(obs_h, eh, HIDDEN, 16, "h")
+      `CHECK(obs_q, eq, HIDDEN, 16, "q0")
+      `CHECK(obs_k, ek, KVHEADS*HD, 16, "k0")
+      `CHECK(obs_v, ev, KVHEADS*HD, 16, "v0")
+      `CHECK(obs_qn, eqn, HEADS*HD, 16, "qn")
+      `CHECK(obs_kn, ekn, KVHEADS*HD, 16, "kn")
+      `CHECK(obs_qr, eqr, HEADS*HD, 16, "qr")
+      `CHECK(obs_kr, ekr, KVHEADS*HD, 16, "kr")
+      `CHECK(obs_a, ea, HEADS*HD, 16, "a")
+      `CHECK(obs_o, eo, HIDDEN, RES, "o")
+      `CHECK(obs_x1, ex1, HIDDEN, 16, "x1")
+      `CHECK(obs_h2, eh2, HIDDEN, 16, "h2")
+      `CHECK(obs_g, eg, INTER, 16, "g")
+      `CHECK(obs_u, eu, INTER, 16, "u")
+      `CHECK(obs_m, em, INTER, 16, "m")
+      `CHECK(obs_f, ef, HIDDEN, RES, "f")
+      `CHECK(x2, ex2, HIDDEN, 16, "x2")
       if (busy) begin
         $display("FAIL busy stayed high after done");
         errors = errors + 1;

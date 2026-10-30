@@ -84,8 +84,8 @@ module tile_layer #(
   output wire signed [HIDDEN*16-1:0]   obs_h,
   output wire signed [HIDDEN*RES-1:0]  obs_x1,
   output wire signed [HIDDEN*16-1:0]   obs_h2,
-  output wire signed [HIDDEN*16-1:0]   obs_o,
-  output wire signed [HIDDEN*16-1:0]   obs_f,
+  output wire signed [HIDDEN*RES-1:0]  obs_o,
+  output wire signed [HIDDEN*RES-1:0]  obs_f,
   output wire signed [HEADS*HD*16-1:0] obs_q,
   output wire signed [HEADS*HD*16-1:0] obs_qn,
   output wire signed [HEADS*HD*16-1:0] obs_qr,
@@ -123,6 +123,8 @@ module tile_layer #(
   localparam integer L2A_G = $clog2(INTER * CH_H);
   localparam integer L2A_D = $clog2(HIDDEN * CH_I);
   localparam integer KV_ADDR = LOG2CONTEXT + $clog2(KVHEADS);
+  // At output fraction 24 a bias no longer fits int16 (the 16-bit residual's biases do).
+  localparam integer BIAS_W = (RES > 16) ? 32 : 16;
 
   localparam [5:0] S_IDLE = 6'd0, S_NA0 = 6'd1, S_NA1 = 6'd2, S_QKVW = 6'd3,
                    S_QKVS = 6'd4, S_QKVWT = 6'd5, S_QN0 = 6'd6, S_QN1 = 6'd7,
@@ -141,10 +143,10 @@ module tile_layer #(
 
   reg signed [HIDDEN*RES-1:0] x_q;
   reg signed [HIDDEN*16-1:0] h;
-  reg signed [HIDDEN*16-1:0] o_buf;
+  reg signed [HIDDEN*RES-1:0] o_buf;
   reg signed [HIDDEN*RES-1:0] x1;
   reg signed [HIDDEN*16-1:0] h2;
-  reg signed [HIDDEN*16-1:0] f_buf;
+  reg signed [HIDDEN*RES-1:0] f_buf;
   reg signed [ATTN_W*16-1:0] q0;
   reg signed [ATTN_W*16-1:0] qn;
   reg signed [ATTN_W*16-1:0] qr;
@@ -235,10 +237,10 @@ module tile_layer #(
   wire signed [15:0] q_y;
   wire signed [15:0] k_y;
   wire signed [15:0] v_y;
-  wire signed [15:0] o_y;
+  wire signed [RES-1:0] o_y;
   wire signed [15:0] g_y;
   wire signed [15:0] u_y;
-  wire signed [15:0] d_y;
+  wire signed [RES-1:0] d_y;
   wire q_yv, k_yv, v_yv, o_yv, g_yv, u_yv, d_yv;
   wire q_done, k_done, v_done, o_done, g_done, u_done, d_done;
   wire [L2R_H-1:0] q_yi, o_yi, d_yi;
@@ -369,6 +371,7 @@ module tile_layer #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS), .ROWS(HIDDEN), .CHUNKS(CH_A),
     .LOG2CHUNKS(L2CH_A), .LOG2ROWS(L2R_H), .LOG2ADDR(L2A_O), .LOG2MACS(L2MACS),
     .LOG2CPG(L2CPG), .NGROUPS(NG_A), .FRAC_IN(O_FI), .FRAC_OUT(O_FO), .EXP(O_EXP),
+    .BIAS_BITS(BIAS_W), .Y_BITS(RES),
     .INIT0(O_B0), .INIT1(O_B1), .INIT2(O_B2), .INIT3(O_B3), .INIT_M(O_M), .INIT_B(O_BIAS)
   ) o_lin (
     .clk(clk), .rst_n(rst_n), .start(o_start),
@@ -377,7 +380,7 @@ module tile_layer #(
     .raw_y(r_o), .raw_y_valid(rv_o), .total_y(t_o), .total_valid(tv_o)
   );
 
-  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(16), .WIDTH(RES)) res_attn (
+  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(RES), .WIDTH(RES)) res_attn (
     .a(x_q), .b(o_buf), .y(res1_y)
   );
 
@@ -421,6 +424,7 @@ module tile_layer #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS), .ROWS(HIDDEN), .CHUNKS(CH_I),
     .LOG2CHUNKS(L2CH_I), .LOG2ROWS(L2R_H), .LOG2ADDR(L2A_D), .LOG2MACS(L2MACS),
     .LOG2CPG(L2CPG), .NGROUPS(NG_I), .FRAC_IN(D_FI), .FRAC_OUT(D_FO), .EXP(D_EXP),
+    .BIAS_BITS(BIAS_W), .Y_BITS(RES),
     .INIT0(D_B0), .INIT1(D_B1), .INIT2(D_B2), .INIT3(D_B3), .INIT_M(D_M), .INIT_B(D_BIAS)
   ) down_lin (
     .clk(clk), .rst_n(rst_n), .start(d_start),
@@ -429,7 +433,7 @@ module tile_layer #(
     .raw_y(r_d), .raw_y_valid(rv_d), .total_y(t_d), .total_valid(tv_d)
   );
 
-  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(16), .WIDTH(RES)) res_mlp (
+  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(RES), .WIDTH(RES)) res_mlp (
     .a(x1), .b(f_buf), .y(res2_y)
   );
   // ---- the schedule: one state per phase ---------------------------------------------
@@ -606,18 +610,18 @@ module tile_layer #(
       q0    <= {ATTN_W*16{1'b0}};
       k0    <= {KV_W*16{1'b0}};
       v0    <= {KV_W*16{1'b0}};
-      o_buf <= {HIDDEN*16{1'b0}};
+      o_buf <= {HIDDEN*RES{1'b0}};
       g_buf <= {INTER*16{1'b0}};
       u_buf <= {INTER*16{1'b0}};
-      f_buf <= {HIDDEN*16{1'b0}};
+      f_buf <= {HIDDEN*RES{1'b0}};
     end else begin
       if (q_yv) q0[q_yi*16 +: 16] <= q_y;
       if (k_yv) k0[k_yi*16 +: 16] <= k_y;
       if (v_yv) v0[v_yi*16 +: 16] <= v_y;
-      if (o_yv) o_buf[o_yi*16 +: 16] <= o_y;
+      if (o_yv) o_buf[o_yi*RES +: RES] <= o_y;
       if (g_yv) g_buf[g_yi*16 +: 16] <= g_y;
       if (u_yv) u_buf[u_yi*16 +: 16] <= u_y;
-      if (d_yv) f_buf[d_yi*16 +: 16] <= d_y;
+      if (d_yv) f_buf[d_yi*RES +: RES] <= d_y;
     end
   end
 

@@ -43,11 +43,12 @@ def l2():
     return graph_l2.GraphL2(graph, spec, arrays)
 
 
-def _pack(values: np.ndarray) -> str:
+def _pack(values: np.ndarray, bits: int = 16) -> str:
+    mask = (1 << bits) - 1
     word = 0
     for lane, value in enumerate(values):
-        word |= (int(value) & 0xFFFF) << (16 * lane)
-    return f"{word:0{len(values) * 4}x}"
+        word |= (int(value) & mask) << (bits * lane)
+    return f"{word:0{len(values) * (bits // 4)}x}"
 
 
 def _write_words(tmp_path, name: str, values: np.ndarray) -> None:
@@ -66,13 +67,16 @@ def _split(tmp_path, key: str, prefix: str) -> int:
     return addr_bits
 
 
-def _matrix_files(tmp_path, arrays, spec, key: str, prefix: str) -> None:
+def _matrix_files(tmp_path, arrays, spec, key: str, prefix: str, bias_bits: int = 16) -> None:
     _split(tmp_path, key, prefix)
     m = arrays[f"{key}.m"].astype(np.int64)
     b = arrays.get(f"{key}.b")
     b = np.zeros(m.shape[0], dtype=np.int64) if b is None else b.astype(np.int64)
     (tmp_path / f"{prefix}_m.hex").write_text("\n".join(f"{int(v) & 0xFFFF:04x}" for v in m.ravel()) + "\n")
-    (tmp_path / f"{prefix}_b.hex").write_text("\n".join(f"{int(v) & 0xFFFF:04x}" for v in b) + "\n")
+    mask = (1 << bias_bits) - 1
+    (tmp_path / f"{prefix}_b.hex").write_text(
+        "\n".join(f"{int(v) & mask:0{bias_bits // 4}x}" for v in b) + "\n"
+    )
 
 
 def _run(
@@ -88,6 +92,8 @@ def _run(
     midreset: bool = False,
 ) -> subprocess.CompletedProcess:
     _graph, spec, arrays = l2.graph, l2.spec, l2.a
+    res_bits = int(spec["activations"]["bits"]["x"])
+    frac = spec["activations"]["frac"]
     generator.generate(spec, arrays, macs=8, out=tmp_path)
     for key, prefix in (
         (f"{layer_no}.q_proj", "q"),
@@ -98,7 +104,8 @@ def _run(
         (f"{layer_no}.up_proj", "up"),
         (f"{layer_no}.down_proj", "down"),
     ):
-        _matrix_files(tmp_path, arrays, spec, key, prefix)
+        bias_bits = 32 if (prefix in ("o", "down") and res_bits > 16) else 16
+        _matrix_files(tmp_path, arrays, spec, key, prefix, bias_bits)
     hold: dict = {}
 
     def observe(node: dict, layer: int | None, env: dict) -> None:
@@ -146,7 +153,7 @@ def _run(
         for name in ("h", "q", "k", "v", "qn", "kn", "qr", "kr", "a", "o", "x1", "h2", "g", "u", "m", "f", "x2")
     }
     if chip or steps is not None:
-        lines = [_pack(row) for row in hold["x"][: position + 1]]
+        lines = [_pack(row, res_bits) for row in hold["x"][: position + 1]]
         (tmp_path / "x.hex").write_text("\n".join(lines) + "\n")
     else:
         (tmp_path / "x.hex").write_text(_pack(x) + "\n")
@@ -173,7 +180,8 @@ def _run(
         ("exp_f", expected["f"]),
         ("exp_x2", expected["x2"]),
     ):
-        (tmp_path / f"{name}.hex").write_text(_pack(values) + "\n")
+        width = res_bits if name in ("exp_x1", "exp_x2", "exp_o", "exp_f") else 16
+        (tmp_path / f"{name}.hex").write_text(_pack(values, width) + "\n")
     kv_heads, hd = l2.spec["hyper"]["kvHeads"], l2.spec["hyper"]["headDim"]
     context = l2.context
     depth = kv_heads * context
@@ -207,6 +215,15 @@ def _run(
     ):
         shutil.copyfile(TEMPLATES / name, tmp_path / name)
     extra: list[str] = []
+    if chip:
+        eps = round(1e-6 * 2.0 ** (2 * frac["x"]))
+        extra = [
+            f"-GRES={res_bits}",
+            f"-GO_FO={frac['x']}",
+            f"-GD_FO={frac['x']}",
+            f"-GEPS_ATTN={eps}",
+            f"-GEPS_MLP={eps}",
+        ]
     if steps is not None:
         shutil.copyfile(TEMPLATES / "tile_layer.v", tmp_path / "tile_layer.v")
         shutil.copyfile(DIRECTED_TB, tmp_path / "tile_layer_directed_tb.v")
@@ -273,4 +290,26 @@ def test_the_layer_schedule_matches_every_observation(l2, tmp_path, layer_no):
     """The same layer, sequenced by the chip's own schedule states instead of the testbench."""
     tokens = [3, 9, 17, 25, 33, 41, 49, 57]
     result = _run(tmp_path, l2, 3, tokens, layer_no, chip=True)
+    assert "PASS" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.fixture(scope="module")
+def l2_24():
+    """The same tiny model with the calibrated spec's 24-bit residual stream."""
+    path = TINY_QWEN3 / "model.safetensors"
+    layout = read_layout(path)
+    graph = recover(census([layout], json.loads((TINY_QWEN3 / "config.json").read_text()), paths={path.name: path}))
+    loader = WeightLoader([layout], {path.name: path})
+    tokens = [3, 9, 17, 25, 33, 41, 49, 57]
+    stats = graph_l2.calibrate(graph, loader.get, [tokens])
+    spec, arrays = graph_l2.build(
+        graph, loader.peek, weight_format="int4", group_size=16, stats=stats, context=16, residual_bits=24
+    )
+    return graph_l2.GraphL2(graph, spec, arrays)
+
+
+def test_the_layer_carries_the_24_bit_residual(l2_24, tmp_path):
+    """The layer's buffers, norms and residual adds follow the spec's 24-bit residual (RES)."""
+    tokens = [3, 9, 17, 25, 33, 41, 49, 57]
+    result = _run(tmp_path, l2_24, 3, tokens, 0, chip=True)
     assert "PASS" in result.stdout, result.stdout + result.stderr

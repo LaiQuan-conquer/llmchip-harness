@@ -23,6 +23,8 @@ module tile_linear #(
   parameter integer FRAC_IN = 12,
   parameter integer FRAC_OUT = 15,
   parameter integer EXP = 21,
+  parameter integer BIAS_BITS = 16,
+  parameter integer Y_BITS = 16,
   parameter         INIT0 = "rom_bank0.hex",
   parameter         INIT1 = "rom_bank1.hex",
   parameter         INIT2 = "rom_bank2.hex",
@@ -37,7 +39,7 @@ module tile_linear #(
   input  wire [LOG2CHUNKS-1:0]         x_wr_chunk,
   input  wire [LOG2MACS-1:0]           x_wr_lane,
   input  wire signed [15:0]            x_wr_data,
-  output reg  signed [15:0]            y,
+  output reg  signed [Y_BITS-1:0]      y,
   output reg                           y_valid,
   output reg  [LOG2ROWS-1:0]           y_index,
   output wire                          done,
@@ -67,7 +69,7 @@ module tile_linear #(
   );
 
   reg [14:0] mant [0:ROWS*NGROUPS-1];
-  reg signed [15:0] bias [0:ROWS-1];
+  reg signed [BIAS_BITS-1:0] bias [0:ROWS-1];
 
   initial begin
     $readmemh(INIT_M, mant);
@@ -81,9 +83,11 @@ module tile_linear #(
   reg signed [63:0] total_next;
   reg signed [63:0] rounded_next;
   reg signed [63:0] shifted_next;
-  wire signed [63:0] bias_ext = {{48{bias[word_row][15]}}, bias[word_row]};
+  wire signed [63:0] bias_ext = {{(64-BIAS_BITS){bias[word_row][BIAS_BITS-1]}}, bias[word_row]};
+  wire signed [63:0] ymax = (64'sd1 <<< (Y_BITS-1)) - 64'sd1;
+  wire signed [63:0] ymin = -(64'sd1 <<< (Y_BITS-1));
   wire signed [63:0] biased_next = shifted_next + bias_ext;
-  reg signed [15:0] y_next;
+  reg signed [Y_BITS-1:0] y_next;
   integer gi;
 
   always @(*) begin
@@ -102,8 +106,8 @@ module tile_linear #(
     end
     rounded_next = total_next + (64'sd1 <<< (SHIFT - 1));
     shifted_next = rounded_next >>> SHIFT;
-    y_next = (biased_next > 64'sd32767) ? 16'sh7fff :
-             (biased_next < -64'sd32768) ? 16'sh8000 : biased_next[15:0];
+    y_next = (biased_next > ymax) ? ymax[Y_BITS-1:0] :
+             (biased_next < ymin) ? ymin[Y_BITS-1:0] : biased_next[Y_BITS-1:0];
   end
 
   always @(posedge clk or negedge rst_n) begin
