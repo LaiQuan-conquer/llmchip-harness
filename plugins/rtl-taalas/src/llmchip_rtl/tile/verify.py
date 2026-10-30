@@ -38,10 +38,12 @@ UNIT_FILES = (
     "test_tile_linear.py",
     "test_tile_attention_kv.py",
     "test_tile_mlp.py",
+    "test_tile_layer.py",
     "test_rom_macro.py",
 )
 SLICE_FILES = ("test_tile_slice.py",)
 LAYER_FILES = ("test_tile_layer.py",)
+DIRECTED_FILES = ("test_tile_directed.py",)
 COVERAGE_FILES = ("test_tile_coverage.py",)
 FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)
@@ -60,6 +62,11 @@ PLAN_ITEMS = (
         "id": "ver.layer",
         "category": "layer",
         "description": "Q-full per-layer observation points against L2",
+    },
+    {
+        "id": "ver.directed",
+        "category": "directed",
+        "description": "Power-on, start while busy, reset mid-inference, one token, context boundary",
     },
     {
         "id": "rtl.tile.equivalence",
@@ -132,6 +139,7 @@ def report(
     run_unit: bool = True,
     run_slice: bool = True,
     run_layer: bool = True,
+    run_directed: bool = True,
     run_coverage: bool = True,
     run_formal: bool = True,
     run_mutation: bool = True,
@@ -194,6 +202,24 @@ def report(
         )
     else:
         items.append({"id": "ver.layer", "status": "not run", "reason": "disabled by the caller"})
+
+    if run_directed:
+        directed = _pytest(DIRECTED_FILES, timeout=1800)
+        items.append(
+            {
+                "id": "ver.directed",
+                "status": "passed" if directed["returncode"] == 0 else "failed",
+                "metrics": {
+                    "tests": directed["passed"] + directed["failed"],
+                    "passed": directed["passed"],
+                    "failed": directed["failed"],
+                    "cases": directed["passed"] + directed["failed"],
+                },
+                "detail": directed["output"],
+            }
+        )
+    else:
+        items.append({"id": "ver.directed", "status": "not run", "reason": "disabled by the caller"})
 
     if run_coverage:
         coverage = _pytest(COVERAGE_FILES)

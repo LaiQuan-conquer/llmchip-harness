@@ -24,8 +24,8 @@ module tile_kv #(
   // One row per (head, position); a row is HD int16 values, and ADDR covers KV_HEADS x CONTEXT rows.
   reg [HD*16-1:0] rows [0:(1 << ADDR)-1];
 
-  wire [ADDR-1:0] wr_index = (wr_head << LOG2CONTEXT) + wr_pos;
-  wire [ADDR-1:0] rd_index = (rd_head << LOG2CONTEXT) + rd_pos;
+  wire [ADDR-1:0] wr_index = (wr_head[ADDR-1:0] << LOG2CONTEXT) + wr_pos[ADDR-1:0];
+  wire [ADDR-1:0] rd_index = (rd_head[ADDR-1:0] << LOG2CONTEXT) + rd_pos[ADDR-1:0];
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin

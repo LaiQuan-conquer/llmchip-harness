@@ -26,6 +26,8 @@ VERILATOR = TOOLS / "oss-cad-suite" / "bin" / "verilator"
 VERILATOR_COVERAGE = TOOLS / "oss-cad-suite" / "bin" / "verilator_coverage"
 TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "llmchip_rtl" / "tile" / "templates"
 TB = Path(__file__).with_name("tile_layer_attn_tb.v")
+CHIP_TB = Path(__file__).with_name("tile_layer_chip_tb.v")
+DIRECTED_TB = Path(__file__).with_name("tile_layer_directed_tb.v")
 TINY_QWEN3 = Path(__file__).parents[3] / "tests" / "fixtures" / "models" / "tiny-qwen3"
 
 
@@ -74,7 +76,16 @@ def _matrix_files(tmp_path, arrays, spec, key: str, prefix: str) -> None:
 
 
 def _run(
-    tmp_path, l2, position: int, tokens: list[int], layer_no: int, coverage: bool = False, x_override=None
+    tmp_path,
+    l2,
+    position: int,
+    tokens: list[int],
+    layer_no: int,
+    coverage: bool = False,
+    x_override=None,
+    chip: bool = False,
+    steps: int | None = None,
+    midreset: bool = False,
 ) -> subprocess.CompletedProcess:
     _graph, spec, arrays = l2.graph, l2.spec, l2.a
     generator.generate(spec, arrays, macs=8, out=tmp_path)
@@ -134,7 +145,11 @@ def _run(
         name: hold[name][-1].astype(np.int64)
         for name in ("h", "q", "k", "v", "qn", "kn", "qr", "kr", "a", "o", "x1", "h2", "g", "u", "m", "f", "x2")
     }
-    (tmp_path / "x.hex").write_text(_pack(x) + "\n")
+    if chip or steps is not None:
+        lines = [_pack(row) for row in hold["x"][: position + 1]]
+        (tmp_path / "x.hex").write_text("\n".join(lines) + "\n")
+    else:
+        (tmp_path / "x.hex").write_text(_pack(x) + "\n")
     (tmp_path / "attn_w.hex").write_text(_pack(arrays[f"{layer_no}.attn_norm.w"]) + "\n")
     (tmp_path / "mlp_w.hex").write_text(_pack(arrays[f"{layer_no}.mlp_norm.w"]) + "\n")
     (tmp_path / "qnorm_w.hex").write_text(_pack(arrays[f"{layer_no}.q_norm.w"]) + "\n")
@@ -191,15 +206,27 @@ def _run(
         "tile_silu.v",
     ):
         shutil.copyfile(TEMPLATES / name, tmp_path / name)
-    shutil.copyfile(TB, tmp_path / "tile_layer_attn_tb.v")
+    extra: list[str] = []
+    if steps is not None:
+        shutil.copyfile(TEMPLATES / "tile_layer.v", tmp_path / "tile_layer.v")
+        shutil.copyfile(DIRECTED_TB, tmp_path / "tile_layer_directed_tb.v")
+        top, tb = "tile_layer_directed_tb", "tile_layer_directed_tb.v"
+        extra = [f"-GSTEPS={steps}", f"-GMIDRESET={1 if midreset else 0}"]
+    elif chip:
+        shutil.copyfile(TEMPLATES / "tile_layer.v", tmp_path / "tile_layer.v")
+        shutil.copyfile(CHIP_TB, tmp_path / "tile_layer_chip_tb.v")
+        top, tb = "tile_layer_chip_tb", "tile_layer_chip_tb.v"
+    else:
+        shutil.copyfile(TB, tmp_path / "tile_layer_attn_tb.v")
+        top, tb = "tile_layer_attn_tb", "tile_layer_attn_tb.v"
     command = [
         str(VERILATOR),
         "--binary",
         "--timing",
         "-Wno-fatal",
         "--top-module",
-        "tile_layer_attn_tb",
-        "tile_layer_attn_tb.v",
+        top,
+        tb,
         "tile_rmsnorm.v",
         "tile_linear.v",
         "tile_engine.v",
@@ -211,15 +238,15 @@ def _run(
         "tile_lut.v",
         "tile_residual.v",
         "tile_silu.v",
+        *(["tile_layer.v"] if chip or steps is not None else []),
+        *extra,
     ]
     if coverage:
         command.insert(1, "--coverage")
     build = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
     if build.returncode != 0:
         return subprocess.CompletedProcess(command, 1, build.stdout + build.stderr, "")
-    run = subprocess.run(
-        [str(tmp_path / "obj_dir" / "Vtile_layer_attn_tb")], cwd=tmp_path, capture_output=True, text=True
-    )
+    run = subprocess.run([str(tmp_path / "obj_dir" / f"V{top}")], cwd=tmp_path, capture_output=True, text=True)
     if coverage:
         cov = subprocess.run(
             [str(VERILATOR_COVERAGE), "--annotate", "obj_dir", "coverage.dat"],
@@ -238,4 +265,12 @@ pytestmark = pytest.mark.skipif(not VERILATOR.is_file(), reason="Verilator is no
 def test_the_layer_matches_every_observation(l2, tmp_path, layer_no):
     tokens = [3, 9, 17, 25, 33, 41, 49, 57]
     result = _run(tmp_path, l2, 3, tokens, layer_no)
+    assert "PASS" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("layer_no", [0, 1])
+def test_the_layer_schedule_matches_every_observation(l2, tmp_path, layer_no):
+    """The same layer, sequenced by the chip's own schedule states instead of the testbench."""
+    tokens = [3, 9, 17, 25, 33, 41, 49, 57]
+    result = _run(tmp_path, l2, 3, tokens, layer_no, chip=True)
     assert "PASS" in result.stdout, result.stdout + result.stderr

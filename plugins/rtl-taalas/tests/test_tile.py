@@ -100,7 +100,7 @@ def test_the_generated_slice_writes_its_rom_and_manifest(built, tmp_path):
     lines = (tmp_path / bank["hex"]).read_text().split()
     assert len(lines) == bank["words"]
     assert (tmp_path / "rtl" / "tile_top.v").is_file()
-    assert len(manifest["files"]) == 16
+    assert len(manifest["files"]) == 17
     assert manifest["layerBanks"] == []
     assert (tmp_path / "rom_view3.v").is_file()
     assert (tmp_path / "rom_via.json").is_file()

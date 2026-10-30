@@ -145,7 +145,7 @@ def synthesizable(bundle: Path, yosys: Path) -> dict:
     files = " ".join(_rtl_files(bundle))
     script = "; ".join(
         [
-            f"read_verilog {files}",
+            f"read_verilog -DSYNTHESIS {files}",
             "chparam -set ADDR 6 tile_top",
             "hierarchy -check -top tile_top",
             "check -assert",

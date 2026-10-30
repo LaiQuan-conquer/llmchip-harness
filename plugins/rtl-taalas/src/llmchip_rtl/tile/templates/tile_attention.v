@@ -24,6 +24,7 @@ module tile_attention #(
   parameter integer FK = 15,
   parameter integer SCORE_FRAC = 10,
   parameter integer EXP_RANGE = 16,
+  parameter integer EXP_BITS = 9,
   parameter integer ATTN_SCALE = 11585,
   parameter integer ACC = 48
 ) (
@@ -40,7 +41,7 @@ module tile_attention #(
   output reg  [ADDR-1:0]               v_addr,
   input  wire signed [HD*16-1:0]       v_data,
   output reg                           exp_en,
-  output reg  [13:0]                   exp_index,
+  output reg  [EXP_BITS-1:0]           exp_index,
   input  wire [15:0]                   exp_value
 );
 
@@ -101,8 +102,8 @@ module tile_attention #(
   // the numeric spec's 10, so index = d >> 5 has 9 bits (0..511).
   wire signed [31:0] d_wide = smax - score_mem[pos];
   wire        [31:0] d_raw  = d_wide[31] ? 32'd0 : d_wide;
-  wire        [13:0] d_cap  = (d_raw > DMAX) ? DMAX[13:0] : d_raw[13:0];
-  wire        [13:0] d_index = d_cap >> (SCORE_FRAC - 5);
+  wire [EXP_BITS+4:0] d_range = (d_raw > DMAX) ? DMAX[EXP_BITS+4:0] : d_raw[EXP_BITS+4:0];
+  wire [EXP_BITS-1:0] d_index = d_range >> (SCORE_FRAC - 5);
 
   // Restoring division: shift the remainder left, bring in the next dividend bit, compare.
   // rem < divisor <= sum(e) < MAXS * 2^15, so REMBITS holds both; the shifted remainder is one
@@ -143,7 +144,7 @@ module tile_attention #(
       k_addr       <= {ADDR{1'b0}};
       v_addr       <= {ADDR{1'b0}};
       exp_en       <= 1'b0;
-      exp_index    <= 14'd0;
+      exp_index    <= {EXP_BITS{1'b0}};
       for (k = 0; k < HD; k = k + 1) begin
         q_buf[k] <= 16'sd0;
         acc[k]   <= {ACC{1'b0}};

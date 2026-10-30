@@ -447,6 +447,7 @@
               "ver.slice",
               "ver.cdc",
               "ver.layer",
+              "ver.directed",
               "ver.coverage",
               "ver.formal",
               "ver.mutation",
@@ -477,6 +478,12 @@
         },
         {
           "check": "ver.layer",
+          "inputs": {
+            "rtl": "slot:rtl-bundle"
+          }
+        },
+        {
+          "check": "ver.directed",
           "inputs": {
             "rtl": "slot:rtl-bundle"
           }
@@ -755,6 +762,27 @@
           "metric": "ver_layer_observations",
           "op": ">",
           "value": 0
+        }
+      ]
+    },
+    {
+      "id": "ver.directed",
+      "version": "1",
+      "title": "Directed tests: power-on, start while busy, reset mid-inference, one token, context boundary",
+      "plugin": "rtl-taalas",
+      "handler": "tile_verify",
+      "completeness": [
+        {
+          "metric": "ver_directed_cases",
+          "op": ">=",
+          "value": 3
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "ver_directed",
+          "op": "==",
+          "value": 1
         }
       ]
     },

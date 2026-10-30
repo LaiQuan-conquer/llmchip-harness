@@ -48,6 +48,7 @@ module tile_rope #(
   );
 
   wire [15:0] base = head << LOG2HD;
+  wire [15:0] table_index = position * HALF + pair;
   wire [15:0] lane_a = (STYLE == 0) ? (base + pair) : (base + (pair << 1));
   wire [15:0] lane_b = (STYLE == 0) ? (lane_a + HALF) : (lane_a + 16'd1);
 
@@ -69,11 +70,11 @@ module tile_rope #(
       state  <= IDLE;
       head   <= 16'd0;
       pair   <= 16'd0;
-      x_q    <= {HEADS*HD{1'b0}};
+      x_q    <= {(HEADS*HD*16){1'b0}};
       index  <= {ADDR{1'b0}};
       cos_en <= 1'b0;
       sin_en <= 1'b0;
-      y      <= {HEADS*HD{1'b0}};
+      y      <= {(HEADS*HD*16){1'b0}};
       done   <= 1'b0;
     end else begin
       cos_en <= 1'b0;
@@ -89,7 +90,7 @@ module tile_rope #(
           end
         end
         REQ: begin
-          index  <= position * HALF + pair;
+          index  <= table_index[ADDR-1:0];
           cos_en <= 1'b1;
           sin_en <= 1'b1;
           state  <= WAIT;
