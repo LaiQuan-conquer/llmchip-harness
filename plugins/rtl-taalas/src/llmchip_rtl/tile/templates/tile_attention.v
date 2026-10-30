@@ -103,7 +103,8 @@ module tile_attention #(
   wire signed [31:0] d_wide = smax - score_mem[pos];
   wire        [31:0] d_raw  = d_wide[31] ? 32'd0 : d_wide;
   wire [EXP_BITS+4:0] d_range = (d_raw > DMAX) ? DMAX[EXP_BITS+4:0] : d_raw[EXP_BITS+4:0];
-  wire [EXP_BITS-1:0] d_index = d_range >> (SCORE_FRAC - 5);
+  wire [EXP_BITS+4:0] d_shift = d_range >> (SCORE_FRAC - 5);
+  wire [EXP_BITS-1:0] d_index = d_shift[EXP_BITS-1:0];
 
   // Restoring division: shift the remainder left, bring in the next dividend bit, compare.
   // rem < divisor <= sum(e) < MAXS * 2^15, so REMBITS holds both; the shifted remainder is one

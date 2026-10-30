@@ -21,8 +21,10 @@ const MODEL = join(TOOLS, 'models/Qwen2.5-0.5B-Instruct')
 const SANDBOX = 'docker.io/library/python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1'
 const SET = process.env.LLMCHIP_SCHEME_SET === 'full' ? 'full' : 'quick'
 const BENCHMARKS = ['mmlu', 'cmmlu', 'ceval', 'gsm8k', 'ifeval', 'humaneval', 'mbpp']
+// A full-set run is hours per scheme; `LLMCHIP_SCHEMES=w8` runs one of them.
+const CHOSEN = (process.env.LLMCHIP_SCHEMES ?? '').split(',').filter(Boolean)
 
-export const SCHEMES = [
+const ALL_SCHEMES = [
   { id: 'w8', params: { weightFormat: 'int8', groupSize: 128, contextLength: 2048, sequences: 64 } },
   {
     id: 'sensitive-w8',
@@ -36,6 +38,7 @@ export const SCHEMES = [
   },
   { id: 'w4-g64', params: { weightFormat: 'int4', groupSize: 64, contextLength: 2048, sequences: 64 } },
 ]
+const SCHEMES = CHOSEN.length ? ALL_SCHEMES.filter((s) => CHOSEN.includes(s.id)) : ALL_SCHEMES
 
 function imagePresent(image: string): boolean {
   try {
@@ -123,6 +126,7 @@ describe.skipIf(!ready)(`Qwen2.5-0.5B-Instruct: the three numeric schemes (${SET
 
     writeFileSync(join(tmpdir(), `llmchip-qwen-schemes-${SET}.json`), JSON.stringify(results, null, 1))
     expect(Object.keys(results)).toEqual(SCHEMES.map((s) => s.id))
+    expect(SCHEMES.length).toBeGreaterThan(0)
     for (const id of Object.keys(results)) expect((results[id] as any).verdicts).toBeTruthy()
   })
 })

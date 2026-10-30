@@ -6,6 +6,7 @@
 
 module tile_rmsnorm #(
   parameter integer DIM = 8,
+  parameter integer WIDTH = 16,
   parameter integer LOG2DIM = 3,
   parameter signed [7:0]  FN = 8'sd14,
   parameter signed [7:0]  FO = 8'sd8,
@@ -15,7 +16,7 @@ module tile_rmsnorm #(
   input  wire                     clk,
   input  wire                     rst_n,
   input  wire                     start,
-  input  wire signed [DIM*16-1:0] x,
+  input  wire signed [DIM*WIDTH-1:0] x,
   input  wire signed [DIM*16-1:0] weight,
   output reg  signed [DIM*16-1:0] y,
   output reg                      done
@@ -32,7 +33,7 @@ module tile_rmsnorm #(
   reg signed [15:0]       r;
   reg [7:0]               index;
   reg                     lut_en;
-  reg signed [DIM*16-1:0] x_q;
+  reg signed [DIM*WIDTH-1:0] x_q;
   reg signed [DIM*16-1:0] w_q;
 
   wire signed [15:0] lut_value;
@@ -51,10 +52,10 @@ module tile_rmsnorm #(
     end
   end
 
-  wire signed [15:0] x_i = x_q[i*16 +: 16];
+  wire signed [WIDTH-1:0] x_i = x_q[i*WIDTH +: WIDTH];
   wire signed [15:0] w_i = w_q[i*16 +: 16];
-  wire signed [31:0] sq = x_i * x_i;
-  wire signed [63:0] sq_ext = {{32{sq[31]}}, sq};
+  wire signed [2*WIDTH-1:0] sq = x_i * x_i;
+  wire signed [63:0] sq_ext = {{(64-2*WIDTH){sq[2*WIDTH-1]}}, sq};
   wire signed [63:0] xw = x_i * w_i;
   wire signed [63:0] product = xw * r;
   wire signed [7:0]  half = {e2[7], e2[7:1]};  // e2 / 2, e2 is even
@@ -75,7 +76,7 @@ module tile_rmsnorm #(
       r      <= 16'sd0;
       index  <= 8'd0;
       lut_en <= 1'b0;
-      x_q    <= {DIM*16{1'b0}};
+      x_q    <= {(DIM*WIDTH){1'b0}};
       w_q    <= {DIM*16{1'b0}};
       y      <= {DIM*16{1'b0}};
       done   <= 1'b0;

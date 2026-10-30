@@ -24,6 +24,7 @@ module tile_layer #(
   parameter integer ACC = 32,
   parameter integer GROUPS = 8,
   parameter integer CPG = 2,
+  parameter integer RES = 16,
   parameter integer FRAC_H = 12,
   parameter integer FRAC_QK = 13,
   parameter integer NORM_FN = 15,
@@ -76,12 +77,12 @@ module tile_layer #(
   input  wire                          rst_n,
   input  wire                          start,
   input  wire [15:0]                   position,
-  input  wire signed [HIDDEN*16-1:0]   x,
-  output reg  signed [HIDDEN*16-1:0]   x2,
+  input  wire signed [HIDDEN*RES-1:0]  x,
+  output reg  signed [HIDDEN*RES-1:0]  x2,
   output wire                          done,
   output wire                          busy,
   output wire signed [HIDDEN*16-1:0]   obs_h,
-  output wire signed [HIDDEN*16-1:0]   obs_x1,
+  output wire signed [HIDDEN*RES-1:0]  obs_x1,
   output wire signed [HIDDEN*16-1:0]   obs_h2,
   output wire signed [HIDDEN*16-1:0]   obs_o,
   output wire signed [HIDDEN*16-1:0]   obs_f,
@@ -138,10 +139,10 @@ module tile_layer #(
   reg [31:0] kh;
   reg [15:0] pos_q;
 
-  reg signed [HIDDEN*16-1:0] x_q;
+  reg signed [HIDDEN*RES-1:0] x_q;
   reg signed [HIDDEN*16-1:0] h;
   reg signed [HIDDEN*16-1:0] o_buf;
-  reg signed [HIDDEN*16-1:0] x1;
+  reg signed [HIDDEN*RES-1:0] x1;
   reg signed [HIDDEN*16-1:0] h2;
   reg signed [HIDDEN*16-1:0] f_buf;
   reg signed [ATTN_W*16-1:0] q0;
@@ -221,8 +222,8 @@ module tile_layer #(
   wire signed [KV_W*16-1:0] krope_y;
   wire signed [ATTN_W*16-1:0] attn_out;
   wire signed [INTER*16-1:0] silu_y;
-  wire signed [HIDDEN*16-1:0] res1_y;
-  wire signed [HIDDEN*16-1:0] res2_y;
+  wire signed [HIDDEN*RES-1:0] res1_y;
+  wire signed [HIDDEN*RES-1:0] res2_y;
   wire attn_done;
   wire norm_a_done;
   wire norm_m_done;
@@ -259,11 +260,11 @@ module tile_layer #(
   wire [15:0] k_rd_pos = {{(16-KV_ADDR){1'b0}}, k_addr} & ctx_mask;
   wire [15:0] v_rd_pos = {{(16-KV_ADDR){1'b0}}, v_addr} & ctx_mask;
   wire exp_en;
-  wire [13:0] exp_index;
+  wire [EXP_ADDR-1:0] exp_index;
   wire [15:0] exp_value;
   // ---- operators ---------------------------------------------------------------------
   tile_rmsnorm #(
-    .DIM(HIDDEN), .LOG2DIM($clog2(HIDDEN)), .FN(NORM_FN), .FO(FRAC_H),
+    .DIM(HIDDEN), .WIDTH(RES), .LOG2DIM($clog2(HIDDEN)), .FN(NORM_FN), .FO(FRAC_H),
     .EPS_Q(EPS_ATTN), .INIT(RSQRT_INIT)
   ) attn_norm (
     .clk(clk), .rst_n(rst_n), .start(na_start), .x(x_q), .weight(attn_w),
@@ -376,10 +377,12 @@ module tile_layer #(
     .raw_y(r_o), .raw_y_valid(rv_o), .total_y(t_o), .total_valid(tv_o)
   );
 
-  tile_residual #(.DIM(HIDDEN), .WIDTH(16)) res_attn (.a(x_q), .b(o_buf), .y(res1_y));
+  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(16), .WIDTH(RES)) res_attn (
+    .a(x_q), .b(o_buf), .y(res1_y)
+  );
 
   tile_rmsnorm #(
-    .DIM(HIDDEN), .LOG2DIM($clog2(HIDDEN)), .FN(NORM_FN), .FO(FRAC_H),
+    .DIM(HIDDEN), .WIDTH(RES), .LOG2DIM($clog2(HIDDEN)), .FN(NORM_FN), .FO(FRAC_H),
     .EPS_Q(EPS_MLP), .INIT(RSQRT_INIT)
   ) mlp_norm (
     .clk(clk), .rst_n(rst_n), .start(nm_start), .x(x1), .weight(mlp_w),
@@ -426,7 +429,9 @@ module tile_layer #(
     .raw_y(r_d), .raw_y_valid(rv_d), .total_y(t_d), .total_valid(tv_d)
   );
 
-  tile_residual #(.DIM(HIDDEN), .WIDTH(16)) res_mlp (.a(x1), .b(f_buf), .y(res2_y));
+  tile_residual #(.DIM(HIDDEN), .WIDTH_A(RES), .WIDTH_B(16), .WIDTH(RES)) res_mlp (
+    .a(x1), .b(f_buf), .y(res2_y)
+  );
   // ---- the schedule: one state per phase ---------------------------------------------
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -435,10 +440,10 @@ module tile_layer #(
       head   <= 32'd0;
       kh     <= 32'd0;
       pos_q  <= 16'd0;
-      x_q    <= {HIDDEN*16{1'b0}};
-      x2     <= {HIDDEN*16{1'b0}};
+      x_q    <= {HIDDEN*RES{1'b0}};
+      x2     <= {HIDDEN*RES{1'b0}};
       h      <= {HIDDEN*16{1'b0}};
-      x1     <= {HIDDEN*16{1'b0}};
+      x1     <= {HIDDEN*RES{1'b0}};
       h2     <= {HIDDEN*16{1'b0}};
       qn     <= {ATTN_W*16{1'b0}};
       qr     <= {ATTN_W*16{1'b0}};
