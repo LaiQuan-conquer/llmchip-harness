@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import chain, macro, rom, views
+from . import chain, chip, macro, rom, views
 
 TEMPLATE_VERSION = "taalas-tile-templates/4"
 CLASSIFIER = "embed"  # the tied classifier: the embedding table's integers
@@ -326,9 +326,12 @@ def generate(
         (rtl / "tile_qfull_banked.v").write_text(banked)
 
     chain_manifest = None
+    chip_manifest = None
     if slice_report is None:
         chosen = layers if layers is not None else list(range(int(spec["hyper"]["layers"])))
+        (rtl / "tile_embed.v").write_text((_templates_dir() / "tile_embed.v").read_text())
         chain_manifest = chain.generate(out, spec, arrays, macs, chosen)
+        chip_manifest = chip.generate(out, spec, arrays, macs)
 
     via_manifest = views.write_view3(out, width=macs * bits)
 
@@ -353,10 +356,13 @@ def generate(
                 "tile_layer.v",
                 "tile_host.v",
                 "tile_chain.v",
+                "tile_chip.v",
+                "tile_embed.v",
             ],
         },
         "layerBanks": layer_banks,
         "chain": chain_manifest,
+        "chip": chip_manifest,
         "linear": linear,
         "macro": macro_manifest,
         "slice": (
@@ -383,6 +389,7 @@ def generate(
         "files": {str(p.relative_to(out)): _hash(p) for p in sorted(rtl.iterdir()) if p.suffix == ".v"},
     }
     if chain_manifest is None:
-        manifest["templates"]["files"].remove("tile_chain.v")
+        for name in ("tile_chain.v", "tile_chip.v", "tile_embed.v"):
+            manifest["templates"]["files"].remove(name)
     (out / "design.json").write_text(json.dumps(manifest, indent=2))
     return manifest

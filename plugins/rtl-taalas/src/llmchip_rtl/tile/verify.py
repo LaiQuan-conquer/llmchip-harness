@@ -45,6 +45,7 @@ SLICE_FILES = ("test_tile_slice.py",)
 LAYER_FILES = ("test_tile_layer.py",)
 DIRECTED_FILES = ("test_tile_directed.py", "test_tile_host.py")
 CHAIN_FILES = ("test_tile_chain.py",)
+CHIP_FILES = ("test_tile_chip.py", "test_tile_embed.py")
 COVERAGE_FILES = ("test_tile_coverage.py",)
 FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)
@@ -63,6 +64,11 @@ PLAN_ITEMS = (
         "id": "ver.layer",
         "category": "layer",
         "description": "Q-full per-layer observation points against L2",
+    },
+    {
+        "id": "rtl.tile.chip",
+        "category": "chip",
+        "description": "The chip generates tokens by itself: embedding, chain, tail, argmax",
     },
     {
         "id": "ver.chain",
@@ -147,6 +153,7 @@ def report(
     run_layer: bool = True,
     run_directed: bool = True,
     run_chain: bool = True,
+    run_chip: bool = True,
     run_coverage: bool = True,
     run_formal: bool = True,
     run_mutation: bool = True,
@@ -209,6 +216,19 @@ def report(
         )
     else:
         items.append({"id": "ver.layer", "status": "not run", "reason": "disabled by the caller"})
+
+    if run_chip:
+        chip = _pytest(CHIP_FILES, timeout=3600)
+        items.append(
+            {
+                "id": "rtl.tile.chip",
+                "status": "passed" if chip["returncode"] == 0 else "failed",
+                "metrics": {"tests": chip["passed"] + chip["failed"], "cases": chip["passed"] + chip["failed"]},
+                "detail": chip["output"],
+            }
+        )
+    else:
+        items.append({"id": "rtl.tile.chip", "status": "not run", "reason": "disabled by the caller"})
 
     if run_chain:
         chain = _pytest(CHAIN_FILES, timeout=1800)

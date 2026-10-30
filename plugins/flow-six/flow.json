@@ -448,6 +448,7 @@
               "ver.cdc",
               "ver.layer",
               "ver.chain",
+              "rtl.tile.chip",
               "ver.directed",
               "ver.coverage",
               "ver.formal",
@@ -479,6 +480,12 @@
         },
         {
           "check": "ver.layer",
+          "inputs": {
+            "rtl": "slot:rtl-bundle"
+          }
+        },
+        {
+          "check": "rtl.tile.chip",
           "inputs": {
             "rtl": "slot:rtl-bundle"
           }
@@ -769,6 +776,27 @@
           "metric": "ver_layer_observations",
           "op": ">",
           "value": 0
+        }
+      ]
+    },
+    {
+      "id": "rtl.tile.chip",
+      "version": "1",
+      "title": "The chip generates tokens by itself and its token stream equals GraphL2's greedy sequence",
+      "plugin": "rtl-taalas",
+      "handler": "tile_verify",
+      "completeness": [
+        {
+          "metric": "ver_chip_cases",
+          "op": ">=",
+          "value": 2
+        }
+      ],
+      "criteria": [
+        {
+          "metric": "ver_chip",
+          "op": "==",
+          "value": 1
         }
       ]
     },

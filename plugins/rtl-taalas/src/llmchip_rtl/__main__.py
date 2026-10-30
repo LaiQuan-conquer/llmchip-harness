@@ -222,6 +222,7 @@ def verify_tile(ctx: InvokeContext) -> Result:
         run_layer=bool(ctx.params.get("layer", True)),
         run_directed=bool(ctx.params.get("directed", True)),
         run_chain=bool(ctx.params.get("chain", True)),
+        run_chip=bool(ctx.params.get("chip", True)),
     )
     Path(ctx.out_dir, "verification.json").write_text(json.dumps(report, indent=2))
     items = {item["id"]: item for item in report["items"]}
@@ -236,6 +237,8 @@ def verify_tile(ctx: InvokeContext) -> Result:
         "ver_layer": passed("ver.layer"),
         "ver_directed": passed("ver.directed"),
         "ver_chain": passed("ver.chain"),
+        "ver_chip": passed("rtl.tile.chip"),
+        "ver_chip_cases": int(items.get("rtl.tile.chip", {}).get("metrics", {}).get("cases", 0)),
         "ver_chain_cases": int(items.get("ver.chain", {}).get("metrics", {}).get("cases", 0)),
         "ver_directed_cases": int(items.get("ver.directed", {}).get("metrics", {}).get("cases", 0)),
         "ver_coverage": passed("ver.coverage"),
