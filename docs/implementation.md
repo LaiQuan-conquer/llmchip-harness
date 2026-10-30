@@ -4,9 +4,9 @@ English | [中文](implementation.zh.md)
 
 | Item | Content |
 |---|---|
-| Document version | v0.4 |
+| Document version | v0.5 |
 | Date | 2026-10-30 |
-| Describes | 2026-10-30, the flow-pack wiring fix (commit `7232a39`): `spec.design` is judged on its own `verify_spec` run (the tile design node carries no check), and the tile's equivalence check is `rtl.tile.equivalence`; the pack loader refuses a pack whose node judges another handler's check, and registers no check of a refused pack. Before it, R2b: the SPEC step of Qwen2.5-0.5B-Instruct: the fast L2 (GPU, bit-identical to the reference L2) and the KV cache, calibrated (GPTQ) quantization, the diagnosis of wrong answers, open benchmarks (quick set and full set) and the six-step flow pack `flow-six`; R1 (commit `11d0dcd`): stage pipelines (every step's "run development" and "run all tests"), CPU/memory/GPU scheduling, run checkpoints and resumption; R0 (commit `d771bb9`, owner decision 2026-10-24): approval gates, waivers, export and `packager` removed, the flow is S0–S7; before it, commit `9434f86`: M4's `9cc76a0`, plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, the exact speed and microarchitecture options of S3, the spatial engine `taalas-spatial/1` through S5, and the virtual-chip test harness `llmchip-vchip`, standalone and as the kernel plugin `vchip` with its Web UI page (design L4) |
+| Describes | 2026-10-30, the flow-pack wiring fix (commit `7232a39`), and the decision-record convention (`docs/adr/`, ADR-012, AGENTS.md "Decision records"): `spec.design` is judged on its own `verify_spec` run (the tile design node carries no check), and the tile's equivalence check is `rtl.tile.equivalence`; the pack loader refuses a pack whose node judges another handler's check, and registers no check of a refused pack. Before it, R2b: the SPEC step of Qwen2.5-0.5B-Instruct: the fast L2 (GPU, bit-identical to the reference L2) and the KV cache, calibrated (GPTQ) quantization, the diagnosis of wrong answers, open benchmarks (quick set and full set) and the six-step flow pack `flow-six`; R1 (commit `11d0dcd`): stage pipelines (every step's "run development" and "run all tests"), CPU/memory/GPU scheduling, run checkpoints and resumption; R0 (commit `d771bb9`, owner decision 2026-10-24): approval gates, waivers, export and `packager` removed, the flow is S0–S7; before it, commit `9434f86`: M4's `9cc76a0`, plus the flow page, `yarn demo`, model import and graph recovery, the numeric schemes of S2, the exact speed and microarchitecture options of S3, the spatial engine `taalas-spatial/1` through S5, and the virtual-chip test harness `llmchip-vchip`, standalone and as the kernel plugin `vchip` with its Web UI page (design L4) |
 | Upstream documents | [Requirement Analysis](<../Coding Harness MVP Requirement Analysis.md>) v0.7, [Microkernel Architecture](<../Microkernel Architecture.md>) v0.12 |
 
 This document says **what the code does today and how to extend it**. It is descriptive, not authoritative. What the product must do is set by the requirements, and how the system is meant to be organized is set by the architecture. If this guide and the code disagree, the code is the fact and this guide is out of date: fix the guide. Between the two language versions of this guide, the Chinese one is authoritative, as for every key document. If the code and an upstream document disagree, that is a conflict. Record it in §7.3 and report it (AGENTS.md, "Authoritative documents"). Do not resolve it by editing either side alone.
@@ -69,7 +69,7 @@ So M1 as a whole is **not** accepted: AC-M1-01 (installer) and the desktop shell
 
 ### 1.4 Not implemented
 
-The Tauri desktop shell, installer, dedicated WSL distro, first-launch onboarding and automatic image pulls. Also: CHARTER.md generation, the sample project, project export and import, the project git working directory (architecture §6.3), model training (FR-QNT-05, P2), graph recovery outside the Llama family and of GGUF, `images/` and `docs/adr/`. §7.1 lists them with requirement IDs.
+The Tauri desktop shell, installer, dedicated WSL distro, first-launch onboarding and automatic image pulls. Also: CHARTER.md generation, the sample project, project export and import, the project git working directory (architecture §6.3), model training (FR-QNT-05, P2), graph recovery outside the Llama family and of GGUF, and `images/`. §7.1 lists them with requirement IDs. Owner decisions are kept in `docs/adr/` (ADR-012 is the latest), which is local and not committed (AGENTS.md, "Decision records").
 
 ---
 
@@ -740,7 +740,7 @@ GSM8K, IFEval and HumanEval+ are within about one point of the published numbers
 | Project export and import, reproduce command, audit export | FR-PRJ-05, FR-TRC-07, FR-TRC-08 |
 | Artifact purge, GC and retention | architecture §4.2, FR-AGT-20 |
 | Externally launched coding agents managed by the kernel | FR-AGT-03 |
-| `docs/adr/` records, `images/` build definitions | architecture §14, §15 |
+| `images/` build definitions | architecture §14 |
 
 ### 7.2 Partial
 

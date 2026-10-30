@@ -6,6 +6,7 @@ lib/
 yarn-error.log
 coverage/
 drafts/
+docs/adr/
 .venv/
 __pycache__/
 .pytest_cache/

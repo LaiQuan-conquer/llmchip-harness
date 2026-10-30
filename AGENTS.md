@@ -9,6 +9,7 @@ This file is the **single entry point** for every agent working on this reposito
 - [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>) ([中文](<Coding Harness MVP Requirement Analysis.zh.md>)) — what the product must do: requirements, priorities, acceptance criteria.
 - [Microkernel Architecture](<Microkernel Architecture.md>) ([中文](<Microkernel Architecture.zh.md>)) — how the system is organized and extended: kernel components, plugins, protocols, ADRs.
 - [Current Implementation and Extension Guide](docs/implementation.md) ([中文](docs/implementation.zh.md)) — what the code does today: implementation scope, modules and dependencies, a traced run path, ownership of data and resources, extension recipes with real examples, verification, limitations and open conflicts. **Read it before changing anything under `packages/`, `plugins/` or `apps/`.**
+- [Decision records](docs/adr/): the owner's decisions (ADR-001…) with their reasons and the iteration plans they trigger. Local and not committed; architecture §15 is the index.
 
 ## Authoritative documents
 
@@ -23,13 +24,24 @@ Authority is divided by domain (see requirements §0.3):
 
 Rules:
 
-- Recorded owner decisions (ADRs) override all documents above; the affected documents must then be updated.
+- Recorded owner decisions (ADRs) override all documents above; the affected documents must then be updated. The records live in `docs/adr/` (see "Decision records").
 - Files under `drafts/` are local discussion material, are not committed, and carry no authority.
 - The implementation guide (`docs/implementation.md`) is descriptive and carries no authority. If it disagrees with the code, the guide is out of date: fix it. Known conflicts between the code and the requirements or architecture are listed in its §7.3 and stay open until the owner decides. Do not build on either side of them.
 - A lower-domain document must not redefine a higher-domain topic. For example, the architecture must not change acceptance criteria.
 - **If you find a conflict, do not pick a side.** Record it as an open issue, report it to the owner, and pause work within the scope of the conflict.
 
 Key documents exist in both English (`<name>.md`) and Chinese (`<name>.zh.md`). **The Chinese version is authoritative.** Every change must update both versions in the same commit, and both must carry the same version number. If you find a mismatch, follow the Chinese version and report the mismatch as a conflict.
+
+### Decision records (`docs/adr/`)
+
+The owner's decisions are kept as ADRs in `docs/adr/`, one file per record (`ADR-<nnn>-<short-name>.md`); architecture §15 is the index. A record states:
+
+- the **decision** and its status, with the date;
+- the **reason**: the background, the alternatives considered, and why they were rejected;
+- the **iteration plan** it triggers: the work it starts, its dependencies, the exit conditions (which checks must reach a verdict), and who decides when an exit condition cannot be met;
+- the **plan draft** it relies on (for example `drafts/Qwen05B_Taalas_Refactor_Plan_zh.md` §12.1) and the division of labour: the record fixes the decision, the draft holds the node-level detail, and a conflict is resolved in favour of the record while the draft is corrected.
+
+**Decision records are not committed to git**: `docs/adr/` is in `.gitignore`. A clone does not carry them, so any decision that changes what the product does, how the system is structured, or how it is accepted must also be written into the committed document it affects (requirements, architecture, this file). The record keeps the reasoning; the committed document is the rule that survives a clone.
 
 ## Iteration loop
 
@@ -80,7 +92,7 @@ Bundled plugins (what each produces: implementation guide §2.4): `estimator`, `
 
 Vendored packages: `cordis`, `cosmokit`, `schemastery`, and the Cordis plugins `@cordisjs/plugin-{loader,include,group,timer,hmr,logger-console}`.
 
-Planned directories still to be created: `apps/desktop/` and `images/` (architecture §14), and `docs/adr/` (architecture §15). Create them only when the corresponding work starts.
+Planned directories still to be created: `apps/desktop/` and `images/` (architecture §14). Create them only when the corresponding work starts. `docs/adr/` exists and holds the decision records (local, not committed; "Decision records").
 
 ### Implementation guide
 

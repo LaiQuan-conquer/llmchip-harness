@@ -4,12 +4,12 @@ English | [中文](<Microkernel Architecture.zh.md>)
 
 | Item | Content |
 |---|---|
-| Document version | v0.12 (draft) |
-| Date | 2026-10-24 |
+| Document version | v0.13 (draft) |
+| Date | 2026-10-30 |
 | Status | Under review, not yet baselined (v1.0 is the formal baseline) |
 | Sibling document | [Coding Harness MVP Requirement Analysis](<Coding Harness MVP Requirement Analysis.md>): describes "what to build" (corresponds to v0.7) |
 | Chinese version | [Microkernel Architecture.zh.md](<Microkernel Architecture.zh.md>) |
-| This revision | v0.12 (2026-10-24): R1 implements the pipelines (K3), resource-aware scheduling (K4) and run checkpoints (IF-2); the places that called them planned now state the implemented rules. v0.11 (2026-10-24): records the owner's decision (ADR-011): approval gates, design snapshots, approvals, conditional approval, the release check, export and waivers are removed, and K7 with them; flow packs no longer define gates, and stage entry has only checks; the tapeout package plugin is removed. Adds the planned (R1) pipelines (K3), resource-aware scheduling (K4) and run checkpoints (IF-2) |
+| This revision | v0.13 (2026-10-30): records the owner's decision (ADR-012) that the next iteration runs as three parallel workstreams, and that `docs/adr/` holds the decision records (local, not committed). v0.12 (2026-10-24): R1 implements the pipelines (K3), resource-aware scheduling (K4) and run checkpoints (IF-2); the places that called them planned now state the implemented rules. v0.11 (2026-10-24): records the owner's decision (ADR-011): approval gates, design snapshots, approvals, conditional approval, the release check, export and waivers are removed, and K7 with them; flow packs no longer define gates, and stage entry has only checks; the tapeout package plugin is removed. Adds the planned (R1) pipelines (K3), resource-aware scheduling (K4) and run checkpoints (IF-2) |
 
 This document answers **"how llmchip-harness is organized and extended"**. "What must be built, and to what extent" is answered by the requirements document. Per the rules of §0.3 of the requirements document: this document must not modify requirements or acceptance criteria; when the two conflict, agents must escalate and must not choose on their own.
 
@@ -625,8 +625,9 @@ llmchip-harness/
 | ADR-009 | Verdicts are made by the kernel's verdict engine; plugins only produce metrics | Accepted (M1b) |
 | ADR-010 | The virtual-chip test harness (`llmchip-vchip`, a standalone tool outside the kernel) may judge pass / fail / incomplete itself, by each chip's own policy. ADR-009 and AP-7 bind kernel plugins and gate evidence; the harness's verdicts are not gate evidence unless they are later brought in through the kernel's verdict engine | Accepted (owner decision, 2026-10-22) |
 | ADR-011 | Remove approval gates: there are no design snapshots, evidence manifests, approvals, conditional approvals, release check, package export or waivers, and K7 is removed with them. Stages have only entry checks; a failed check is recorded as it is and opens an incident, and once the cause is fixed the work and its tests run again. The tapeout package and post-silicon testing are out of scope; the `packager` plugin is removed. Approval, waiver and export events in older event logs are kept as history only. The text of ADR-010 stays as it was; its "gate evidence" now reads "kernel verdicts". The product side is specified in requirements v0.7 | Accepted (owner decision, 2026-10-24) |
+| ADR-012 | The next iteration runs as three parallel workstreams: A numeric format closure (SPEC quality), B on-chip scheduling and full-chip simulation (RTL/VER wrap-up), C physical-design groundwork (calibration, verification depth, PD skeleton). B1 (phase encoding and the residual handshake) is the only serial bottleneck; A decides only when the ROM word width and the area conclusions are frozen. The node-level plan is `drafts/Qwen05B_Taalas_Refactor_Plan_zh.md` §12.1; the full record is `docs/adr/ADR-012-parallel-iteration.md` (local, not committed) | Accepted (owner decision, 2026-10-30) |
 
-The full record of each ADR (context, alternatives, rationale, consequences) will be placed under `docs/adr/` after development starts.
+The full record of each ADR (context, alternatives, rationale, consequences) **and the iteration plan it triggers** is kept in `docs/adr/` as `ADR-<nnn>-<short-name>.md`. By AGENTS.md ("Decision records") these records are local and **not committed to git**, so a decision that changes product behaviour, system structure or acceptance must also be written into the committed document it affects.
 
 ---
 
