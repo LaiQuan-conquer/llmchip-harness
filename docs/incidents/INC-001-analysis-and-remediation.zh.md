@@ -444,4 +444,5 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 - TB 增加 `POS` 参数（`STEPS = POS + 1`），测试按 `LLMCHIP_QWEN_POS` 生成该位置的 `x.hex` 与 golden，并传 `-GPOS`；
 - 结果（第 0 层）：**POS 3 通过**；POS 0/1/2 失败（`obs_h` 为 0，期望小值），说明 TB 对前几个位置的 `x2`/位置语义与 golden 不一致，尚未定位；
 - 默认（不设 `LLMCHIP_QWEN_POS`）仍是 POS 3，24 层回归行为不变；
-- 结论：逐位置覆盖需要先解决 TB 的 `x2`（第二残差输入）与位置处理，再重跑 24×4；在此之前不能声称逐位置覆盖。
+- 根因：测试漏传 `-GPOS`，TB 始终按 4 个位置运行；POS<3 时 `x.hex` 只有 `pos+1` 行，剩余 token 的 `x=0`，最终 `h` 为 0。补上 `-GPOS={pos}` 后，第 0 层 **POS 0/1/2/3 全部通过**（各约 30 秒）。
+- 24×4 全量逐位置回归已启动（96 个用例）。

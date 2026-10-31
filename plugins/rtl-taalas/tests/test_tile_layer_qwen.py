@@ -119,7 +119,7 @@ def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
     command = [
         str(VERILATOR), "--binary", "--timing", "-Wno-fatal", "--top-module", "tile_layer_qwen_tb",
         f"-GHIDDEN={int(h['hidden'])}", f"-GINTER={int(h['intermediate'])}", f"-GHEADS={int(h['heads'])}",
-        f"-GKVHEADS={gk}", f"-GHD={mk}", f"-GLOG2CONTEXT=9", "-GMACS=128", f"-GRES={res}",
+        f"-GKVHEADS={gk}", f"-GHD={mk}", f"-GLOG2CONTEXT=9", "-GMACS=128", f"-GRES={res}", f"-GPOS={pos}",
         f"-GFRAC_H={int(frac['xn'])}", f"-GFRAC_QK={int(frac['q'])}", f"-GNORM_FN={int(spec['normWeights']['frac'])}",
         f"-GEPS_ATTN={round(1e-6 * 2.0 ** (2 * int(frac['x'])))}",
         f"-GEPS_MLP={round(1e-6 * 2.0 ** (2 * int(frac['x'])))}",
