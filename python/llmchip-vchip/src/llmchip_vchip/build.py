@@ -441,3 +441,125 @@ def chips_from_artifacts(
         "clock_mhz": clock if rtl is not None else None,
         "sources": sources,
     }
+
+
+GRAPH_SPEC = "llmchip-numeric-graph-spec/1"
+
+
+def graph_chips(
+    chip_id: str,
+    chips_dir: Path,
+    *,
+    graph: Path,
+    spec: Path,
+    weights: Path,
+    tokenizer: Path,
+    prompts: Path,
+    rtl: Path | None = None,
+    clock_mhz: float = 100.0,
+    image: str | None = None,
+    max_tokens: int = 64,
+) -> dict:
+    """The chips of a graph numeric spec (Qwen): `<id>-golden` (GraphL2) and, with `rtl`, `<id>`
+    (the `taalas-tile/1` full-model chip judged against the golden)."""
+    import shutil
+
+    data = json.loads(spec.read_text())
+    if data.get("format") != GRAPH_SPEC:
+        raise ValueError(f"the numeric spec is {data.get('format')!r}, not a graph spec ({GRAPH_SPEC})")
+    h = data["hyper"]
+    hidden, inter, vocab = int(h["hidden"]), int(h["intermediate"]), int(h["vocab"])
+    heads, kv_heads, layers = int(h["heads"]), int(h["kvHeads"]), int(h["layers"])
+    kv = kv_heads * int(h["headDim"])
+    params = (
+        vocab * hidden + layers * (hidden * hidden + 2 * kv * hidden + hidden * hidden + 3 * inter * hidden) + hidden
+    )
+    model = {
+        "family": data.get("model", {}).get("family", "graph"),
+        "params": params,
+        "dim": hidden,
+        "layers": layers,
+        "heads": heads,
+        "kv_heads": kv_heads,
+        "context": int(data["context"]["maxTokens"]),
+        "vocab": vocab,
+    }
+    chips_dir.mkdir(parents=True, exist_ok=True)
+    golden_dir = chips_dir / f"{chip_id}-golden"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    for name, source in (
+        ("graph.json", graph),
+        ("numeric-spec.json", spec),
+        ("l2-weights.npz", weights),
+        ("tokenizer.json", tokenizer),
+        ("prompts.jsonl", prompts),
+    ):
+        shutil.copy(source, golden_dir / name)
+    common = {
+        "format": "llmchip-vchip/1",
+        "model": model,
+        "tokenizer": {"kind": "hf", "path": "tokenizer.json"},
+        "prompts": "prompts.jsonl",
+        "capabilities": ["greedy"],
+        "host": {"kind": "direct"},
+    }
+    (golden_dir / "chip.json").write_text(
+        json.dumps(
+            {
+                **common,
+                "id": f"{chip_id}-golden",
+                "backend": "graph-numeric",
+                "description": "GraphL2 of the project's graph numeric spec",
+                "artifacts": {"graph": "graph.json", "spec": "numeric-spec.json", "weights": "l2-weights.npz"},
+                "measurement": {"cycles": "model", "host_cycles": "model", "trusted": False},
+                "policy": {},
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
+    built = {"golden": f"{chip_id}-golden"}
+    if rtl is not None:
+        dut_dir = chips_dir / chip_id
+        dut_dir.mkdir(parents=True, exist_ok=True)
+        for name, source in (
+            ("rtl.tar", rtl),
+            ("numeric-spec.json", spec),
+            ("tokenizer.json", tokenizer),
+            ("prompts.jsonl", prompts),
+        ):
+            shutil.copy(source, dut_dir / name)
+        (dut_dir / "chip.json").write_text(
+            json.dumps(
+                {
+                    **common,
+                    "id": chip_id,
+                    "backend": "rtl",
+                    "description": "taalas-tile/1 full-model chip under the pin-level testbench",
+                    "model": {**model, "architecture": "taalas-tile/1"},
+                    "artifacts": {"rtl": "rtl.tar", "spec": "numeric-spec.json"},
+                    "clock_mhz": clock_mhz,
+                    "capabilities": ["greedy", "cycles"],
+                    "simulator": {"image": image or _sim_image(), "tool": "verilator"},
+                    "measurement": {
+                        "cycles": "testbench",
+                        "host_cycles": "testbench",
+                        "trusted": True,
+                        "testbench": "tile pin-level testbench",
+                    },
+                    "timeout_s": 3600,
+                    "policy": {
+                        "max_tokens": max_tokens,
+                        "golden": f"{chip_id}-golden",
+                        "quality": {"bit_exact": True},
+                        "speed": {"measurement_trusted": True},
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        built["dut"] = chip_id
+    return {"chips": built}

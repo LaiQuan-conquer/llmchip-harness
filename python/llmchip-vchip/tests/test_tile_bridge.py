@@ -286,3 +286,53 @@ def test_the_graph_golden_answers_greedy_tokens(tmp_path):
     for pos in range(8):
         got.append(golden.step(got[-1] if got else PROMPT, pos).token)
     assert got == _greedy(l2, PROMPT, 8), got
+
+
+def test_graph_chips_build_a_dut_and_its_golden(tmp_path):
+
+    from llmchip_vchip.adapters.graph import GraphChip
+    from llmchip_vchip.adapters.rtl import RtlChip
+    from llmchip_vchip.bridges import verilator
+    from llmchip_vchip.build import graph_chips
+    from llmchip_vchip.manifest import load
+
+    if not verilator.image_present(_image()):
+        pytest.skip("the simulator image is not present")
+    l2 = _l2()
+    graph = tmp_path / "graph.json"
+    graph.write_text(json.dumps(l2.graph))
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(l2.spec))
+    weights = tmp_path / "weights.npz"
+    np.savez(weights, meta=np.array(json.dumps({"format": "llmchip-graph-weights/1"})), **l2.a)
+    prompts = tmp_path / "prompts.jsonl"
+    prompts.write_text(json.dumps({"id": "p0", "prompt": "hello"}) + "\n")
+    tar = _bundle_tar(tmp_path)
+    built = graph_chips(
+        "tiny",
+        tmp_path / "chips",
+        graph=graph,
+        spec=spec,
+        weights=weights,
+        tokenizer=TINY_QWEN3 / "tokenizer.json",
+        prompts=prompts,
+        rtl=tar,
+        clock_mhz=100.0,
+        image=_image(),
+    )
+    assert built["chips"] == {"golden": "tiny-golden", "dut": "tiny"}
+    for name in ("tiny-golden", "tiny"):
+        assert not load(tmp_path / "chips" / name).problems, load(tmp_path / "chips" / name).problems
+    golden = GraphChip(load(tmp_path / "chips" / "tiny-golden"))
+    dut = RtlChip(load(tmp_path / "chips" / "tiny"))
+    try:
+        golden.reset()
+        dut.reset()
+        got_golden, got_dut = [], []
+        for pos in range(4):
+            t = got_golden[-1] if got_golden else PROMPT
+            got_golden.append(golden.step(t, pos).token)
+            got_dut.append(dut.step(t, pos).token)
+    finally:
+        dut.close()
+    assert got_dut == got_golden, (got_dut, got_golden)
