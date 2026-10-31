@@ -33,6 +33,8 @@ class TileSim(BaseChip):
         m = load(chip_dir)
         super().__init__(m.meta())
         self.design = json.loads((build_dir / "bundle" / "design.json").read_text())
+        identity = build_dir / "build.json"
+        self.identity = json.loads(identity.read_text()) if identity.is_file() else {}
         if self.design.get("architecture") != "taalas-tile/1":
             raise ChipError("unsupported", f"not a tile bundle: {self.design.get('architecture')!r}")
         image = m.data["simulator"]["image"]
@@ -67,7 +69,7 @@ class TileSim(BaseChip):
         return answer
 
     def hello_info(self) -> dict:
-        return {"measurement": "testbench", "testbench": TESTBENCH}
+        return {"measurement": "testbench", "testbench": TESTBENCH, "build": self.identity}
 
     def reset(self) -> None:
         self._cmd("RESET", "OK")

@@ -173,6 +173,7 @@ def test_tilesim_steps_the_tiny_chip(tmp_path):
     assert not manifest.problems, manifest.problems
     sim = TileSim(chip, build)
     try:
+        assert sim.hello_info()["build"]["architecture"] == "taalas-tile/1"
         sim.reset()
         got = []
         for pos in range(8):
