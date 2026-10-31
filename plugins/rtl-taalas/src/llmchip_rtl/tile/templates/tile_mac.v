@@ -26,17 +26,6 @@ module tile_mac #(
   genvar k;
   genvar g;
 
-  wire signed [ACC-1:0] prod [0:MACS-1];
-
-  generate
-    for (k = 0; k < MACS; k = k + 1) begin : lane
-      wire signed [BITS-1:0] level = w[k*BITS +: BITS];
-      wire signed [ACC-1:0]  xa    = {{(ACC-16){x[k*16+15]}}, x[k*16 +: 16]};
-      wire signed [ACC-1:0]  wa    = {{(ACC-BITS){level[BITS-1]}}, level};
-      assign prod[k] = xa * wa;
-    end
-  endgenerate
-
   reg [MACS*ACC-1:0]   prod_d;
   reg signed [ACC-1:0] gsum [0:GROUPS-1];
   reg signed [ACC-1:0] gsum_d [0:GROUPS-1];
@@ -78,7 +67,7 @@ module tile_mac #(
         if (!rst_n) begin
           prod_d[k*ACC +: ACC] <= {ACC{1'b0}};
         end else if (en) begin
-          prod_d[k*ACC +: ACC] <= prod[k];
+          prod_d[k*ACC +: ACC] <= $signed(x[k*16 +: 16]) * $signed(w[k*BITS +: BITS]);
         end
       end
     end

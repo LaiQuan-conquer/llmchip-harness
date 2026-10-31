@@ -111,7 +111,7 @@ module tile_engine #(
   tile_mac #(.MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS)) mac (
     .clk(clk),
     .rst_n(rst_n),
-    .en(1'b1),
+    .en((state == RUN) || (state == DRAIN)),
     .first(first_d),
     .x(valid_d ? x_d : {MACS*16{1'b0}}),
     .w(word_d),
