@@ -267,3 +267,13 @@ SiLU 实验有效后，再逐项处理新采样中占比最高的部分：
 这有两种可能：该测试实际使用的 `tile_layer_attn_tb.v` 没有走到 `S_GUWT/S_SILU`（或没有实例化到我们修改的路径），或者 `$display` 未被捕获。已确认 `tile_layer_attn_tb.v` 是该测试的 TB（`test_tile_layer.py` 的 `TB` 常量），需要单独核对该 TB 是否覆盖 MLP 路径。
 
 RTL 已回退，工作树干净；下一步是先核对 `tile_layer_attn_tb.v` 的实例化与激励范围，而不是继续在整层上猜。
+
+### 11.3 突破与剩余测试问题（2026-10-31 追加）
+
+用**验证过的**钟控 `tile_silu`（`$signed(a)` 夹取、64 位乘积、`if (en)` 内计算）接回层后：
+
+- **`test_the_layer_schedule_matches_every_observation`（完整层，检查 h/q/…/g/u/m/f/x2）2 passed** —— 条件 SiLU 在完整层里功能正确，`m_buf` 时序成立；
+- 仅 `test_the_layer_matches_every_observation`（attn TB）失败：该 TB 自己实例化 `tile_silu` 并在**同一拍**组合地比较 `m`，而新模块是寄存器输出，因此读到 0（−147…）。这是**参考 TB 的接口假设**问题，不是 RTL 缺陷；
+- 为该实例补 `.clk(clk)`、`.en(1'b1)` 与一个时钟沿后仍失败，需按寄存器语义改造该 TB 的 `m` 参考路径（或让它复用 `tile_layer` 而非自建数据通路）。
+
+结论：条件 SiLU 的 RTL 已可用（完整层测试通过），剩余是 attn TB 的更新；本轮改动已回退，工作树干净。
