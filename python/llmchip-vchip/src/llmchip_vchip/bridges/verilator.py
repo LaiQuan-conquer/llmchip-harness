@@ -249,6 +249,21 @@ def build_tile(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> 
                 _BUILDS.discard(name)
             if proc.returncode != 0 or not (tmp / "bundle/rtl/obj_tile/Vtile").is_file():
                 raise ChipError("crash", f"Verilator failed ({proc.returncode}): {(proc.stdout + proc.stderr)[-2000:]}")
+            import hashlib as _hashlib
+
+            binary = tmp / "bundle/rtl/obj_tile/Vtile"
+            identity = {
+                "format": "llmchip-tile-build/1",
+                "architecture": "taalas-tile/1",
+                "bundle": file_hash(bundle),
+                "testbench": _hashlib.sha256(tb).hexdigest(),
+                "image": image,
+                "sources": {p.name: _hashlib.sha256(p.read_bytes()).hexdigest()
+                            for p in sorted((root / "rtl").glob("*.v"))},
+                "binary": _hashlib.sha256(binary.read_bytes()).hexdigest(),
+                "verilator": FLAGS,
+            }
+            (tmp / "build.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
             tmp.rename(out)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

@@ -115,6 +115,9 @@ def test_the_tile_bundle_builds_in_the_simulator_image(tmp_path):
         pytest.skip("the simulator image is not present")
     out = verilator.build_tile(_bundle_tar(tmp_path), _image(), tmp_path / "cache")
     assert (out / "bundle/rtl/obj_tile/Vtile").is_file()
+    identity = json.loads((out / "build.json").read_text())
+    assert identity["architecture"] == "taalas-tile/1"
+    assert identity["bundle"] and identity["binary"] and identity["sources"]
 
 
 def test_tilesim_steps_the_tiny_chip(tmp_path):
