@@ -228,9 +228,11 @@ def _run(s: Session, prompts: PromptSet, max_tokens: int, checks: list[dict], re
 def _hardware(
     s: Session, gens: list, errors: list, checks: list[dict], registry: Registry, prompts, quick: bool
 ) -> None:
-    from .bridges.rtl_bridge import HOST_CHECKS
+    from .bridges.rtl_bridge import HOST_CHECKS as SPI_HOST_CHECKS
 
     meta, chip = s.meta, s.chip
+    # A bridge declares the checks its host interface has; the spatial SPI bridge is the default.
+    host_checks = tuple(getattr(chip, "HOST_CHECKS", SPI_HOST_CHECKS))
     by_id = {c["id"]: c["verdict"] for c in checks}
     bridged = meta.backend in metrics.TESTBENCH_BACKENDS
     if bridged:
@@ -261,13 +263,13 @@ def _hardware(
         try:
             result = chip.op("host_check")
             got = result.get("checks", {})
-            failed = [k for k in HOST_CHECKS if got.get(k) is not True]
-            if set(got) != set(HOST_CHECKS):
-                failed.append(f"check set {sorted(got)} is not {list(HOST_CHECKS)}")
+            failed = [k for k in host_checks if got.get(k) is not True]
+            if set(got) != set(host_checks):
+                failed.append(f"check set {sorted(got)} is not {list(host_checks)}")
         except ChipError as e:
             failed = [f"host_check: {e}"]
         failed += _read_against_golden(s, registry)
-        detail = f"failed: {', '.join(failed)}" if failed else f"{', '.join(HOST_CHECKS)}; READ equals the golden"
+        detail = f"failed: {', '.join(failed)}" if failed else f"{', '.join(host_checks)}; READ equals the golden"
         checks.append(_check("T-17", "host interface on the pins", "fail" if failed else "pass", detail))
     # T-18 / T-19: the acceptance run of the chip's policy (golden, all prompts, policy length).
     policy = s.manifest.policy()
