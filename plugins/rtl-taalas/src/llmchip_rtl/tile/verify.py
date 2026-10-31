@@ -147,7 +147,10 @@ def _qwen_layer_sweep(model: Path, layers: int) -> dict:
     passed = int(match.group(1)) if match else 0
     failed_match = re.search(r"(\d+) failed", text)
     failed = int(failed_match.group(1)) if failed_match else (0 if result.returncode == 0 else 1)
-    return {"returncode": result.returncode, "passed": passed, "failed": failed, "output": text[-4000:]}
+    checks_match = re.search(r"LAYER_CHECKS (\d+)", text)
+    checks = int(checks_match.group(1)) if checks_match else 0
+    return {"returncode": result.returncode, "passed": passed, "failed": failed,
+            "checks": checks, "output": text[-4000:]}
 
 
 def _pytest(files: tuple[str, ...], timeout: int = 1800) -> dict:
@@ -232,7 +235,7 @@ def report(
                         "passed": layer["passed"],
                         "failed": layer["failed"],
                         "layers": layer["passed"],
-                        "observations": OBSERVATIONS_PER_LAYER * layer["passed"],
+                        "observations": layer["checks"] * layer["passed"] if layer.get("checks") else OBSERVATIONS_PER_LAYER * layer["passed"],
                         "required": qwen_layers,
                     },
                     "detail": layer["output"],

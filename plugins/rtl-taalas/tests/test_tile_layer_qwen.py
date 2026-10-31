@@ -9,6 +9,7 @@ layer runs four positions supplied by L2.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -140,3 +141,6 @@ def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
     assert build.returncode == 0, (build.stdout + build.stderr)[-4000:]
     run = subprocess.run([str(tmp_path / "obj_dir" / "Vtile_layer_qwen_tb")], cwd=tmp_path, capture_output=True, text=True)
     assert "PASS" in run.stdout, run.stdout + run.stderr
+    match = re.search(r"CHECKS (\d+)", run.stdout)
+    assert match, run.stdout[-2000:]
+    print(f"LAYER_CHECKS {int(match.group(1))}")
