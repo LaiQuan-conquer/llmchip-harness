@@ -59,17 +59,15 @@ module tile_silu #(
   endfunction
 
   reg signed [DIM*16-1:0] g_r;
-  genvar lane;
-  generate
-    for (lane = 0; lane < DIM; lane = lane + 1) begin : g_lane
-      always @(posedge clk) begin
-        if (en) begin
-          g_r[lane*16 +: 16] <= silu_lane(h1[lane*16 +: 16], h3[lane*16 +: 16],
-                                          sigmoid[silu_index(h1[lane*16 +: 16])]);
-        end
+  integer lane;
+  always @(posedge clk) begin
+    if (en) begin
+      for (lane = 0; lane < DIM; lane = lane + 1) begin
+        g_r[lane*16 +: 16] <= silu_lane(h1[lane*16 +: 16], h3[lane*16 +: 16],
+                                        sigmoid[silu_index(h1[lane*16 +: 16])]);
       end
     end
-  endgenerate
+  end
 
   assign g = g_r;
 
