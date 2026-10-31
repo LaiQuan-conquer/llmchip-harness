@@ -8,6 +8,7 @@ module tb_top (
   input  wire        rst_n,
   input  wire        start,
   input  wire [23:0] token,
+  input  wire [15:0] position,
   input  wire [15:0] length,
   output wire        busy,
   output wire        done,
@@ -15,7 +16,7 @@ module tb_top (
 );
 
   tile_chip dut (
-    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .length(length),
+    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .position(position), .length(length),
     .busy(busy), .done(done), .next_token(next_token),
     .obs_addr(16'd0), .obs_word(), .dbg_sig(), .dbg_sum(), .dbg_valid()
   );

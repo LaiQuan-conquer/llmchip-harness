@@ -71,6 +71,7 @@ module tile_chip #(
   input  wire                         rst_n,
   input  wire                         start,
   input  wire [23:0]                  token,
+  input  wire [15:0]                  position,
   input  wire [15:0]                  length,
   output wire                         busy,
   output reg                          done,
@@ -198,7 +199,7 @@ module tile_chip #(
         S_IDLE: begin
           if (start) begin
             tok <= token;
-            pos <= 16'd0;
+            pos <= position;
             left <= length;
             best <= 32'sh80000000;
             state <= S_EMB0;

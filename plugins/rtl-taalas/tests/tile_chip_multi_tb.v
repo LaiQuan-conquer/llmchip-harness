@@ -23,7 +23,7 @@ module tile_chip_multi_tb ();
   wire [23:0] next_token;
 
   tile_chip dut (
-    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .length(length),
+    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .position(16'd0), .length(length),
     .busy(busy), .done(done), .next_token(next_token), .obs_addr(16'd0), .obs_word(),
     .dbg_sig(), .dbg_sum(), .dbg_valid()
   );

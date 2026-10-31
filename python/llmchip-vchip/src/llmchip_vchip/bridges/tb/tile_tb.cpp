@@ -1,7 +1,7 @@
 // Pin-level host testbench for a generated taalas-tile/1 chip (llmchip-vchip, B6). The chip's
 // host side is parallel, so each STEP drives start/token/length and counts the busy pin.
 //   RESET      -> OK
-//   STEP <tok> -> STEP <next_token> <busy_cycles>
+//   STEP <tok> <pos> -> STEP <next_token> <busy_cycles>
 //   QUIT
 #include <cstdint>
 #include <cstdio>
@@ -41,9 +41,10 @@ int main(int argc, char** argv) {
       for (int i = 0; i < 4; i++) tick();
       std::cout << "OK" << std::endl;
     } else if (cmd == "STEP") {
-      uint32_t token = 0;
-      std::cin >> token;
+      uint32_t token = 0, pos = 0;
+      std::cin >> token >> pos;
       top->token = token & 0xffffffu;
+      top->position = pos & 0xffffu;
       top->length = 1;
       top->start = 1;
       tick();

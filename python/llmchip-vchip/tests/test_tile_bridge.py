@@ -78,7 +78,7 @@ def test_the_tile_pin_bridge_generates_tokens(tmp_path):
     assert proc.stdout.readline().strip() == "OK"
     got = []
     for _ in range(STEPS):
-        proc.stdin.write(f"STEP {got[-1] if got else PROMPT}\n")
+        proc.stdin.write(f"STEP {got[-1] if got else PROMPT} {len(got)}\n")
         proc.stdin.flush()
         line = proc.stdout.readline().split()
         assert line[0] == "STEP" and "TIMEOUT" not in line, line

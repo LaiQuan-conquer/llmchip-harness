@@ -23,7 +23,7 @@ module tile_chip_tb ();
   reg [15:0] obs_addr = 16'd0;
 
   tile_chip dut (
-    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .length(length),
+    .clk(clk), .rst_n(rst_n), .start(start), .token(token), .position(16'd0), .length(length),
     .busy(busy), .done(done), .next_token(next_token), .obs_addr(obs_addr), .obs_word(obs_word)
   );
 
