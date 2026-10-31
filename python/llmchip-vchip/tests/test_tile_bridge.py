@@ -238,3 +238,51 @@ def test_the_rtl_adapter_dispatches_a_tile_bundle(tmp_path):
     finally:
         sim.close()
     assert got == _greedy(l2, PROMPT, 4), got
+
+
+def test_the_graph_golden_answers_greedy_tokens(tmp_path):
+    from llmchip_vchip.adapters.graph import GraphChip
+    from llmchip_vchip.manifest import load
+
+    l2 = _l2()
+    (tmp_path / "graph.json").write_text(json.dumps(l2.graph))
+    (tmp_path / "spec.json").write_text(json.dumps(l2.spec))
+    np.savez(tmp_path / "weights.npz", meta=np.array(json.dumps({"format": "llmchip-graph-weights/1"})), **l2.a)
+    chip = tmp_path / "chip"
+    chip.mkdir()
+    shutil = __import__("shutil")
+    for name in ("graph.json", "spec.json", "weights.npz"):
+        shutil.copy(tmp_path / name, chip / name)
+    shutil.copy(TINY_QWEN3 / "tokenizer.json", chip / "tokenizer.json")
+    (chip / "chip.json").write_text(
+        json.dumps(
+            {
+                "format": "llmchip-vchip/1",
+                "id": "graph-tiny",
+                "backend": "graph-numeric",
+                "model": {
+                    "family": "qwen3",
+                    "params": 1000,
+                    "dim": 32,
+                    "layers": 2,
+                    "heads": 4,
+                    "kv_heads": 2,
+                    "context": 16,
+                    "vocab": 128,
+                },
+                "tokenizer": {"kind": "hf", "path": "tokenizer.json"},
+                "artifacts": {"graph": "graph.json", "spec": "spec.json", "weights": "weights.npz"},
+                "capabilities": ["greedy"],
+                "host": {"kind": "direct"},
+                "measurement": {"cycles": "model", "host_cycles": "model"},
+                "policy": {},
+            }
+        )
+    )
+    manifest = load(chip)
+    assert not manifest.problems, manifest.problems
+    golden = GraphChip(manifest)
+    got = []
+    for pos in range(8):
+        got.append(golden.step(got[-1] if got else PROMPT, pos).token)
+    assert got == _greedy(l2, PROMPT, 8), got
