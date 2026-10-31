@@ -446,3 +446,9 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 - 默认（不设 `LLMCHIP_QWEN_POS`）仍是 POS 3，24 层回归行为不变；
 - 根因：测试漏传 `-GPOS`，TB 始终按 4 个位置运行；POS<3 时 `x.hex` 只有 `pos+1` 行，剩余 token 的 `x=0`，最终 `h` 为 0。补上 `-GPOS={pos}` 后，第 0 层 **POS 0/1/2/3 全部通过**（各约 30 秒）。
 - **24×4 全量逐位置回归完成：96 passed in 2064.44s (0:34:24)**，即 24 层 × 4 个位置 × 每位置 17 项 = **1632 项实际比较**，全部通过；`LLMCHIP_QWEN_POSES=0,1,2,3` 与 `LLMCHIP_QWEN_LAYERS=0..23` 一次进程内跑完（规格只构建一次）。
+
+### 13.3 问题四进展（2026-10-31）
+
+- `build_tile` 写入 `build.json`（bundle、testbench、镜像、每个 RTL 源、二进制 sha256、Verilator 参数）；
+- `TileSim` 读取该文件并在 `hello_info()["build"]` 上报，测试断言 `architecture == taalas-tile/1`（1 passed）；
+- 仍未完成：B5/B6 由正式流程选择该产物、记录 spec/weights/golden 身份、运行期校验实际加载的二进制。
