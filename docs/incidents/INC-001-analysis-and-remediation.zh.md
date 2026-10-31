@@ -438,3 +438,10 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 - 1 层验证：`1 passed`，`CHECKS 17`（原 15）；
 - 24 层重跑：**24 passed in 528.87s (0:08:48)**，每层 17 项检查（含 qn/kn），共 408 项实际比较（仍为最后位置）；
 - 尚未完成：逐位置的 golden 与比较、`verify.py` 的 observations 指标改为据实汇总。
+
+### 13.2 逐位置覆盖尝试（2026-10-31）
+
+- TB 增加 `POS` 参数（`STEPS = POS + 1`），测试按 `LLMCHIP_QWEN_POS` 生成该位置的 `x.hex` 与 golden，并传 `-GPOS`；
+- 结果（第 0 层）：**POS 3 通过**；POS 0/1/2 失败（`obs_h` 为 0，期望小值），说明 TB 对前几个位置的 `x2`/位置语义与 golden 不一致，尚未定位；
+- 默认（不设 `LLMCHIP_QWEN_POS`）仍是 POS 3，24 层回归行为不变；
+- 结论：逐位置覆盖需要先解决 TB 的 `x2`（第二残差输入）与位置处理，再重跑 24×4；在此之前不能声称逐位置覆盖。

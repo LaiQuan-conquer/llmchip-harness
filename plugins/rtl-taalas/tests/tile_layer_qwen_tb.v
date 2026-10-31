@@ -88,7 +88,8 @@ module tile_layer_qwen_tb ();
     .obs_raw_sum(), .obs_raw_valid()
   );
 
-  localparam integer STEPS = 4;
+  parameter integer POS = 3;
+  localparam integer STEPS = POS + 1;
   reg [HIDDEN*RES-1:0] xmem [0:STEPS-1];
   reg [131071:0] big [0:0];
   reg [HIDDEN*RES-1:0] eh1, ex2;

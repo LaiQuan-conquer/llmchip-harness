@@ -84,9 +84,9 @@ def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
             hold["obs"]["qr"] = env["q"][-1].astype(np.int64).copy()
             hold["obs"]["kr"] = env["k"][-1].astype(np.int64).copy()
 
-    l2.forward(TOKENS[:4], observe=observe)
+    pos = int(os.environ.get("LLMCHIP_QWEN_POS", "3"))
+    l2.forward(TOKENS[: pos + 1], observe=observe)
     res = int(spec["activations"]["bits"]["x"])
-    pos = 3
     x = hold["x"][pos]
     (tmp_path / "x.hex").write_text("\n".join(_pack(row, res) for row in hold["x"][: pos + 1]) + "\n")
     obs = hold["obs"]
