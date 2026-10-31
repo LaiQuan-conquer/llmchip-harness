@@ -173,3 +173,77 @@ def build(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> Path:
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     return out
+
+
+def build_tile(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> Path:
+    """The build directory of a `taalas-tile/1` bundle with the tile pin testbench binary.
+
+    The tile chip has its own host pins, so its testbench (`tb/tile_tb.cpp` + `tb/tile_top.v`)
+    wraps `tile_chip` and every `rtl/*.v` of the bundle is compiled with it."""
+    import fcntl
+    import json
+
+    tb = (resources.files("llmchip_vchip.bridges") / "tb" / "tile_tb.cpp").read_bytes()
+    top_v = (resources.files("llmchip_vchip.bridges") / "tb" / "tile_top.v").read_bytes()
+    digest = hashlib.sha256(tb + b"\0" + top_v).hexdigest()
+    key = hashlib.sha256(f"{file_hash(bundle)}\0{digest}\0{image}".encode()).hexdigest()[:16]
+    out = cache / key
+    cache.mkdir(parents=True, exist_ok=True)
+    with (cache / f"{key}.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if (out / "bundle/rtl/obj_tile/Vtile").is_file():
+            return out
+        if not image_present(image):
+            raise ChipError("unsupported", f"the simulator image {image} is not present (podman pull it)")
+        tmp = cache / f"{key}.{os.getpid()}.{secrets.token_hex(3)}.tmp"
+        try:
+            tmp.mkdir()
+            with tarfile.open(bundle) as tar:
+                tar.extractall(tmp, filter="data")
+            root = tmp / "bundle"
+            design = json.loads((root / "design.json").read_text())
+            if design.get("architecture") != "taalas-tile/1":
+                raise ChipError("crash", f"not a tile bundle: {design.get('architecture')!r}")
+            (root / "tile_tb.cpp").write_bytes(tb)
+            (root / "tile_top.v").write_bytes(top_v)
+            sources = sorted(_safe(p.relative_to(root).as_posix()) for p in (root / "rtl").glob("*.v"))
+            name = f"llmchip-vchip-tile-build-{key}-{secrets.token_hex(3)}"
+            cmd = container(
+                image,
+                [f"{tmp}:/work"],
+                f"{TOOLS}/verilator",
+                "--cc",
+                "--exe",
+                "--build",
+                "-O3",
+                "-Wno-fatal",
+                "--x-assign",
+                "fast",
+                "--x-initial",
+                "fast",
+                "--Mdir",
+                "rtl/obj_tile",
+                "-o",
+                "Vtile",
+                "--top-module",
+                "tb_top",
+                "tile_top.v",
+                *sources,
+                "tile_tb.cpp",
+                "-CFLAGS",
+                "-O2",
+                name=name,
+            )
+            cmd.insert(cmd.index(f"--entrypoint={TOOLS}/verilator"), "--workdir=/work/bundle")
+            _BUILDS.add(name)
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            finally:
+                remove_container(name)
+                _BUILDS.discard(name)
+            if proc.returncode != 0 or not (tmp / "bundle/rtl/obj_tile/Vtile").is_file():
+                raise ChipError("crash", f"Verilator failed ({proc.returncode}): {(proc.stdout + proc.stderr)[-2000:]}")
+            tmp.rename(out)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return out

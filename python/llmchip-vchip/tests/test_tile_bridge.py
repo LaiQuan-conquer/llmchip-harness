@@ -87,3 +87,31 @@ def test_the_tile_pin_bridge_generates_tokens(tmp_path):
     proc.stdin.flush()
     proc.wait(timeout=30)
     assert got == _greedy(l2, PROMPT, STEPS), got
+
+
+def _image() -> str:
+    import json
+
+    manifest = json.loads((Path(__file__).parents[3] / "plugins/sim-verilator/llmchip-plugin.json").read_text())
+    return manifest["entry"]["image"]
+
+
+def _bundle_tar(tmp_path):
+    import tarfile
+
+    l2 = _l2()
+    root = tmp_path / "bundle-root"
+    generator.generate(l2.spec, l2.a, macs=8, out=root)
+    tar = tmp_path / "tile.tar"
+    with tarfile.open(tar, "w") as archive:
+        archive.add(root, arcname="bundle")
+    return tar
+
+
+def test_the_tile_bundle_builds_in_the_simulator_image(tmp_path):
+    from llmchip_vchip.bridges import verilator
+
+    if not verilator.image_present(_image()):
+        pytest.skip("the simulator image is not present")
+    out = verilator.build_tile(_bundle_tar(tmp_path), _image(), tmp_path / "cache")
+    assert (out / "bundle/rtl/obj_tile/Vtile").is_file()
