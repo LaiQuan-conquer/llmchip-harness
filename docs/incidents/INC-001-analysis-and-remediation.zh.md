@@ -436,4 +436,5 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 
 - `tile_layer_qwen_tb.v` 补齐 `qn/kn` 的期望文件读取与比较（Qwen 无 q/k norm 时观测值等于 q/k，沿用 `obs["qn"]=obs["q"]` 的旁路语义），并打印实际执行的检查数（`CHECKS <n>`）；
 - 1 层验证：`1 passed`，`CHECKS 17`（原 15）；
-- 尚未完成：逐位置的 golden 与比较、`verify.py` 的 observations 指标改为据实汇总；24 层重跑进行中。
+- 24 层重跑：**24 passed in 528.87s (0:08:48)**，每层 17 项检查（含 qn/kn），共 408 项实际比较（仍为最后位置）；
+- 尚未完成：逐位置的 golden 与比较、`verify.py` 的 observations 指标改为据实汇总。
