@@ -115,3 +115,65 @@ def test_the_tile_bundle_builds_in_the_simulator_image(tmp_path):
         pytest.skip("the simulator image is not present")
     out = verilator.build_tile(_bundle_tar(tmp_path), _image(), tmp_path / "cache")
     assert (out / "bundle/rtl/obj_tile/Vtile").is_file()
+
+
+def test_tilesim_steps_the_tiny_chip(tmp_path):
+    import shutil
+
+    from llmchip_vchip.bridges import verilator
+    from llmchip_vchip.bridges.tile_bridge import TileSim
+    from llmchip_vchip.manifest import load
+
+    if not verilator.image_present(_image()):
+        pytest.skip("the simulator image is not present")
+    l2 = _l2()
+    tar = _bundle_tar(tmp_path)
+    build = verilator.build_tile(tar, _image(), tmp_path / "cache")
+    chip = tmp_path / "chip"
+    chip.mkdir()
+    shutil.copy(tar, chip / "tile.tar")
+    (chip / "numeric-spec.json").write_text(json.dumps(l2.spec))
+    shutil.copy(TINY_QWEN3 / "tokenizer.json", chip / "tokenizer.json")
+    (chip / "chip.json").write_text(
+        json.dumps(
+            {
+                "format": "llmchip-vchip/1",
+                "id": "tile-tiny",
+                "backend": "rtl",
+                "model": {
+                    "family": "qwen3",
+                    "params": 1000,
+                    "dim": 32,
+                    "layers": 2,
+                    "heads": 4,
+                    "kv_heads": 2,
+                    "context": 16,
+                    "vocab": 128,
+                },
+                "tokenizer": {"kind": "hf", "path": "tokenizer.json"},
+                "artifacts": {"rtl": "tile.tar", "spec": "numeric-spec.json"},
+                "clock_mhz": 100,
+                "capabilities": ["greedy", "cycles"],
+                "host": {"kind": "direct"},
+                "measurement": {
+                    "cycles": "testbench",
+                    "host_cycles": "testbench",
+                    "trusted": True,
+                    "testbench": "tile pin-level testbench",
+                },
+                "simulator": {"image": _image(), "tool": "verilator"},
+                "policy": {},
+            }
+        )
+    )
+    manifest = load(chip)
+    assert not manifest.problems, manifest.problems
+    sim = TileSim(chip, build)
+    try:
+        sim.reset()
+        got = []
+        for pos in range(8):
+            got.append(sim.step(got[-1] if got else PROMPT, pos).token)
+    finally:
+        sim.close()
+    assert got == _greedy(l2, PROMPT, 8), got
