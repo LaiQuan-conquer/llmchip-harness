@@ -20,6 +20,7 @@ pass (DP-10).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -51,6 +52,9 @@ FORMAL_FILES = ("test_formal.py",)
 MUTATION_FILES = ("test_mutation.py",)
 DFT_FILES = ("test_dft.py",)
 EQUIV_FILES = ("test_full_model.py",)
+QWEN_FILES = ("test_tile_layer_qwen.py",)
+QWEN_LAYERS = 24
+OBSERVATIONS_PER_LAYER = 17
 
 PLAN_ITEMS = (
     {"id": "ver.unit", "category": "unit", "description": "Every template against its Python reference"},
@@ -130,6 +134,22 @@ def clocks(bundle: Path) -> dict:
     }
 
 
+def _qwen_layer_sweep(model: Path, layers: int) -> dict:
+    """The real model's decoder layers against GraphL2, in one pytest process (spec built once)."""
+    env = dict(os.environ)
+    env["LLMCHIP_QWEN"] = "1"
+    env["LLMCHIP_QWEN_MODEL"] = str(model)
+    env["LLMCHIP_QWEN_LAYERS"] = ",".join(str(i) for i in range(layers))
+    command = [sys.executable, "-m", "pytest", *(str(TESTS / name) for name in QWEN_FILES), "-q"]
+    result = subprocess.run(command, cwd=REPO, capture_output=True, text=True, env=env, timeout=21600)
+    text = result.stdout + result.stderr
+    match = re.search(r"(\d+) passed", text)
+    passed = int(match.group(1)) if match else 0
+    failed_match = re.search(r"(\d+) failed", text)
+    failed = int(failed_match.group(1)) if failed_match else (0 if result.returncode == 0 else 1)
+    return {"returncode": result.returncode, "passed": passed, "failed": failed, "output": text[-4000:]}
+
+
 def _pytest(files: tuple[str, ...], timeout: int = 1800) -> dict:
     command = [sys.executable, "-m", "pytest", *[str(TESTS / name) for name in files], "-q"]
     result = subprocess.run(command, cwd=REPO, capture_output=True, text=True, timeout=timeout)
@@ -151,6 +171,8 @@ def report(
     run_unit: bool = True,
     run_slice: bool = True,
     run_layer: bool = True,
+    qwen_model: Path | None = None,
+    qwen_layers: int = QWEN_LAYERS,
     run_directed: bool = True,
     run_chain: bool = True,
     run_chip: bool = True,
@@ -198,22 +220,41 @@ def report(
         items.append({"id": "ver.slice", "status": "not run", "reason": "disabled by the caller"})
 
     if run_layer:
-        layer = _pytest(LAYER_FILES)
-        observations = 17 * layer["passed"]
-        items.append(
-            {
-                "id": "ver.layer",
-                "status": "passed" if layer["returncode"] == 0 else "failed",
-                "metrics": {
-                    "tests": layer["passed"] + layer["failed"],
-                    "passed": layer["passed"],
-                    "failed": layer["failed"],
-                    "layers": layer["passed"],
-                    "observations": observations,
-                },
-                "detail": layer["output"],
-            }
-        )
+        if qwen_model is not None:
+            layer = _qwen_layer_sweep(qwen_model, qwen_layers)
+            complete = layer["passed"] >= qwen_layers
+            items.append(
+                {
+                    "id": "ver.layer",
+                    "status": "passed" if layer["returncode"] == 0 and complete else "failed",
+                    "metrics": {
+                        "tests": layer["passed"] + layer["failed"],
+                        "passed": layer["passed"],
+                        "failed": layer["failed"],
+                        "layers": layer["passed"],
+                        "observations": OBSERVATIONS_PER_LAYER * layer["passed"],
+                        "required": qwen_layers,
+                    },
+                    "detail": layer["output"],
+                }
+            )
+        else:
+            layer = _pytest(LAYER_FILES)
+            observations = OBSERVATIONS_PER_LAYER * layer["passed"]
+            items.append(
+                {
+                    "id": "ver.layer",
+                    "status": "passed" if layer["returncode"] == 0 else "failed",
+                    "metrics": {
+                        "tests": layer["passed"] + layer["failed"],
+                        "passed": layer["passed"],
+                        "failed": layer["failed"],
+                        "layers": layer["passed"],
+                        "observations": observations,
+                    },
+                    "detail": layer["output"],
+                }
+            )
     else:
         items.append({"id": "ver.layer", "status": "not run", "reason": "disabled by the caller"})
 

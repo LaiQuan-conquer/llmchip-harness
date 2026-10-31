@@ -440,7 +440,8 @@
             "plugin": "rtl-taalas",
             "handler": "tile_verify",
             "inputs": {
-              "rtl": "slot:rtl-bundle"
+              "rtl": "slot:rtl-bundle",
+              "model": "slot:model"
             },
             "judge": [
               "ver.unit",
@@ -481,7 +482,8 @@
         {
           "check": "ver.layer",
           "inputs": {
-            "rtl": "slot:rtl-bundle"
+            "rtl": "slot:rtl-bundle",
+            "model": "slot:model"
           }
         },
         {
@@ -755,15 +757,15 @@
     },
     {
       "id": "ver.layer",
-      "version": "1",
-      "title": "Both Q-full layers match GraphL2 at every observation point",
+      "version": "2",
+      "title": "All 24 decoder layers of the real model match GraphL2 at their 17 observation points",
       "plugin": "rtl-taalas",
       "handler": "tile_verify",
       "completeness": [
         {
           "metric": "ver_layer_layers",
-          "op": ">",
-          "value": 0
+          "op": ">=",
+          "value": 24
         }
       ],
       "criteria": [
@@ -774,8 +776,8 @@
         },
         {
           "metric": "ver_layer_observations",
-          "op": ">",
-          "value": 0
+          "op": ">=",
+          "value": 408
         }
       ]
     },

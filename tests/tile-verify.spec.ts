@@ -16,14 +16,14 @@ describe('R4 verification wiring', () => {
     const stage = flow.stages.find((s: any) => s.id === 'VER')
     expect(stage).toBeTruthy()
     const checks = stage.tests.map((t: any) => t.check)
-    expect(checks).toEqual(['ver.unit', 'ver.slice', 'ver.cdc', 'ver.layer', 'ver.chain', 'rtl.tile.chip', 'ver.directed', 'ver.coverage', 'ver.formal', 'ver.mutation', 'ver.dft', 'rtl.tile.equivalence'])
+    expect(checks).toEqual(['ver.unit', 'ver.slice', 'ver.cdc', 'ver.layer', 'rtl.tile.chip', 'ver.chain', 'ver.directed', 'ver.coverage', 'ver.formal', 'ver.mutation', 'ver.dft', 'rtl.tile.equivalence'])
     const node = stage.develop.nodes.find((n: any) => n.id === 'verify')
     expect(node.plugin).toBe('rtl-taalas')
     expect(node.handler).toBe('tile_verify')
   })
 
   it('defines the ver.unit, ver.slice, ver.cdc, ver.layer and ver.coverage, ver.formal, ver.mutation, ver.dft and rtl.tile.equivalence checks on the tile_verify handler', () => {
-    for (const id of ['ver.unit', 'ver.slice', 'ver.cdc', 'ver.layer', 'ver.chain', 'rtl.tile.chip', 'ver.directed', 'ver.coverage', 'ver.formal', 'ver.mutation', 'ver.dft', 'rtl.tile.equivalence']) {
+    for (const id of ['ver.unit', 'ver.slice', 'ver.cdc', 'ver.layer', 'rtl.tile.chip', 'ver.chain', 'ver.directed', 'ver.coverage', 'ver.formal', 'ver.mutation', 'ver.dft', 'rtl.tile.equivalence']) {
       const check = flow.checks.find((c: any) => c.id === id)
       expect(check, id).toBeTruthy()
       expect(check.plugin).toBe('rtl-taalas')
@@ -36,7 +36,7 @@ describe('R4 verification wiring', () => {
   it('exposes the tile_verify handler with a verification.report output', () => {
     const handler = plugin.handlers.find((h: any) => h.name === 'tile_verify')
     expect(handler).toBeTruthy()
-    expect(handler.inputs.map((i: any) => i.name)).toEqual(['rtl'])
+    expect(handler.inputs.map((i: any) => i.name)).toEqual(['rtl', 'model'])
     expect(handler.outputs[0].type).toBe('verification.report')
   })
 })

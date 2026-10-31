@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_tile_layer import _matrix_files, _pack, _write_words
 
 TOOLS = Path(os.environ.get("LLMCHIP_TOOLS", "/root/projects/deepseek-harness/tools"))
-MODEL = TOOLS / "models/Qwen2.5-0.5B-Instruct"
+MODEL = Path(os.environ.get("LLMCHIP_QWEN_MODEL", TOOLS / "models/Qwen2.5-0.5B-Instruct"))
 VERILATOR = TOOLS / "oss-cad-suite" / "bin" / "verilator"
 TB = Path(__file__).with_name("tile_layer_qwen_tb.v")
 TOKENS = [3, 9, 17, 25, 33, 41, 49, 57]

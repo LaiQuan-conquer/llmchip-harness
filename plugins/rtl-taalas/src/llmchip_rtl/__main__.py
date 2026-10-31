@@ -215,8 +215,14 @@ def verify_tile(ctx: InvokeContext) -> Result:
     bundle.mkdir(parents=True, exist_ok=True)
     with tarfile.open(ctx.input("rtl").path) as archive:
         archive.extractall(bundle)
+    qwen_model = None
+    if any(item.name == "model" for item in ctx.inputs):
+        from llmchip_model.pipeline import open_model
+
+        qwen_model, _ = open_model(ctx)
     report = tile_verify.report(
         bundle,
+        qwen_model=qwen_model,
         run_unit=bool(ctx.params.get("unit", True)),
         run_slice=bool(ctx.params.get("slice", True)),
         run_layer=bool(ctx.params.get("layer", True)),
@@ -252,6 +258,7 @@ def verify_tile(ctx: InvokeContext) -> Result:
         "ver_cdc_domains": int(items.get("ver.cdc", {}).get("metrics", {}).get("domains", 0)),
         "ver_cdc_violations": int(items.get("ver.cdc", {}).get("metrics", {}).get("violations", 0)),
         "ver_layer_layers": int(items.get("ver.layer", {}).get("metrics", {}).get("layers", 0)),
+        "ver_layer_required": int(items.get("ver.layer", {}).get("metrics", {}).get("required", 0)),
         "ver_layer_observations": int(items.get("ver.layer", {}).get("metrics", {}).get("observations", 0)),
         "ver_layer_tests": int(items.get("ver.layer", {}).get("metrics", {}).get("tests", 0)),
         "ver_coverage_line": float(items.get("ver.coverage", {}).get("metrics", {}).get("line", 0.0)),

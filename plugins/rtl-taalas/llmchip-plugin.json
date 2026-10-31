@@ -58,7 +58,10 @@
     {
       "name": "tile_verify",
       "title": "R4 verification: template suite, functional S-1 slice and clock domains",
-      "inputs": [{ "name": "rtl", "types": ["rtl.bundle"], "required": true }],
+      "inputs": [
+        { "name": "rtl", "types": ["rtl.bundle"], "required": true },
+        { "name": "model", "types": ["model.archive"], "required": false }
+      ],
       "outputs": [{ "name": "report", "type": "verification.report", "mediaType": "application/json" }],
       "params": {
         "type": "object",
