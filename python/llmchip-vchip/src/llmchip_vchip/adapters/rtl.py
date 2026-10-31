@@ -19,11 +19,22 @@ from .process import ProcessChip
 
 class RtlChip(ProcessChip):
     def __init__(self, m: Manifest) -> None:
+        import json
+        import tarfile
+
         image = m.data["simulator"]["image"]
-        build_dir = verilator.build(
-            m.artifact("rtl"), image, m.dir / "build", float(m.data.get("build_timeout_s", 3600))
-        )
-        super().__init__(m, [sys.executable, "-m", "llmchip_vchip.bridges.rtl_bridge", "{chip_dir}", str(build_dir)])
+        timeout = float(m.data.get("build_timeout_s", 3600))
+        with tarfile.open(m.artifact("rtl")) as tar:
+            member = tar.extractfile("bundle/design.json")
+            design = json.loads(member.read()) if member else {}
+        if design.get("architecture") == "taalas-tile/1":
+            # The tile chip has its own host pins and testbench (bridges/tile_bridge.py).
+            build_dir = verilator.build_tile(m.artifact("rtl"), image, m.dir / "build", timeout)
+            module = "llmchip_vchip.bridges.tile_bridge"
+        else:
+            build_dir = verilator.build(m.artifact("rtl"), image, m.dir / "build", timeout)
+            module = "llmchip_vchip.bridges.rtl_bridge"
+        super().__init__(m, [sys.executable, "-m", module, "{chip_dir}", str(build_dir)])
         if self.hello.get("measurement") != "testbench":
             self.close()
             raise ChipError("crash", "the RTL bridge does not report testbench measurement")
