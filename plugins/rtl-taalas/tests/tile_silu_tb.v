@@ -8,6 +8,10 @@ module tile_silu_tb;
   parameter integer F3 = 15;
   parameter integer FG = 19;
 
+  reg clk = 1'b0;
+  reg rst_n = 1'b0;
+  reg en = 1'b1;
+  always #5 clk = ~clk;
   reg signed [DIM*16-1:0] h1 = {DIM*16{1'b0}};
   reg signed [DIM*16-1:0] h3 = {DIM*16{1'b0}};
   wire signed [DIM*16-1:0] g;
@@ -18,7 +22,7 @@ module tile_silu_tb;
   integer i;
   integer errors;
 
-  tile_silu #(.DIM(DIM), .F1(F1), .F3(F3), .FG(FG), .INIT("sigmoid.hex")) dut (.h1(h1), .h3(h3), .g(g));
+  tile_silu #(.DIM(DIM), .F1(F1), .F3(F3), .FG(FG), .INIT("sigmoid.hex")) dut (.clk(clk), .rst_n(rst_n), .en(en), .h1(h1), .h3(h3), .g(g));
 
   initial begin
     errors = 0;
@@ -27,6 +31,9 @@ module tile_silu_tb;
     $readmemh("expected.hex", expected);
     h1 = h1mem[0];
     h3 = h3mem[0];
+    repeat (2) @(posedge clk);
+    rst_n = 1'b1;
+    repeat (3) @(posedge clk);
     #1;
     for (i = 0; i < DIM; i = i + 1) begin
       if ($signed(g[i*16 +: 16]) !== $signed(expected[i])) begin

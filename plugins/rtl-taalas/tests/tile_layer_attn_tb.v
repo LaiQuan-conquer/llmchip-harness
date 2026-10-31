@@ -273,7 +273,7 @@ module tile_layer_attn_tb;
     .raw_y(), .raw_y_valid()
   );
   tile_silu #(.DIM(INTER), .F1(15), .F3(15), .FG(19), .INIT("sigmoid.hex")) silu (
-    .clk(clk), .en(1'b1), .h1(g), .h3(u), .g(m)
+    .clk(clk), .rst_n(rst_n), .en(1'b1), .h1(g), .h3(u), .g(m)
   );
 
   wire signed [HIDDEN*16-1:0] res_y;

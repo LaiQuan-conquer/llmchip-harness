@@ -12,6 +12,7 @@ module tile_silu #(
   parameter         INIT = "sigmoid.hex"
 ) (
   input  wire                        clk,
+  input  wire                        rst_n,
   input  wire                        en,
   input  wire signed [DIM*16-1:0]    h1,
   input  wire signed [DIM*16-1:0]    h3,
@@ -60,8 +61,10 @@ module tile_silu #(
 
   reg signed [DIM*16-1:0] g_r;
   integer lane;
-  always @(posedge clk) begin
-    if (en) begin
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      g_r <= {DIM*16{1'b0}};
+    end else if (en) begin
       for (lane = 0; lane < DIM; lane = lane + 1) begin
         g_r[lane*16 +: 16] <= silu_lane(h1[lane*16 +: 16], h3[lane*16 +: 16],
                                         sigmoid[silu_index(h1[lane*16 +: 16])]);

@@ -428,7 +428,7 @@ module tile_layer #(
 
   tile_silu #(
     .DIM(INTER), .F1(SILU_F1), .F3(SILU_F3), .FG(SILU_FG), .INIT(SIGMOID_INIT)
-  ) silu (.clk(clk), .en(silu_en), .h1(g_buf), .h3(u_buf), .g(silu_y));
+  ) silu (.clk(clk), .rst_n(rst_n), .en(silu_en), .h1(g_buf), .h3(u_buf), .g(silu_y));
 
   tile_linear #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS), .ROWS(HIDDEN), .CHUNKS(CH_I),
