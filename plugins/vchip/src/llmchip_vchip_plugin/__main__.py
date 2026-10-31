@@ -20,7 +20,7 @@ from pathlib import Path
 from llmchip_sdk import InvokeContext, Output, Result, run_plugin
 from llmchip_vchip.adapters import process
 from llmchip_vchip.bridges import verilator
-from llmchip_vchip.build import chips_from_artifacts
+from llmchip_vchip.build import GRAPH_SPEC, chips_from_artifacts, graph_chips
 from llmchip_vchip.conform import conform as run_conform
 from llmchip_vchip.prompts import PromptSet, inline
 from llmchip_vchip.prompts import load as load_prompts
@@ -37,6 +37,8 @@ def _optional(ctx: InvokeContext, name: str) -> Path | None:
 def _chips(ctx: InvokeContext) -> tuple[Registry, dict]:
     chips_dir = Path(ctx.work_dir) / "chips"
     ctx.progress(0.05, "building the chips from the artifacts")
+    if json.loads(Path(ctx.input("spec").path).read_text()).get("format") == GRAPH_SPEC:
+        return _graph_chips(ctx, chips_dir)
     built = chips_from_artifacts(
         ID,
         chips_dir,
@@ -48,6 +50,32 @@ def _chips(ctx: InvokeContext) -> tuple[Registry, dict]:
         ir=_optional(ctx, "ir"),
         chip_spec=_optional(ctx, "chip"),
         clock_mhz=ctx.params.get("clockMHz"),
+    )
+    return Registry([chips_dir]), built
+
+
+def _graph_chips(ctx: InvokeContext, chips_dir: Path) -> tuple[Registry, dict]:
+    """A recovered graph (Qwen): the golden is GraphL2, the chip is the taalas-tile/1 bundle."""
+    from llmchip_model.pipeline import open_model
+
+    model_dir, _ = open_model(ctx)
+    tokenizer = model_dir / "tokenizer.json"
+    if not tokenizer.is_file():
+        raise ValueError("the model archive carries no tokenizer.json for the HF tokenizer")
+    prompts = _prompts(ctx)
+    prompts_path = Path(ctx.work_dir) / "prompts.jsonl"
+    prompts_path.write_text(prompts.to_jsonl())
+    built = graph_chips(
+        ID,
+        chips_dir,
+        graph=Path(ctx.input("graph").path),
+        spec=Path(ctx.input("spec").path),
+        weights=Path(ctx.input("weights").path),
+        tokenizer=tokenizer,
+        prompts=prompts_path,
+        rtl=_optional(ctx, "rtl"),
+        clock_mhz=float(ctx.params.get("clockMHz") or 100.0),
+        max_tokens=int(ctx.params.get("maxTokens") or 64),
     )
     return Registry([chips_dir]), built
 

@@ -11,7 +11,9 @@
       "name": "bench",
       "title": "Generation on a prompt set by the chip under test (the RTL under the pin-level testbench, else L2), against the L2 golden and the float reference: quality, trusted speed",
       "inputs": [
-        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": false },
+        { "name": "graph", "types": ["model.graph"], "required": false },
+        { "name": "model", "types": ["model.archive"], "required": false },
         { "name": "spec", "types": ["numeric.spec"], "required": true },
         { "name": "weights", "types": ["numeric.weights"], "required": true },
         { "name": "evalset", "types": ["eval.set"], "required": false },
@@ -40,7 +42,9 @@
       "name": "conform",
       "title": "Conformance of the chip under test (design T-01 to T-19): interface, host frames, trusted cycles, the host interface on the pins, the acceptance run",
       "inputs": [
-        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": true },
+        { "name": "tokenizer", "types": ["model.tokenizer.llama2c"], "required": false },
+        { "name": "graph", "types": ["model.graph"], "required": false },
+        { "name": "model", "types": ["model.archive"], "required": false },
         { "name": "spec", "types": ["numeric.spec"], "required": true },
         { "name": "weights", "types": ["numeric.weights"], "required": true },
         { "name": "evalset", "types": ["eval.set"], "required": true },
