@@ -252,6 +252,7 @@ module tile_layer #(
   wire signed [RES-1:0] d_y;
   wire q_yv, k_yv, v_yv, o_yv, g_yv, u_yv, d_yv;
   wire q_done, k_done, v_done, o_done, g_done, u_done, d_done;
+  wire silu_en = (state == S_GUWT) && g_done;
   wire [L2R_H-1:0] q_yi, o_yi, d_yi;
   wire [L2R_K-1:0] k_yi, v_yi;
   wire [L2R_I-1:0] g_yi, u_yi;
@@ -427,7 +428,7 @@ module tile_layer #(
 
   tile_silu #(
     .DIM(INTER), .F1(SILU_F1), .F3(SILU_F3), .FG(SILU_FG), .INIT(SIGMOID_INIT)
-  ) silu (.h1(g_buf), .h3(u_buf), .g(silu_y));
+  ) silu (.clk(clk), .en(silu_en), .h1(g_buf), .h3(u_buf), .g(silu_y));
 
   tile_linear #(
     .MACS(MACS), .BITS(BITS), .ACC(ACC), .GROUPS(GROUPS), .ROWS(HIDDEN), .CHUNKS(CH_I),

@@ -273,7 +273,7 @@ module tile_layer_attn_tb;
     .raw_y(), .raw_y_valid()
   );
   tile_silu #(.DIM(INTER), .F1(15), .F3(15), .FG(19), .INIT("sigmoid.hex")) silu (
-    .h1(g), .h3(u), .g(m)
+    .clk(clk), .en(1'b1), .h1(g), .h3(u), .g(m)
   );
 
   wire signed [HIDDEN*16-1:0] res_y;
@@ -453,6 +453,7 @@ module tile_layer_attn_tb;
     @(posedge clk);
     d_start = 1'b1; @(posedge clk); d_start = 1'b0;
     timeout = 0; while (d_count < HIDDEN && timeout < 200000) begin @(posedge clk); timeout = timeout + 1; end
+    repeat (2) @(posedge clk);
     #1 x2 = res2_y;
 
     `CHECK(h, eh, HIDDEN, "h")
