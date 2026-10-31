@@ -113,7 +113,7 @@ def build(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> Path:
     import json
 
     tb, top_v = testbench_source(), (resources.files("llmchip_vchip.bridges") / "tb" / TOP).read_bytes()
-    digest = hashlib.sha256(tb + b"\0" + top_v).hexdigest()
+    digest = hashlib.sha256(tb + b"\0" + top_v + b"\0tile-split").hexdigest()
     key = hashlib.sha256(f"{file_hash(bundle)}\0{digest}\0{image}".encode()).hexdigest()[:16]
     out = cache / key
     cache.mkdir(parents=True, exist_ok=True)
@@ -185,7 +185,7 @@ def build_tile(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> 
 
     tb = (resources.files("llmchip_vchip.bridges") / "tb" / "tile_tb.cpp").read_bytes()
     top_v = (resources.files("llmchip_vchip.bridges") / "tb" / "tile_top.v").read_bytes()
-    digest = hashlib.sha256(tb + b"\0" + top_v).hexdigest()
+    digest = hashlib.sha256(tb + b"\0" + top_v + b"\0tile-split").hexdigest()
     key = hashlib.sha256(f"{file_hash(bundle)}\0{digest}\0{image}".encode()).hexdigest()[:16]
     out = cache / key
     cache.mkdir(parents=True, exist_ok=True)
@@ -221,6 +221,12 @@ def build_tile(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> 
                 "fast",
                 "--x-initial",
                 "fast",
+                "-Wno-lint",
+                "-Wno-style",
+                "--output-split",
+                "20000",
+                "--output-split-cfuncs",
+                "2000",
                 "--Mdir",
                 "rtl/obj_tile",
                 "-o",

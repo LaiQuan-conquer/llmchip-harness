@@ -58,9 +58,6 @@ def generate(out: Path, spec: dict, arrays: dict[str, np.ndarray], macs: int, la
     if cpg < 1 or group % macs:
         raise ValueError(f"group {group} is not a multiple of {macs} MACs")
     chosen = layers if layers is not None else list(range(int(h["layers"])))
-    for layer in chosen:
-        if f"{layer}.q_norm.w" not in arrays:
-            raise ValueError("tile_chain needs a model with QK norm (q_norm/k_norm); Qwen2.5 has none yet")
     rope_addr = (int(np.asarray(arrays["lut.rope_cos"]).size) - 1).bit_length()
     exp_addr = (int(np.asarray(arrays["lut.exp"]).size) - 1).bit_length()
 
@@ -99,13 +96,15 @@ def generate(out: Path, spec: dict, arrays: dict[str, np.ndarray], macs: int, la
             files[f"{node}_BIAS"] = wfile(f"{key}_b.hex", b, bias_bits)
         files["attn_w"] = wpack(f"{layer}.attn_w.hex", arrays[f"{layer}.attn_norm.w"], 16)
         files["mlp_w"] = wpack(f"{layer}.mlp_w.hex", arrays[f"{layer}.mlp_norm.w"], 16)
-        files["qnorm_w"] = wpack(f"{layer}.qnorm_w.hex", arrays[f"{layer}.q_norm.w"], 16)
-        files["knorm_w"] = wpack(f"{layer}.knorm_w.hex", arrays[f"{layer}.k_norm.w"], 16)
+        has_qk = f"{layer}.q_norm.w" in arrays
+        files["qnorm_w"] = wpack(f"{layer}.qnorm_w.hex", arrays[f"{layer}.q_norm.w"], 16) if has_qk else "qnorm_w.hex"
+        files["knorm_w"] = wpack(f"{layer}.knorm_w.hex", arrays[f"{layer}.k_norm.w"], 16) if has_qk else "knorm_w.hex"
         params = {
             "HIDDEN": int(h["hidden"]), "INTER": int(h["intermediate"]), "HEADS": int(h["heads"]),
             "KVHEADS": int(h["kvHeads"]), "HD": int(h["headDim"]), "LOG2CONTEXT": log2context,
             "MACS": macs, "BITS": bits, "ACC": 32, "GROUPS": 8, "CPG": cpg, "RES": res,
-            "FRAC_H": int(fr["xn"]), "FRAC_QK": int(fr["qn"]), "NORM_FN": int(spec["normWeights"]["frac"]),
+            "FRAC_H": int(fr["xn"]), "FRAC_QK": int(fr.get("qn", fr["q"])),
+            "NORM_FN": int(spec["normWeights"]["frac"]), "QK_NORM": 1 if has_qk else 0,
             "EPS_ATTN": round(EPS * 2.0 ** (2 * int(fr["x"]))),
             "EPS_MLP": round(EPS * 2.0 ** (2 * int(fr["x"]))),
             "EPS_HEAD": round(EPS * 2.0 ** (2 * int(fr["q"]))),
