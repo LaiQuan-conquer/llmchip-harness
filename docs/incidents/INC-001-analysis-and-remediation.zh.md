@@ -453,3 +453,17 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 - `TileSim` 读取该文件并在 `hello_info()["build"]` 上报，测试断言 `architecture == taalas-tile/1`（1 passed）；
 - `graph_chips` 另写 `run-identity.json`（spec/weights/graph/tokenizer/prompts/rtl bundle 哈希与 max_tokens），测试断言其存在与内容（1 passed）；
 - 仍未完成：B5/B6 由正式流程选择该产物、记录 golden 身份、运行期校验实际加载的二进制。
+
+## 14. 受控重新采样（2026-11-01）
+
+同一构建流程（`build_tile`，当前模板：钟控条件 SiLU + MAC 门控 + SiLU 复位）、同一 `TICKS` 仪表、同一台机器，1/4/24 层分别测量：
+
+| 构建 | 周期/秒 | 备注 |
+|---|---:|---|
+| 1 层 | **436,591** | 单 token 6.69 s（此前）+ 当前构建 |
+| 4 层 | **110,672** | 4 层与 1 层近似线性（约 3.9×） |
+| 24 层 | **9,986** | 单 token 384.98 s；4→24 层约 11.1×（略超线性） |
+
+- 24 层相对 1 层约 44×，接近层数线性（24× 之外的约 1.8× 额外开销，疑为代码规模/缓存与 Verilator 的单体 eval）；
+- 这些是**当前源码**的受控数字，不引用历史 126 周期/秒的旧基线作为对照；
+- 仍未达到 1 层 ~300k 的早期目标（当前 436k 已超过该目标，但 24 层仍受单体模型限制）。
