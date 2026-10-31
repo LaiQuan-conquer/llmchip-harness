@@ -562,4 +562,15 @@ def graph_chips(
             + "\n"
         )
         built["dut"] = chip_id
+    run_identity = {
+        "format": "llmchip-tile-run/1",
+        "spec": file_hash(spec),
+        "weights": file_hash(weights),
+        "graph": file_hash(graph),
+        "tokenizer": file_hash(tokenizer),
+        "prompts": file_hash(prompts),
+        "rtl": file_hash(rtl) if rtl is not None else None,
+        "max_tokens": max_tokens,
+    }
+    (chips_dir / "run-identity.json").write_text(json.dumps(run_identity, indent=2, sort_keys=True) + "\n")
     return {"chips": built}

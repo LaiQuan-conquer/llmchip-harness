@@ -451,4 +451,5 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 
 - `build_tile` 写入 `build.json`（bundle、testbench、镜像、每个 RTL 源、二进制 sha256、Verilator 参数）；
 - `TileSim` 读取该文件并在 `hello_info()["build"]` 上报，测试断言 `architecture == taalas-tile/1`（1 passed）；
-- 仍未完成：B5/B6 由正式流程选择该产物、记录 spec/weights/golden 身份、运行期校验实际加载的二进制。
+- `graph_chips` 另写 `run-identity.json`（spec/weights/graph/tokenizer/prompts/rtl bundle 哈希与 max_tokens），测试断言其存在与内容（1 passed）；
+- 仍未完成：B5/B6 由正式流程选择该产物、记录 golden 身份、运行期校验实际加载的二进制。

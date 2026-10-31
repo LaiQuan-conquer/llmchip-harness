@@ -325,6 +325,8 @@ def test_graph_chips_build_a_dut_and_its_golden(tmp_path):
         image=_image(),
     )
     assert built["chips"] == {"golden": "tiny-golden", "dut": "tiny"}
+    identity = json.loads((tmp_path / "chips" / "run-identity.json").read_text())
+    assert identity["format"] == "llmchip-tile-run/1" and identity["spec"] and identity["rtl"]
     for name in ("tiny-golden", "tiny"):
         assert not load(tmp_path / "chips" / name).problems, load(tmp_path / "chips" / name).problems
     golden = GraphChip(load(tmp_path / "chips" / "tiny-golden"))
