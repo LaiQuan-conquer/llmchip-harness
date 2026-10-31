@@ -56,11 +56,13 @@ def qwen_l2():
 
 
 LAYERS = [int(x) for x in os.environ.get("LLMCHIP_QWEN_LAYERS", str(LAYER)).split(",")]
+POSES = [int(x) for x in os.environ.get("LLMCHIP_QWEN_POSES", os.environ.get("LLMCHIP_QWEN_POS", "3")).split(",")]
 
 
 @pytest.mark.skipif(not ready, reason="set LLMCHIP_QWEN=1 and install the model")
 @pytest.mark.parametrize("layer", LAYERS)
-def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
+@pytest.mark.parametrize("pos", POSES)
+def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer, pos):
     l2 = qwen_l2
     spec, arrays = l2.spec, l2.a
     h = spec["hyper"]
@@ -84,7 +86,6 @@ def test_one_real_layer_matches_l2(qwen_l2, tmp_path, layer):
             hold["obs"]["qr"] = env["q"][-1].astype(np.int64).copy()
             hold["obs"]["kr"] = env["k"][-1].astype(np.int64).copy()
 
-    pos = int(os.environ.get("LLMCHIP_QWEN_POS", "3"))
     l2.forward(TOKENS[: pos + 1], observe=observe)
     res = int(spec["activations"]["bits"]["x"])
     x = hold["x"][pos]
