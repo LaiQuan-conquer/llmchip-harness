@@ -34,7 +34,14 @@ class TileSim(BaseChip):
         super().__init__(m.meta())
         self.design = json.loads((build_dir / "bundle" / "design.json").read_text())
         identity = build_dir / "build.json"
-        self.identity = json.loads(identity.read_text()) if identity.is_file() else {}
+        if not identity.is_file():
+            raise ChipError("unsupported", "the build has no build.json identity")
+        self.identity = json.loads(identity.read_text())
+        import hashlib as _hashlib
+
+        binary = build_dir / "bundle" / "rtl" / "obj_tile" / "Vtile"
+        if not binary.is_file() or self.identity.get("binary") != _hashlib.sha256(binary.read_bytes()).hexdigest():
+            raise ChipError("crash", "the binary does not match the build.json identity")
         if self.design.get("architecture") != "taalas-tile/1":
             raise ChipError("unsupported", f"not a tile bundle: {self.design.get('architecture')!r}")
         image = m.data["simulator"]["image"]

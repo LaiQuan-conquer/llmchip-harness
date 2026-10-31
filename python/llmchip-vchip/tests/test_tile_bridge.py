@@ -182,6 +182,13 @@ def test_tilesim_steps_the_tiny_chip(tmp_path):
     finally:
         sim.close()
     assert got == _greedy(l2, PROMPT, 8), got
+    from llmchip_vchip.interface import ChipError
+
+    data = json.loads((build / "build.json").read_text())
+    data["binary"] = "0" * 64
+    (build / "build.json").write_text(json.dumps(data))
+    with pytest.raises(ChipError):
+        TileSim(chip, build)
 
 
 def test_the_rtl_adapter_dispatches_a_tile_bundle(tmp_path):
