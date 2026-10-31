@@ -118,6 +118,7 @@ def test_the_tile_bundle_builds_in_the_simulator_image(tmp_path):
     identity = json.loads((out / "build.json").read_text())
     assert identity["architecture"] == "taalas-tile/1"
     assert identity["bundle"] and identity["binary"] and identity["sources"]
+    assert "10000" in json.dumps(identity["command"]) and "1000" in json.dumps(identity["command"])
 
 
 def test_tilesim_steps_the_tiny_chip(tmp_path):

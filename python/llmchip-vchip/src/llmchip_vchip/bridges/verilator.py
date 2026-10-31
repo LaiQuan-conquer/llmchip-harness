@@ -261,7 +261,7 @@ def build_tile(bundle: Path, image: str, cache: Path, timeout: float = 3600) -> 
                 "sources": {p.name: _hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in sorted((root / "rtl").glob("*.v"))},
                 "binary": _hashlib.sha256(binary.read_bytes()).hexdigest(),
-                "verilator": FLAGS,
+                "command": cmd,
             }
             (tmp / "build.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
             tmp.rename(out)
