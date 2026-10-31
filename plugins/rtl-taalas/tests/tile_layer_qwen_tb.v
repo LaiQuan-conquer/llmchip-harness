@@ -97,9 +97,10 @@ module tile_layer_qwen_tb ();
   reg [INTER*16-1:0] eg, eu, em;
   reg [HEADS*HD*16-1:0] eq, eqn, eqr, ea;
   reg [KVHEADS*HD*16-1:0] ek, ev, ekn, ekr;
-  integer ci, errors, timeout, step, up;
+  integer ci, errors, timeout, step, up, checks;
 
 `define CMP(GOT, EXP, LANES, WIDTH, LABEL) \
+  checks = checks + 1; \
   for (ci = 0; ci < (LANES); ci = ci + 1) begin \
     if ($signed(GOT[ci*WIDTH +: WIDTH]) !== $signed(EXP[ci*WIDTH +: WIDTH])) begin \
       if (errors < 6) $display("FAIL %s %0d: %0d != %0d", LABEL, ci, $signed(GOT[ci*WIDTH +: WIDTH]), $signed(EXP[ci*WIDTH +: WIDTH])); \
@@ -109,6 +110,7 @@ module tile_layer_qwen_tb ();
 
   initial begin
     errors = 0;
+    checks = 0;
     $readmemh("x.hex", xmem);
     $readmemh("exp_h.hex", big); eh = big[0][HIDDEN*16-1:0];
     $readmemh("exp_q.hex", big); eq = big[0][HEADS*HD*16-1:0];
@@ -116,6 +118,8 @@ module tile_layer_qwen_tb ();
     $readmemh("exp_v.hex", big); ev = big[0][KVHEADS*HD*16-1:0];
     $readmemh("exp_qr.hex", big); eqr = big[0][HEADS*HD*16-1:0];
     $readmemh("exp_kr.hex", big); ekr = big[0][KVHEADS*HD*16-1:0];
+    $readmemh("exp_qn.hex", big); eqn = big[0][HEADS*HD*16-1:0];
+    $readmemh("exp_kn.hex", big); ekn = big[0][KVHEADS*HD*16-1:0];
     $readmemh("exp_a.hex", big); ea = big[0][HEADS*HD*16-1:0];
     $readmemh("exp_o.hex", big); eo = big[0][HIDDEN*RES-1:0];
     $readmemh("exp_x1.hex", big); eh1 = big[0][HIDDEN*RES-1:0];
@@ -168,6 +172,8 @@ module tile_layer_qwen_tb ();
     `CMP(obs_q, eq, HEADS*HD, 16, "q")
     `CMP(obs_k, ek, KVHEADS*HD, 16, "k")
     `CMP(obs_v, ev, KVHEADS*HD, 16, "v")
+    `CMP(obs_qn, eqn, HEADS*HD, 16, "qn")
+    `CMP(obs_kn, ekn, KVHEADS*HD, 16, "kn")
     `CMP(obs_qr, eqr, HEADS*HD, 16, "qr")
     `CMP(obs_kr, ekr, KVHEADS*HD, 16, "kr")
     `CMP(obs_a, ea, HEADS*HD, 16, "a")
@@ -179,6 +185,7 @@ module tile_layer_qwen_tb ();
     `CMP(obs_m, em, INTER, 16, "m")
     `CMP(obs_f, ef, HIDDEN, RES, "f")
     `CMP(x2, ex2, HIDDEN, RES, "x2")
+    $display("CHECKS %0d", checks);
     if (errors == 0) $display("PASS");
     else $display("FAIL %0d errors", errors);
     $finish;

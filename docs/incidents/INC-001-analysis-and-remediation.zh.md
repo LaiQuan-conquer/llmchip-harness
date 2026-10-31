@@ -431,3 +431,9 @@ uv run --frozen pytest plugins/rtl-taalas/tests/test_tile_mlp.py -q -x
 | 4～6 | 未开始：构建/二进制/golden 身份绑定、重新采样、B5/B6 | — |
 
 事故仍为 **P0 未关闭**：问题二（观测计数与覆盖）与问题四（构建身份）未解决，B5/B6 未运行。性能数字（1 层 176,457、24 层 10,535 周期/秒）与逐层日志仍成立，但不等于完整验证。
+
+### 13.1 问题二进展（2026-10-31 深夜）
+
+- `tile_layer_qwen_tb.v` 补齐 `qn/kn` 的期望文件读取与比较（Qwen 无 q/k norm 时观测值等于 q/k，沿用 `obs["qn"]=obs["q"]` 的旁路语义），并打印实际执行的检查数（`CHECKS <n>`）；
+- 1 层验证：`1 passed`，`CHECKS 17`（原 15）；
+- 尚未完成：逐位置的 golden 与比较、`verify.py` 的 observations 指标改为据实汇总；24 层重跑进行中。
